@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 采数平台当前业务流程</title>
+<style>
+  :root {
+    --bg: #f7f5ef;
+    --panel: #ffffff;
+    --text: #1f2623;
+    --muted: #6b736f;
+    --border: #d9d3c7;
+    --blue-bg: #e9f2fb;
+    --blue-border: #2b74b8;
+    --blue-text: #0c447c;
+    --teal-bg: #e6f5ef;
+    --teal-border: #0f6e56;
+    --teal-text: #085041;
+    --amber-bg: #fcefdc;
+    --amber-border: #9a5b10;
+    --amber-text: #6a3d07;
+    --gray-bg: #f1efe8;
+    --gray-border: #706f69;
+    --gray-text: #494946;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 28px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  }
+
+  .page {
+    width: 1280px;
+    margin: 0 auto;
+    background: var(--panel);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 20px;
+    box-shadow: 0 18px 45px rgba(30, 34, 32, 0.08);
+    padding: 24px 24px 28px;
+  }
+
+  .header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 18px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  .subtitle {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+
+  .business { background: var(--blue-bg); border-color: var(--blue-border); color: var(--blue-text); }
+  .config { background: var(--teal-bg); border-color: var(--teal-border); color: var(--teal-text); }
+  .exec { background: var(--amber-bg); border-color: var(--amber-border); color: var(--amber-text); }
+  .govern { background: var(--gray-bg); border-color: var(--gray-border); color: var(--gray-text); }
+
+  .stage {
+    margin-top: 18px;
+    padding: 16px;
+    border-radius: 18px;
+    background: #faf8f2;
+    border: 1px solid var(--border);
+  }
+
+  .stage-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+
+  .stage-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .stage-desc {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .flow-row {
+    display: grid;
+    grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .card {
+    min-height: 110px;
+    border-radius: 16px;
+    padding: 14px 14px 12px;
+    border: 1px solid transparent;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  }
+
+  .card.business { background: var(--blue-bg); border-color: rgba(43, 116, 184, 0.22); }
+  .card.config { background: var(--teal-bg); border-color: rgba(15, 110, 86, 0.22); }
+  .card.exec { background: var(--amber-bg); border-color: rgba(154, 91, 16, 0.22); }
+  .card.govern { background: var(--gray-bg); border-color: rgba(112, 111, 105, 0.22); }
+
+  .card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .step-no {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.7);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .role {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.72;
+  }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.35;
+    margin-bottom: 8px;
+  }
+
+  .card-body {
+    font-size: 12px;
+    line-height: 1.75;
+    color: rgba(0, 0, 0, 0.72);
+  }
+
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: #b7aea0;
+    font-weight: 500;
+  }
+
+  .note {
+    margin-top: 12px;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px dashed #c9c0b2;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.8;
+    color: #5d645f;
+  }
+
+  .dual {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .pill {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div>
+        <h1>AI 采数平台当前业务流程</h1>
+        <p class="subtitle">围绕“1 Requirement = 1 WideTable”的主模型组织需求定义、Demo 验证、计划落地、持续运行与验收交付，统一覆盖按业务日期增量采集与按快照全量采集两类链路。</p>
+      </div>
+      <div class="legend">
+        <span class="tag business">业务方</span>
+        <span class="tag config">平台配置</span>
+        <span class="tag exec">调度 / 执行</span>
+        <span class="tag govern">治理 / 交付</span>
+      </div>
+    </div>
+
+    <section class="stage">
+      <div class="stage-head">
+        <div class="stage-title">阶段一 · 需求建模</div>
+        <div class="stage-desc">先稳定目标宽表，再讨论如何执行</div>
+      </div>
+      <div class="flow-row">
+        <div class="card business">
+          <div class="card-top"><span class="step-no">①</span><span class="role">Business</span></div>
+          <div class="card-title">提出采数需求</div>
+          <div class="card-body">明确业务目标、交付口径、目标主体与需要持续更新还是快照采集。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card config">
+          <div class="card-top"><span class="step-no">②</span><span class="role">Config</span></div>
+          <div class="card-title">创建 Demo 需求并继承项目默认信源</div>
+          <div class="card-body">注入行业背景、搜索引擎、站点策略、知识库与固定 URL 等默认配置。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card config">
+          <div class="card-top"><span class="step-no">③</span><span class="role">Config</span></div>
+          <div class="card-title">定义宽表、采集模式与指标组</div>
+          <div class="card-body">
+            固定 `1 Requirement = 1 WideTable`，维护 Schema、Scope、IndicatorGroup、ScheduleRule。
+            <div class="dual">
+              <span class="pill">增量：business_date</span>
+              <span class="pill">全量：full_snapshot</span>
+            </div>
+          </div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card config">
+          <div class="card-top"><span class="step-no">④</span><span class="role">Config</span></div>
+          <div class="card-title">生成预览行并确认范围</div>
+          <div class="card-body">先物化 WideTableRow，校验业务日期、维度枚举与行绑定键是否符合预期。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-head">
+        <div class="stage-title">阶段二 · Demo 验证</div>
+        <div class="stage-desc">小批量验证采集表达与结果质量</div>
+      </div>
+      <div class="flow-row">
+        <div class="card exec">
+          <div class="card-top"><span class="step-no">⑤</span><span class="role">Execute</span></div>
+          <div class="card-title">生成 Demo 计划版本</div>
+          <div class="card-body">基于预览结果生成 CollectionBatch、TaskGroup 与 FetchTask，形成当前可执行计划。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card exec">
+          <div class="card-top"><span class="step-no">⑥</span><span class="role">Execute</span></div>
+          <div class="card-title">按“行 × 指标组”执行采集</div>
+          <div class="card-body">FetchTask 下发给 Agent，执行期再按指标键展开 RetrievalTask 与 NarrowIndicatorRow。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card govern">
+          <div class="card-top"><span class="step-no">⑦</span><span class="role">Govern</span></div>
+          <div class="card-title">回填宽表并检查 Demo 结果</div>
+          <div class="card-body">写回指标值、来源链接、摘录与执行记录，观察结果是否满足业务预期。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card business">
+          <div class="card-top"><span class="step-no">⑧</span><span class="role">Business</span></div>
+          <div class="card-title">Demo 通过，原地转正式</div>
+          <div class="card-body">需求不复制，直接从 Demo 进入 Production，并保留同一条业务链路。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-head">
+        <div class="stage-title">阶段三 · 计划落地与持续运行</div>
+        <div class="stage-desc">锁定结构，按模式持续执行</div>
+      </div>
+      <div class="flow-row">
+        <div class="card config">
+          <div class="card-top"><span class="step-no">⑨</span><span class="role">Config</span></div>
+          <div class="card-title">锁定 Schema 并确认更新方式</div>
+          <div class="card-body">Production 阶段锁定表结构，仅允许扩展范围、调整调度、补采与数据更新方式。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card exec">
+          <div class="card-top"><span class="step-no">⑩</span><span class="role">Execute</span></div>
+          <div class="card-title">按模式生成批次与任务组</div>
+          <div class="card-body">增量模式按业务日期生成批次与任务组；全量模式按整表快照生成 `full_table` 任务组。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card exec">
+          <div class="card-top"><span class="step-no">⑪</span><span class="role">Execute</span></div>
+          <div class="card-title">历史补数 + 未来调度</div>
+          <div class="card-body">历史日期走 BackfillRequest，当前与未来走 ScheduleRule；失败任务按 auto-retry 规则重试。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card govern">
+          <div class="card-top"><span class="step-no">⑫</span><span class="role">Govern</span></div>
+          <div class="card-title">后处理、稽核与状态聚合</div>
+          <div class="card-body">统一更新 WideTableRow、TaskGroup、CollectionBatch 状态，为验收与下游交付准备可消费结果。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-head">
+        <div class="stage-title">阶段四 · 验收交付</div>
+        <div class="stage-desc">按单元格追踪问题并闭环修复</div>
+      </div>
+      <div class="flow-row">
+        <div class="card business">
+          <div class="card-top"><span class="step-no">⑬</span><span class="role">Business</span></div>
+          <div class="card-title">查看宽表结果与单指标溯源</div>
+          <div class="card-body">按单元格查看来源链接、原文摘录、发布时间和关联任务，定位问题不再依赖整批人工排查。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card govern">
+          <div class="card-top"><span class="step-no">⑭</span><span class="role">Govern</span></div>
+          <div class="card-title">人工修订或发起重跑</div>
+          <div class="card-body">支持单元格修订、单任务重跑、任务组重跑，以及增量模式下的区间补采。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card govern">
+          <div class="card-top"><span class="step-no">⑮</span><span class="role">Govern</span></div>
+          <div class="card-title">结果回写并形成新一轮版本</div>
+          <div class="card-body">修订与重跑结果继续回写宽表，形成新的执行记录、计划版本与可追溯交付资产。</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="card govern">
+          <div class="card-top"><span class="step-no">⑯</span><span class="role">Govern</span></div>
+          <div class="card-title">持续交付宽表资产</div>
+          <div class="card-body">面向后处理、稽核、验收和下游消费持续提供结构稳定、可追溯、可重跑的数据结果。</div>
+        </div>
+      </div>
+      <div class="note">
+        未通过时并不推翻整条链路，而是沿着<strong>单元格 → 任务 → 任务组 → 补采区间</strong>逐级修复。这样既保留了计划与执行痕迹，也避免了整批重算带来的额外成本。
+      </div>
+    </section>
+  </div>
+</body>
+</html>
