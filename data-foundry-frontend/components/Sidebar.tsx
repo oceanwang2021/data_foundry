@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   FolderKanban,
+  ClipboardList,
+  Workflow,
+  ShieldCheck,
   Activity,
   CalendarClock,
   ChevronRight,
@@ -19,15 +22,69 @@ type NavChildType = {
   icon: LucideIcon;
 };
 
+type MatchContext = {
+  pathname: string;
+  tab: string | null;
+};
+
 type NavItemType = {
   name: string;
   href: string;
   icon: LucideIcon;
+  match?: (context: MatchContext) => boolean;
   children?: NavChildType[];
 };
 
+const isProjectOverviewPath = (pathname: string) =>
+  pathname === "/projects" || /^\/projects\/[^/]+\/?$/.test(pathname);
+
+const isRequirementDetailPath = (pathname: string) =>
+  /^\/projects\/[^/]+\/requirements\/[^/]+(?:\/.*)?$/.test(pathname);
+
+const isRequirementTaskPath = (pathname: string) =>
+  /^\/projects\/[^/]+\/requirements\/[^/]+\/tasks(?:\/[^/]+)?\/?$/.test(pathname);
+
 const mainNav: NavItemType[] = [
-  { name: "项目", href: "/projects", icon: FolderKanban },
+  {
+    name: "项目",
+    href: "/projects",
+    icon: FolderKanban,
+    match: ({ pathname }) => isProjectOverviewPath(pathname),
+  },
+  {
+    name: "需求管理",
+    href: "/requirements",
+    icon: ClipboardList,
+    match: ({ pathname, tab }) =>
+      pathname === "/requirements"
+      || (
+        isRequirementDetailPath(pathname)
+        && !isRequirementTaskPath(pathname)
+        && tab !== "tasks"
+        && tab !== "acceptance"
+        && tab !== "audit"
+      ),
+  },
+  {
+    name: "采集任务管理",
+    href: "/collection-tasks",
+    icon: Workflow,
+    match: ({ pathname, tab }) =>
+      pathname === "/collection-tasks"
+      || isRequirementTaskPath(pathname)
+      || (isRequirementDetailPath(pathname) && tab === "tasks"),
+  },
+  {
+    name: "数据验收",
+    href: "/acceptance",
+    icon: ShieldCheck,
+    match: ({ pathname, tab }) =>
+      pathname === "/acceptance"
+      || pathname.startsWith("/acceptance/")
+      || pathname === "/quality-audit"
+      || pathname.startsWith("/quality-audit/")
+      || (isRequirementDetailPath(pathname) && (tab === "acceptance" || tab === "audit")),
+  },
   { name: "知识库", href: "/knowledge-base", icon: BookOpen },
   {
     name: "运行中心",
@@ -43,27 +100,20 @@ const mainNav: NavItemType[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const safePathname = pathname ?? "";
+  const tab = searchParams?.get("tab") ?? null;
+  const context: MatchContext = { pathname: safePathname, tab };
 
   const isChildActive = (child: NavChildType) => {
-    if (child.href === "/projects") {
-      return safePathname === "/projects" || /^\/projects\/[^/]+$/.test(safePathname);
-    }
-    if (child.href === "/requirements") {
-      return safePathname === "/requirements" || safePathname.includes("/requirements/");
-    }
     return safePathname === child.href || safePathname.startsWith(`${child.href}/`);
   };
 
   const NavItem = ({ item }: { item: NavItemType }) => {
     const hasActiveChild = item.children?.some((child) => isChildActive(child)) ?? false;
-    const isProjectSection = item.href === "/projects";
-    const isActive =
-      (isProjectSection
-        ? safePathname === "/projects" || safePathname.startsWith("/projects/") || safePathname === "/requirements" || safePathname.includes("/requirements/")
-        : safePathname === item.href)
-      || (item.href !== "/" && safePathname.startsWith(`${item.href}/`))
-      || hasActiveChild;
+    const isActive = item.match
+      ? item.match(context)
+      : safePathname === item.href || (item.href !== "/" && safePathname.startsWith(`${item.href}/`)) || hasActiveChild;
 
     return (
       <div className="space-y-1">

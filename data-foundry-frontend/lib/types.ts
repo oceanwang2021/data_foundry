@@ -27,7 +27,7 @@ export type Project = {
       sitePolicy: "preferred" | "whitelist";
     };
     knowledgeBases: string[];
-    fixedUrls: string[];
+    fixedUrls?: string[];
   };
   createdAt: string;
 };
@@ -41,7 +41,6 @@ export type RequirementCollectionPolicy = {
   preferredSites: string[];
   sitePolicy: "preferred" | "whitelist";
   knowledgeBases: string[];
-  fixedUrls: string[];
   nullPolicy: string;
   sourcePriority: string;
   valueFormat: string;
@@ -57,8 +56,8 @@ export type Requirement = {
   assignee: string;
   businessGoal: string;
   backgroundKnowledge?: string;
-  businessBoundary: string;
-  deliveryScope: string;
+  businessBoundary?: string;
+  deliveryScope?: string;
   collectionPolicy?: RequirementCollectionPolicy;
   dataUpdateEnabled?: boolean;
   dataUpdateMode?: RequirementDataUpdateMode | null;
@@ -89,6 +88,10 @@ export type ColumnDefinition = {
   unit?: string;
   required: boolean;
   isBusinessDate?: boolean;
+  passthroughEnabled?: boolean;
+  passthroughContent?: string;
+  auditRuleType?: "max_lte" | "min_gte" | "change_rate_lte" | "not_empty";
+  auditRuleValue?: string;
 };
 
 export type WideTableSchema = {

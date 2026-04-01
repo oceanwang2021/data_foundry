@@ -75,7 +75,6 @@ function buildCollectionPolicy(
     preferred_sites: projectDataSource?.search.sites ?? [],
     site_policy: projectDataSource?.search.sitePolicy ?? "preferred",
     knowledge_bases: projectDataSource?.knowledgeBases ?? [],
-    fixed_urls: projectDataSource?.fixedUrls ?? [],
     null_policy: "未提及填 NULL，不允许把缺失写成 0。",
     source_priority: "监管公告 > 企业官网 > 券商研报 > 媒体。",
     value_format: "日期统一为 YYYY-MM，数值列与单位分离存储。",
@@ -156,6 +155,10 @@ function mapColumn(raw: any): ColumnDefinition {
     unit: raw.unit ?? undefined,
     required: raw.required ?? false,
     isBusinessDate: raw.is_business_date ?? false,
+    passthroughEnabled: raw.passthrough_enabled ?? raw.passthroughEnabled ?? false,
+    passthroughContent: raw.passthrough_content ?? raw.passthroughContent ?? undefined,
+    auditRuleType: raw.audit_rule_type ?? raw.auditRuleType ?? undefined,
+    auditRuleValue: raw.audit_rule_value != null ? String(raw.audit_rule_value) : raw.auditRuleValue,
   };
 }
 
@@ -268,15 +271,14 @@ function mapRequirement(raw: any): Requirement {
     owner: raw.owner ?? "",
     assignee: raw.assignee ?? "",
     businessGoal: raw.business_goal ?? "",
-    backgroundKnowledge: raw.background_knowledge ?? undefined,
-    businessBoundary: raw.business_boundary ?? raw.background_knowledge ?? "",
+    backgroundKnowledge: raw.background_knowledge ?? raw.business_goal ?? undefined,
+    businessBoundary: raw.business_boundary ?? "",
     deliveryScope: raw.delivery_scope ?? "",
     collectionPolicy: raw.collection_policy ? {
       searchEngines: raw.collection_policy.search_engines ?? [],
       preferredSites: raw.collection_policy.preferred_sites ?? [],
       sitePolicy: raw.collection_policy.site_policy ?? "preferred",
       knowledgeBases: raw.collection_policy.knowledge_bases ?? [],
-      fixedUrls: raw.collection_policy.fixed_urls ?? [],
       nullPolicy: raw.collection_policy.null_policy ?? "",
       sourcePriority: raw.collection_policy.source_priority ?? "",
       valueFormat: raw.collection_policy.value_format ?? "",
@@ -672,6 +674,10 @@ function toBackendWideTableColumn(column: ColumnDefinition) {
     required: column.required,
     unit: column.unit,
     is_business_date: Boolean(column.isBusinessDate),
+    passthrough_enabled: Boolean(column.passthroughEnabled),
+    passthrough_content: column.passthroughEnabled ? (column.passthroughContent ?? "") : undefined,
+    audit_rule_type: column.auditRuleType,
+    audit_rule_value: column.auditRuleValue ?? undefined,
   };
 }
 
@@ -883,8 +889,8 @@ export async function createRequirement(
     title: string;
     owner: string;
     assignee: string;
-    businessGoal: string;
-    businessBoundary?: string;
+    businessGoal?: string;
+    backgroundKnowledge?: string;
     deliveryScope?: string;
     dataUpdateEnabled?: boolean;
     dataUpdateMode?: RequirementDataUpdateMode | null;
@@ -897,8 +903,8 @@ export async function createRequirement(
     phase: "demo",
     owner: data.owner,
     assignee: data.assignee,
-    business_goal: data.businessGoal,
-    background_knowledge: data.businessBoundary ?? "",
+    business_goal: data.businessGoal ?? data.backgroundKnowledge ?? "",
+    background_knowledge: data.backgroundKnowledge ?? data.businessGoal ?? "",
     delivery_scope: data.deliveryScope ?? "",
     data_update_enabled: data.dataUpdateEnabled,
     data_update_mode: data.dataUpdateMode ?? null,
@@ -920,7 +926,7 @@ export async function updateRequirement(
     owner: string;
     assignee: string;
     businessGoal: string;
-    businessBoundary: string;
+    backgroundKnowledge: string;
     deliveryScope: string;
     dataUpdateEnabled: boolean;
     dataUpdateMode: RequirementDataUpdateMode | null;
@@ -933,7 +939,7 @@ export async function updateRequirement(
   if (data.owner !== undefined) body.owner = data.owner;
   if (data.assignee !== undefined) body.assignee = data.assignee;
   if (data.businessGoal !== undefined) body.business_goal = data.businessGoal;
-  if (data.businessBoundary !== undefined) body.background_knowledge = data.businessBoundary;
+  if (data.backgroundKnowledge !== undefined) body.background_knowledge = data.backgroundKnowledge;
   if (data.deliveryScope !== undefined) body.delivery_scope = data.deliveryScope;
   if (data.dataUpdateEnabled !== undefined) body.data_update_enabled = data.dataUpdateEnabled;
   if (data.dataUpdateMode !== undefined) body.data_update_mode = data.dataUpdateMode;

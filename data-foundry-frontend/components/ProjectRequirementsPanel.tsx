@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -45,9 +45,7 @@ export default function ProjectRequirementsPanel({
         title: "需求待命名",
         owner: "业务-待定",
         assignee: "算法-待定",
-        businessGoal: "",
-        businessBoundary: "",
-        deliveryScope: "",
+        backgroundKnowledge: "",
         projectDataSource: project.dataSource,
       });
       setRequirements((prev) => [...prev, createdRequirement]);
@@ -85,7 +83,7 @@ export default function ProjectRequirementsPanel({
         </div>
 
         <p className="text-xs text-muted-foreground">
-          新需求总是先以 Demo 状态创建。Demo 通过后，需要进入该需求的【数据产出】Tab，在原需求上直接转为正式需求，不再额外新建正式需求记录。
+          新需求总是先以 Demo 状态创建。Demo 通过后，需要进入该需求的「数据产出」标签，在原需求上直接转为正式需求，不再额外新建正式需求记录。
         </p>
         {message ? <div className="text-xs text-primary">{message}</div> : null}
 
@@ -104,7 +102,7 @@ export default function ProjectRequirementsPanel({
                   <th className="text-left px-3 py-2">需求</th>
                   <th className="text-left px-3 py-2">负责人/执行人</th>
                   <th className="text-left px-3 py-2">关联宽表</th>
-                  <th className="text-left px-3 py-2">业务目标</th>
+                  <th className="text-left px-3 py-2">背景知识</th>
                   <th className="text-left px-3 py-2">状态流转</th>
                   <th className="text-left px-3 py-2">操作</th>
                 </tr>
@@ -170,7 +168,7 @@ function RequirementRow({
         {reqWideTable ? `${reqWideTable.name}（${reqWideTable.id}）` : "未配置"}
       </td>
       <td className="px-3 py-2 align-top text-xs text-muted-foreground max-w-xs truncate">
-        {requirement.businessGoal || "-"}
+        {requirement.backgroundKnowledge || requirement.businessGoal || "-"}
       </td>
       <td className="px-3 py-2 align-top text-xs text-muted-foreground">
         {requirement.requirementType === "demo"
@@ -190,3 +188,5 @@ function RequirementRow({
     </tr>
   );
 }
+
+

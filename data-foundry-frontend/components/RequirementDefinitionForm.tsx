@@ -488,7 +488,7 @@ export default function RequirementDefinitionForm({
       >
         <nav
           ref={navRef}
-          aria-label="定义页面导航"
+          aria-label="需求页面导航"
           className={cn(
             "relative z-20 grid overflow-hidden rounded-xl border border-border/80 bg-background/98 shadow-md backdrop-blur-md supports-[backdrop-filter]:bg-background/92",
             isDemoRequirement ? "grid-cols-4" : "grid-cols-5",
@@ -499,8 +499,8 @@ export default function RequirementDefinitionForm({
           <StageSummaryCard
             href="#business-definition"
             index={1}
-            title="业务定义"
-            description="查看需求目标、边界和角色分工。"
+            title="业务需求"
+            description="查看需求背景和角色分工。"
             isActive={activeSection === "business-definition"}
             onNavigate={handleSectionNavigation("business-definition")}
           />
@@ -508,7 +508,7 @@ export default function RequirementDefinitionForm({
             href="#data-source"
             index={2}
             title="数据来源"
-            description="维护项目级检索引擎、知识库和固定网页。"
+            description="维护项目级检索引擎和知识库。"
             isActive={activeSection === "data-source"}
             onNavigate={handleSectionNavigation("data-source")}
           />
@@ -889,7 +889,7 @@ function BasicInfoSection({
     <section id="business-definition" className="scroll-mt-28 rounded-xl border bg-card p-6 space-y-4">
       <div className="space-y-1">
         <h3 className="font-semibold">1. 业务定义</h3>
-        <p className="text-xs text-muted-foreground">明确这条需求解决什么问题、边界到哪里，以及由谁推进。</p>
+        <p className="text-xs text-muted-foreground">明确这条需求的背景知识与角色分工。</p>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <CompactInfoItem label="需求ID" value={requirement.id} />
@@ -909,24 +909,14 @@ function BasicInfoSection({
           value={requirement.title} onChange={(e) => update({ title: e.target.value })} />
       } />
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        <EditableField label="业务目标" control={
+      <div className="grid gap-3 xl:grid-cols-1">
+        <EditableField label="背景知识" control={
           <textarea className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[72px] resize-y"
-            value={requirement.businessGoal} onChange={(e) => update({ businessGoal: e.target.value })}
-            placeholder="描述这条需求要解决的核心问题" />
-        } />
-        <EditableField label="业务边界" control={
-          <textarea className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[72px] resize-y"
-            value={requirement.businessBoundary} onChange={(e) => update({ businessBoundary: e.target.value })}
-            placeholder="描述采集范围的约束和口径要求" />
+            value={requirement.backgroundKnowledge ?? requirement.businessGoal ?? ""}
+            onChange={(e) => update({ backgroundKnowledge: e.target.value, businessGoal: e.target.value })}
+            placeholder="补充业务背景、历史口径和上下文信息" />
         } />
       </div>
-
-      <EditableField label="交付范围" control={
-        <input className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-          value={requirement.deliveryScope} onChange={(e) => update({ deliveryScope: e.target.value })}
-          placeholder="例如：DS-8201 / SKB264，HER2阳性乳腺癌，2024 ~ 2025" />
-      } />
 
       <CompactInfoItem label="当前关联数据表" value={linkedWideTable ? linkedWideTable.name : "尚未关联"} />
     </section>
@@ -1482,33 +1472,10 @@ function DataSourceSection({
           </div>
         </div>
 
-        <div className={blockClass}>
-          <div>
-            <h4 className="text-sm font-semibold">固定网页</h4>
-            <p className="mt-1 text-xs text-muted-foreground">直接维护固定采集清单。</p>
-          </div>
-          <label className="space-y-1 block">
-            <div className="text-xs font-medium text-muted-foreground">固定网页 URL</div>
-            <textarea
-              value={project.dataSource.fixedUrls.join("\n")}
-              onChange={(event) =>
-                updateProjectDataSource((currentProject) => ({
-                  ...currentProject,
-                  dataSource: {
-                    ...currentProject.dataSource,
-                    fixedUrls: parseMultilineList(event.target.value),
-                  },
-                }))
-              }
-              className="min-h-36 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="每行一个 URL"
-            />
-          </label>
-        </div>
       </div>
 
       <div className="rounded-lg bg-muted/10 px-4 py-3 text-xs text-muted-foreground">
-        当前项目复用 {enabledSearchEngines.length} 个全局检索引擎、{project.dataSource.knowledgeBases.length} 个知识库、{project.dataSource.fixedUrls.length} 个固定网页。
+        当前项目复用 {enabledSearchEngines.length} 个全局检索引擎、{project.dataSource.knowledgeBases.length} 个知识库。
       </div>
 
       <KnowledgeBaseSelectorModal
@@ -1865,6 +1832,8 @@ function WideTableSchemaSection({
                         <th className="px-2 py-1.5 text-left">说明</th>
                         <th className="px-2 py-1.5 text-left">单位</th>
                         <th className="px-2 py-1.5 text-left">必填</th>
+                        <th className="px-2 py-1.5 text-left">透传字段</th>
+                        <th className="px-2 py-1.5 text-left">稽核规则</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -1937,6 +1906,73 @@ function WideTableSchemaSection({
                           <td className="px-2 py-1.5">
                             <span>{col.required ? "是" : "否"}</span>
                           </td>
+                          <td className="px-2 py-1.5 align-top">
+                            {isSchemaMetadataEditable ? (
+                              <div className="space-y-1.5">
+                                <select
+                                  value={col.passthroughEnabled ? "yes" : "no"}
+                                  onChange={(event) => {
+                                    const enabled = event.target.value === "yes";
+                                    handleColumnMetadataChange(col.id, {
+                                      passthroughEnabled: enabled,
+                                      passthroughContent: enabled ? (col.passthroughContent ?? "") : "",
+                                    });
+                                  }}
+                                  className="w-full rounded-md border bg-background px-2 py-1 text-xs"
+                                >
+                                  <option value="no">否</option>
+                                  <option value="yes">是</option>
+                                </select>
+                                {col.passthroughEnabled ? (
+                                  <input
+                                    value={col.passthroughContent ?? ""}
+                                    onChange={(event) =>
+                                      handleColumnMetadataChange(col.id, { passthroughContent: event.target.value })
+                                    }
+                                    className="w-full rounded-md border bg-background px-2 py-1 text-xs"
+                                    placeholder="填写透传内容"
+                                  />
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span>{formatPassthroughDisplay(col)}</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            {isSchemaMetadataEditable ? (
+                              <div className="space-y-1.5">
+                                <select
+                                  value={col.auditRuleType ?? ""}
+                                  onChange={(event) => {
+                                    const ruleType = (event.target.value || undefined) as ColumnDefinition["auditRuleType"] | undefined;
+                                    handleColumnMetadataChange(col.id, {
+                                      auditRuleType: ruleType,
+                                      auditRuleValue: ruleType && auditRuleNeedsValue(ruleType) ? (col.auditRuleValue ?? "") : "",
+                                    });
+                                  }}
+                                  className="w-full rounded-md border bg-background px-2 py-1 text-xs"
+                                >
+                                  <option value="">不设置</option>
+                                  <option value="max_lte">最大值小于等于xxx</option>
+                                  <option value="min_gte">最小值大于等于xxx</option>
+                                  <option value="change_rate_lte">本期较上期变化范围不超过xxx</option>
+                                  <option value="not_empty">不为空</option>
+                                </select>
+                                {col.auditRuleType && auditRuleNeedsValue(col.auditRuleType) ? (
+                                  <input
+                                    value={col.auditRuleValue ?? ""}
+                                    onChange={(event) =>
+                                      handleColumnMetadataChange(col.id, { auditRuleValue: event.target.value })
+                                    }
+                                    className="w-full rounded-md border bg-background px-2 py-1 text-xs"
+                                    placeholder="填写xxx的数值"
+                                  />
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span>{formatAuditRuleDisplay(col)}</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -2007,6 +2043,11 @@ function ScopeAndGroupSection({
   const [isPersistingPlan, setIsPersistingPlan] = useState(false);
   const [selectedPreviewBusinessDate, setSelectedPreviewBusinessDate] = useState("");
   const [selectedPreviewYear, setSelectedPreviewYear] = useState("");
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [excelImportTargetDimension, setExcelImportTargetDimension] = useState<string | null>(null);
+  const [sqlImportTargetDimension, setSqlImportTargetDimension] = useState<string | null>(null);
+  const [sqlImportText, setSqlImportText] = useState("");
+  const excelImportInputRef = useRef<HTMLInputElement | null>(null);
   const selectedWideTableAllRecords = useMemo(
     () => wideTableRecords.filter((record) => record.wideTableId === selectedWtId),
     [wideTableRecords, selectedWtId],
@@ -2295,6 +2336,84 @@ function ScopeAndGroupSection({
     }
   };
 
+  const appendDimensionValues = (dimensionName: string, values: string[]) => {
+    if (values.length === 0) {
+      return;
+    }
+    updateSelectedWideTable((wideTable) => {
+      const currentPlanVersion = wideTable.currentPlanVersion ?? resolveCurrentPlanVersion(wideTable, selectedWideTableRecords, taskGroups ?? []);
+      const existingRange = wideTable.dimensionRanges.find((range) => range.dimensionName === dimensionName);
+      if (existingRange) {
+        existingRange.values = Array.from(new Set([...existingRange.values, ...values]));
+      } else {
+        wideTable.dimensionRanges = [
+          ...wideTable.dimensionRanges,
+          { dimensionName, values: Array.from(new Set(values)) },
+        ];
+      }
+      return {
+        ...wideTable,
+        currentPlanVersion: currentPlanVersion + 1,
+        currentPlanFingerprint: undefined,
+        recordCount: 0,
+        status: "draft",
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    setRangeMessage("维度枚举范围已更新，请重新确认并生成预览。");
+    onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
+    if (onTaskGroupsChange && selectedWt) {
+      const prevPlanVersion = selectedWideTablePlanVersion;
+      const staleTaskGroups = markTaskGroupsAsStale(taskGroups ?? [], selectedWt.id, prevPlanVersion);
+      onTaskGroupsChange(staleTaskGroups);
+    }
+  };
+
+  const handleExcelImport = async (dimensionName: string, file: File) => {
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+      setRangeMessage("暂不支持直接解析 .xlsx/.xls，请先在 Excel 中另存为 CSV 后导入。");
+      return;
+    }
+    const text = await file.text();
+    const values = Array.from(
+      new Set(
+        text
+          .split(/[\r\n,\t]+/)
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (values.length === 0) {
+      setRangeMessage("导入内容为空，请检查文件。");
+      return;
+    }
+    appendDimensionValues(dimensionName, values);
+    setRangeMessage(`已从文件导入 ${values.length} 个维度取值。`);
+  };
+
+  const handleSqlImportConfirm = () => {
+    if (!sqlImportTargetDimension) {
+      return;
+    }
+    const quotedValues = Array.from(sqlImportText.matchAll(/'([^']+)'|"([^"]+)"/g))
+      .map((match) => (match[1] || match[2] || "").trim())
+      .filter(Boolean);
+    const fallbackValues = sqlImportText
+      .split(/[\s,\r\n;()]+/)
+      .map((item) => item.trim())
+      .filter((item) => item && !/^(select|from|where|and|or|in|like|limit|order|by)$/i.test(item));
+    const values = Array.from(new Set(quotedValues.length > 0 ? quotedValues : fallbackValues));
+    if (values.length === 0) {
+      setRangeMessage("未识别到可导入的维度取值，请在 SQL 中使用 IN (...) 或引号值。");
+      return;
+    }
+    appendDimensionValues(sqlImportTargetDimension, values);
+    setRangeMessage(`已从 SQL 中导入 ${values.length} 个维度取值。`);
+    setSqlImportTargetDimension(null);
+    setSqlImportText("");
+  };
+
   const handleConfirmScope = async () => {
     if (!selectedWt || !onReplaceWideTableRecords) {
       return;
@@ -2427,17 +2546,7 @@ function ScopeAndGroupSection({
             <StepGroupBadge steps={["C", "D"]} statuses={stepStatuses} />
           </span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {usesBusinessDateAxis
-            ? isDemoRequirement
-              ? "这里聚焦业务日期范围本身：确认范围和维度取值，再生成预览。"
-              : !hasConfirmedDataUpdateEnabled
-                ? "请先在下方“数据更新”里确认是否定期更新，再继续确认业务日期范围和维度取值。"
-                : dataUpdateEnabled
-                  ? "这里聚焦正式范围本身：确认业务日期起点、结束方式和维度取值，再生成预览。"
-                  : "当前按一次性交付处理，请确认固定业务日期范围和维度取值，再生成预览。"
-            : "这里聚焦快照范围本身：确认维度取值后生成当前快照预览。"}
-        </p>
+        <p className="text-xs text-muted-foreground">在这里配置时间范围与维度取值，并在需要时查看预览。</p>
       </div>
 
       {wideTables.length === 0 ? (
@@ -2563,12 +2672,63 @@ function ScopeAndGroupSection({
                   </div>
                 </div>
               ) : (
-                <div className={cn("rounded-lg bg-muted/10 p-4 space-y-2", !isCEditable ? "opacity-60" : "")}>
-                  <h4 className="text-sm font-semibold">快照范围</h4>
-                  <p className="text-xs text-muted-foreground">
-                    当前宽表未启用业务日期语义轴。每次采集都会按当前维度范围生成一份全量快照，不需要配置业务日期范围。
-                    {!isDemoRequirement && dataUpdateEnabled ? " 如果该正式需求需要持续更新，请在上方“数据更新”里继续配置全量更新调度。" : ""}
-                  </p>
+                <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
+                  <h4 className="text-sm font-semibold">时间范围</h4>
+                  <p className="text-xs text-muted-foreground">请选择时间粒度，并设置对应的起止时间。</p>
+                  <div className="grid gap-3 text-xs md:grid-cols-3">
+                    {isRangeEditable && isCEditable ? (
+                      <>
+                        <EditableField
+                          label="时间粒度"
+                          control={(
+                            <select
+                              value={selectedWt.businessDateRange.frequency}
+                              onChange={(event) =>
+                                handleBusinessDateRangeChange({
+                                  frequency: event.target.value as WideTable["businessDateRange"]["frequency"],
+                                })
+                              }
+                              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            >
+                              <option value="daily">日</option>
+                              <option value="weekly">周</option>
+                              <option value="monthly">月</option>
+                              <option value="quarterly">季</option>
+                              <option value="yearly">年</option>
+                            </select>
+                          )}
+                        />
+                        <EditableField
+                          label="开始时间"
+                          control={(
+                            <BusinessDateInput
+                              frequency={selectedWt.businessDateRange.frequency}
+                              value={selectedWt.businessDateRange.start}
+                              onChange={(v) => handleBusinessDateRangeChange({ start: v })}
+                            />
+                          )}
+                        />
+                        <EditableField
+                          label="结束时间"
+                          control={(
+                            <BusinessDateInput
+                              frequency={selectedWt.businessDateRange.frequency}
+                              value={selectedWt.businessDateRange.end === "never"
+                                ? fallbackBusinessDateEnd(selectedWt.businessDateRange.start)
+                                : selectedWt.businessDateRange.end}
+                              onChange={(v) => handleBusinessDateRangeChange({ end: v })}
+                            />
+                          )}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <ReadOnlyField label="时间粒度" value={frequencyLabel(selectedWt.businessDateRange.frequency)} />
+                        <ReadOnlyField label="开始时间" value={selectedWt.businessDateRange.start} />
+                        <ReadOnlyField label="结束时间" value={formatBusinessDateEnd(selectedWt.businessDateRange.end)} />
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2630,31 +2790,55 @@ function ScopeAndGroupSection({
                             ) : null}
                           </div>
                           {isRangeEditable && isCEditable ? (
-                            <div className="flex gap-2">
-                              <input
-                                value={pendingDimensionValues[dimensionColumn.name] ?? ""}
-                                onChange={(event) =>
-                                  setPendingDimensionValues((prev) => ({
-                                    ...prev,
-                                    [dimensionColumn.name]: event.target.value,
-                                  }))
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    handleAddDimensionValue(dimensionColumn.name);
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExcelImportTargetDimension(dimensionColumn.name);
+                                    excelImportInputRef.current?.click();
+                                  }}
+                                  className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                                >
+                                  导入Excel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSqlImportTargetDimension(dimensionColumn.name);
+                                    setSqlImportText("");
+                                  }}
+                                  className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                                >
+                                  导入SQL
+                                </button>
+                              </div>
+                              <div className="flex gap-2">
+                                <input
+                                  value={pendingDimensionValues[dimensionColumn.name] ?? ""}
+                                  onChange={(event) =>
+                                    setPendingDimensionValues((prev) => ({
+                                      ...prev,
+                                      [dimensionColumn.name]: event.target.value,
+                                    }))
                                   }
-                                }}
-                                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-                                placeholder={`新增 ${dimensionColumn.name} 枚举值`}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleAddDimensionValue(dimensionColumn.name)}
-                                className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
-                              >
-                                添加
-                              </button>
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      handleAddDimensionValue(dimensionColumn.name);
+                                    }
+                                  }}
+                                  className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                                  placeholder={`新增 ${dimensionColumn.name} 枚举值`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddDimensionValue(dimensionColumn.name)}
+                                  className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                                >
+                                  添加
+                                </button>
+                              </div>
                             </div>
                           ) : null}
                         </div>
@@ -2663,25 +2847,40 @@ function ScopeAndGroupSection({
                   </div>
                 )}
               </div>
+              <input
+                ref={excelImportInputRef}
+                type="file"
+                accept=".csv,.txt,.tsv,.xlsx,.xls"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  const dimensionName = excelImportTargetDimension;
+                  event.currentTarget.value = "";
+                  if (!file || !dimensionName) {
+                    return;
+                  }
+                  await handleExcelImport(dimensionName, file);
+                  setExcelImportTargetDimension(null);
+                }}
+              />
 
               <div className="rounded-lg bg-muted/10 p-4 space-y-3">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold">预览与生成</h4>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {isDemoRequirement
-                        ? "确认范围后，系统会生成预览行；属性列可直接在表格中补齐，指标列默认留空。"
-                        : usesBusinessDateAxis
-                          ? dataUpdateEnabled
-                            ? "确认范围后，系统会生成预览行；正式需求中的属性列只读展示。"
-                            : "确认范围后，系统会按当前固定业务日期范围生成一次性预览；正式需求中的属性列只读展示。"
-                          : dataUpdateEnabled
-                            ? "确认范围后，系统会生成当前快照预览；正式需求中的属性列只读展示。"
-                            : "确认范围后，系统会生成当前快照预览并完成本次一次性交付；正式需求中的属性列只读展示。"}
-                    </p>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-semibold">预览与生成</h4>
+                  <p className="text-xs text-muted-foreground">
+                    预览已调整为弹窗展示，请使用右下角按钮操作。
+                  </p>
+                </div>
+
+                {rangeMessage ? (
+                  <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+                    {rangeMessage}
                   </div>
+                ) : null}
+
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   {isRangeEditable ? (
-                    <div className="flex items-center gap-3">
+                    <>
                       {!isScheduleRuleConfigured ? (
                         <span className="text-xs text-amber-700">请先完成数据更新中的调度规则配置</span>
                       ) : null}
@@ -2704,138 +2903,184 @@ function ScopeAndGroupSection({
                       >
                         {isPersistingPlan ? "保存中..." : "确认范围并生成预览"}
                       </button>
-                      {isStepDCompleted && (selectedWt?.status === "initialized" || selectedWt?.status === "active") ? (
-                        <span className="text-xs text-muted-foreground">
-                          {isProductionScopeReconfirmable
-                            ? "正式配置已更新，可重新确认"
-                            : "当前版本已确认"}
-                        </span>
-                      ) : null}
-                      {isStepDInvalidated ? (
-                        <span className="text-xs text-orange-600">
-                          {isProductionScopeReconfirmable
-                            ? "正式配置已更新，请重新确认"
-                            : "配置已变更，请重新确认"}
-                        </span>
-                      ) : null}
-                    </div>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setIsPreviewModalOpen(true)}
+                    className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                  >
+                    查看预览
+                  </button>
+                  {isStepDCompleted && (selectedWt?.status === "initialized" || selectedWt?.status === "active") ? (
+                    <span className="text-xs text-muted-foreground">
+                      {isProductionScopeReconfirmable ? "正式配置已更新，可重新确认" : "当前版本已确认"}
+                    </span>
+                  ) : null}
+                  {isStepDInvalidated ? (
+                    <span className="text-xs text-orange-600">
+                      {isProductionScopeReconfirmable ? "正式配置已更新，请重新确认" : "配置已变更，请重新确认"}
+                    </span>
                   ) : null}
                 </div>
 
-                {rangeMessage ? (
-                  <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
-                    {rangeMessage}
+                {isPreviewModalOpen ? (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+                    <div className="max-h-[86vh] w-full max-w-6xl overflow-auto rounded-xl border bg-card p-4 shadow-lg">
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="text-sm font-semibold">预览行</div>
+                        <button
+                          type="button"
+                          onClick={() => setIsPreviewModalOpen(false)}
+                          className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          关闭
+                        </button>
+                      </div>
+                      {selectedWideTableRecords.length === 0 ? (
+                        <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+                          {usesBusinessDateAxis ? "还没有预览数据，先确认业务日期和维度取值。" : "还没有预览数据，先确认维度取值并生成预览。"}
+                          {isOpenEnded ? ` open-ended 范围仅会生成截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期的预览。` : ""}
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="text-xs text-muted-foreground">
+                            预计生成 {selectedWt.recordCount} 行，当前展示 {selectedWideTableRecords.length} 行预览。
+                          </div>
+                          {previewBusinessDates.length > 0 ? (
+                            <div className="space-y-2">
+                              {isPreviewMonthlyFrequency && previewBusinessYears.length > 0 ? (
+                                <div className={cn("flex gap-2 overflow-x-auto pb-1", previewBusinessYears.length > 1 ? "border-b" : "")}>
+                                  {previewBusinessYears.length > 1 ? (
+                                    previewBusinessYears.map((year) => (
+                                      <button
+                                        key={year}
+                                        type="button"
+                                        onClick={() => setSelectedPreviewYear(year)}
+                                        className={cn(
+                                          "shrink-0 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+                                          effectiveSelectedPreviewYear === year
+                                            ? "border-primary text-primary"
+                                            : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted",
+                                        )}
+                                      >
+                                        {year}年
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <div className="shrink-0 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                                      {previewBusinessYears[0]}年
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
+                              <div className="flex gap-2 overflow-x-auto pb-1">
+                                {visiblePreviewBusinessDates.map((businessDate) => (
+                                  <button
+                                    key={businessDate}
+                                    type="button"
+                                    onClick={() => setSelectedPreviewBusinessDate(businessDate)}
+                                    className={cn(
+                                      "shrink-0 rounded-md border px-3 py-1.5 text-xs",
+                                      selectedPreviewBusinessDate === businessDate
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                                    )}
+                                  >
+                                    {isPreviewMonthlyFrequency
+                                      ? `${extractBusinessDateMonth(businessDate) ?? businessDate.slice(5, 7)}月`
+                                      : businessDate}{" "}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead className="border-b bg-muted/40">
+                                <tr>
+                                  {previewColumns.map((column) => (
+                                    <th key={column.id} className="px-2 py-1.5 text-left">
+                                      {column.name}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y">
+                                {visiblePreviewRecords.map((record) => (
+                                  <tr key={`${record.wideTableId}-${record.id}`}>
+                                    {previewColumns.map((column) => (
+                                      <td key={column.id} className="px-2 py-1.5 text-muted-foreground">
+                                        {column.category === "attribute" && isPreviewAttributeEditable ? (
+                                          column.type === "BOOLEAN" ? (
+                                            <select
+                                              value={record[column.name] === true ? "true" : record[column.name] === false ? "false" : ""}
+                                              onChange={(event) => handlePreviewAttributeChange(record, column, event.target.value)}
+                                              className="w-full rounded-md border bg-background px-2 py-1 text-xs"
+                                            >
+                                              <option value="">未设置</option>
+                                              <option value="true">是</option>
+                                              <option value="false">否</option>
+                                            </select>
+                                          ) : (
+                                            <input
+                                              type={previewAttributeInputType(column)}
+                                              value={stringifyPreviewAttributeValue(column, record[column.name])}
+                                              onChange={(event) => handlePreviewAttributeChange(record, column, event.target.value)}
+                                              className="w-full min-w-28 rounded-md border bg-background px-2 py-1 text-xs"
+                                              placeholder={`编辑 ${column.name}`}
+                                            />
+                                          )
+                                        ) : record[column.name] != null && record[column.name] !== "" ? (
+                                          String(record[column.name])
+                                        ) : (
+                                          "-"
+                                        )}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : null}
-
-                {selectedWideTableRecords.length === 0 ? (
-                  <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                    {usesBusinessDateAxis ? "还没有预览数据，先确认业务日期和维度取值。" : "还没有预览数据，先确认维度取值并生成快照预览。"}
-                    {isOpenEnded ? ` open-ended 范围仅会生成截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期的预览。` : ""}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="text-xs text-muted-foreground">
-                      预计生成 {selectedWt.recordCount} 行，当前展示 {selectedWideTableRecords.length} 行预览。
-                    </div>
-                    {previewBusinessDates.length > 0 ? (
-                      <div className="space-y-2">
-                        {isPreviewMonthlyFrequency && previewBusinessYears.length > 0 ? (
-                          <div className={cn("flex gap-2 overflow-x-auto pb-1", previewBusinessYears.length > 1 ? "border-b" : "")}>
-                            {previewBusinessYears.length > 1 ? (
-                              previewBusinessYears.map((year) => (
-	                                <button
-	                                  key={year}
-	                                  type="button"
-	                                  onClick={() => setSelectedPreviewYear(year)}
-	                                  className={cn(
-	                                    "shrink-0 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
-	                                    effectiveSelectedPreviewYear === year
-	                                      ? "border-primary text-primary"
-	                                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted",
-	                                  )}
-	                                >
-                                  {year}年
-                                </button>
-                              ))
-                            ) : (
-                              <div className="shrink-0 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                                {previewBusinessYears[0]}年
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
-                        <div className="flex gap-2 overflow-x-auto pb-1">
-                          {visiblePreviewBusinessDates.map((businessDate) => (
-                            <button
-                              key={businessDate}
-                              type="button"
-                              onClick={() => setSelectedPreviewBusinessDate(businessDate)}
-                              className={cn(
-                                "shrink-0 rounded-md border px-3 py-1.5 text-xs",
-                                selectedPreviewBusinessDate === businessDate
-                                  ? "border-primary bg-primary/10 text-primary"
-                                  : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
-                              )}
-                            >
-                              {isPreviewMonthlyFrequency
-                                ? `${extractBusinessDateMonth(businessDate) ?? businessDate.slice(5, 7)}月`
-                                : businessDate}{" "}
-                            </button>
-                          ))}
-                        </div>
+                {sqlImportTargetDimension ? (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+                    <div className="w-full max-w-2xl rounded-xl border bg-card p-4 shadow-lg space-y-3">
+                      <div className="text-sm font-semibold">导入 SQL - {sqlImportTargetDimension}</div>
+                      <p className="text-xs text-muted-foreground">支持粘贴 SQL，并从引号值或 IN 列表中提取维度取值。</p>
+                      <textarea
+                        value={sqlImportText}
+                        onChange={(event) => setSqlImportText(event.target.value)}
+                        className="min-h-40 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        placeholder="例如：SELECT * FROM t WHERE company IN ('Waymo','Pony.ai')"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSqlImportTargetDimension(null);
+                            setSqlImportText("");
+                          }}
+                          className="rounded-md border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSqlImportConfirm}
+                          className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90"
+                        >
+                          导入
+                        </button>
                       </div>
-                    ) : null}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead className="border-b bg-muted/40">
-                          <tr>
-                            {previewColumns.map((column) => (
-                              <th key={column.id} className="px-2 py-1.5 text-left">
-                                {column.name}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {visiblePreviewRecords.map((record) => (
-                            <tr key={`${record.wideTableId}-${record.id}`}>
-                              {previewColumns.map((column) => (
-                                <td key={column.id} className="px-2 py-1.5 text-muted-foreground">
-                                  {column.category === "attribute" && isPreviewAttributeEditable ? (
-                                    column.type === "BOOLEAN" ? (
-                                      <select
-                                        value={record[column.name] === true ? "true" : record[column.name] === false ? "false" : ""}
-                                        onChange={(event) => handlePreviewAttributeChange(record, column, event.target.value)}
-                                        className="w-full rounded-md border bg-background px-2 py-1 text-xs"
-                                      >
-                                        <option value="">未设置</option>
-                                        <option value="true">是</option>
-                                        <option value="false">否</option>
-                                      </select>
-                                    ) : (
-                                      <input
-                                        type={previewAttributeInputType(column)}
-                                        value={stringifyPreviewAttributeValue(column, record[column.name])}
-                                        onChange={(event) => handlePreviewAttributeChange(record, column, event.target.value)}
-                                        className="w-full min-w-28 rounded-md border bg-background px-2 py-1 text-xs"
-                                        placeholder={`编辑 ${column.name}`}
-                                      />
-                                    )
-                                  ) : record[column.name] != null && record[column.name] !== "" ? (
-                                    String(record[column.name])
-                                  ) : (
-                                    "-"
-                                  )}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
             )
@@ -3311,4 +3556,35 @@ function categoryLabel(category: ColumnDefinition["category"]): string {
     return "指标列";
   }
   return "系统列";
+}
+
+function auditRuleNeedsValue(ruleType: ColumnDefinition["auditRuleType"]): boolean {
+  return ruleType === "max_lte" || ruleType === "min_gte" || ruleType === "change_rate_lte";
+}
+
+function formatPassthroughDisplay(column: ColumnDefinition): string {
+  if (!column.passthroughEnabled) {
+    return "否";
+  }
+  if (column.passthroughContent?.trim()) {
+    return `是：${column.passthroughContent.trim()}`;
+  }
+  return "是";
+}
+
+function formatAuditRuleDisplay(column: ColumnDefinition): string {
+  if (!column.auditRuleType) {
+    return "-";
+  }
+  const value = (column.auditRuleValue ?? "").trim();
+  if (column.auditRuleType === "max_lte") {
+    return `最大值小于等于${value || "xxx"}`;
+  }
+  if (column.auditRuleType === "min_gte") {
+    return `最小值大于等于${value || "xxx"}`;
+  }
+  if (column.auditRuleType === "change_rate_lte") {
+    return `本期较上期变化范围不超过${value || "xxx"}`;
+  }
+  return "不为空";
 }

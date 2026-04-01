@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -93,8 +93,7 @@ export default function ProjectRequirementDetailPanel({
       owner: nextRequirement.owner,
       assignee: nextRequirement.assignee,
       businessGoal: nextRequirement.businessGoal,
-      businessBoundary: nextRequirement.businessBoundary,
-      deliveryScope: nextRequirement.deliveryScope,
+      backgroundKnowledge: nextRequirement.backgroundKnowledge,
       dataUpdateEnabled: nextRequirement.dataUpdateEnabled,
       dataUpdateMode: nextRequirement.dataUpdateMode,
       processingRuleDrafts: nextRequirement.processingRuleDrafts,
@@ -232,11 +231,11 @@ export default function ProjectRequirementDetailPanel({
         {needsProductionScopeRefresh && activeTab !== "requirement" ? (
           <div className="mb-3 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <div className="font-medium">下一步需要回到“定义”确认数据范围与更新方式</div>
+              <div className="font-medium">下一步需要回到“需求”确认数据范围与更新方式</div>
               <div className="text-xs text-amber-800">
                 {containsFullSnapshotTable
-                  ? "正式需求已经创建成功。请先在“定义 > 数据范围”里确认正式范围，再到“数据更新”里确认是否持续全量更新，并重新生成预览。"
-                  : "正式需求已经创建成功。请先在“定义 > 数据范围”里确认正式范围；如需持续增量更新，请将结束方式改为“永不”，再到“数据更新”里确认更新方式并重新生成预览。"}
+                  ? "正式需求已经创建成功。请先在“需求 > 数据范围”里确认正式范围，再到“数据更新”里确认是否持续全量更新，并重新生成预览。"
+                  : "正式需求已经创建成功。请先在“需求 > 数据范围”里确认正式范围；如需持续增量更新，请将结束方式改为“永不”，再到“数据更新”里确认更新方式并重新生成预览。"}
               </div>
             </div>
             <Link
@@ -254,10 +253,10 @@ export default function ProjectRequirementDetailPanel({
             emphasized={needsProductionScopeRefresh && activeTab !== "requirement"}
             badge={needsProductionScopeRefresh && activeTab !== "requirement" ? "下一步" : undefined}
           >
-            定义
+            需求
           </TabLink>
           <TabLink href={`${basePath}?tab=tasks`} active={activeTab === "tasks"}>
-            执行
+            任务
           </TabLink>
           <TabLink href={`${basePath}?tab=processing`} active={activeTab === "processing"}>
             数据产出
@@ -564,3 +563,4 @@ function wideTableStatusScore(status: WideTable["status"]): number {
   }
   return 1;
 }
+

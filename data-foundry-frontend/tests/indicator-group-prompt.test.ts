@@ -23,7 +23,6 @@ const requirement: Requirement = {
     preferredSites: ["site:waymo.com"],
     sitePolicy: "preferred",
     knowledgeBases: ["kb_autodrive"],
-    fixedUrls: ["https://waymo.com/"],
     nullPolicy: "未提及填 NULL",
     sourcePriority: "官网优先",
     valueFormat: "数值列与单位分离存储",

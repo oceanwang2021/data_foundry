@@ -1,4 +1,4 @@
-import type { IndicatorGroup, Requirement, WideTable, ColumnDefinition } from "./types";
+﻿import type { IndicatorGroup, Requirement, WideTable, ColumnDefinition } from "./types";
 
 export const PROMPT_SECTION_TITLES = {
   coreQueryRequirement: "核心查询需求",
@@ -84,12 +84,9 @@ function resolveCoreQueryRequirement(
   const lines = [
     `- 需求名称：${requirement.title}`,
     `- 指标组：${group.name}`,
-    `- 核心目标：${requirement.businessGoal || "未配置"}`,
+    `- 核心目标：${requirement.backgroundKnowledge || requirement.businessGoal || "未配置"}`,
     "- 执行范围：本次只采集当前指标组内指标，禁止跨指标组混填。",
   ];
-  if (requirement.deliveryScope) {
-    lines.push(`- 交付范围：${requirement.deliveryScope}`);
-  }
   if (group.description) {
     lines.push(`- 分组补充说明：${group.description}`);
   }
@@ -112,15 +109,9 @@ function resolveBusinessKnowledge(
   }
 
   const lines: string[] = [];
-  const backgroundKnowledge = requirement.backgroundKnowledge || requirement.businessBoundary;
+  const backgroundKnowledge = requirement.backgroundKnowledge || requirement.businessGoal;
   if (backgroundKnowledge) {
     lines.push(`- 业务知识：${backgroundKnowledge}`);
-  }
-  if (
-    requirement.businessBoundary
-    && requirement.businessBoundary !== backgroundKnowledge
-  ) {
-    lines.push(`- 业务边界：${requirement.businessBoundary}`);
   }
   if (lines.length === 0) {
     lines.push("- 暂无额外业务知识，请严格按需求定义与字段口径执行。");
@@ -185,7 +176,7 @@ function buildDimensionColumnsMarkdown(wideTable: WideTable): string {
       lines.push(
         "  - 取值范围："
         + `${wideTable.businessDateRange.start} ~ ${wideTable.businessDateRange.end}`
-        + `（${wideTable.businessDateRange.frequency}${latestYearQuarterly}）`,
+        + `，${wideTable.businessDateRange.frequency}${latestYearQuarterly}`,
       );
       lines.push("  - 是否业务日期：是");
       return lines.join("\n");
@@ -256,9 +247,6 @@ function resolveOutputConstraints(
   if (collectionPolicy.knowledgeBases.length > 0) {
     lines.push(`- 可参考知识库：${collectionPolicy.knowledgeBases.join("、")}`);
   }
-  if (collectionPolicy.fixedUrls.length > 0) {
-    lines.push(`- 固定参考链接：${collectionPolicy.fixedUrls.join("、")}`);
-  }
   return lines.join("\n");
 }
 
@@ -274,5 +262,5 @@ function extractSectionBody(markdown: string, title: string): string | undefined
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
 }
