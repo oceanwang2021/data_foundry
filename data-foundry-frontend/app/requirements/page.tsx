@@ -128,7 +128,7 @@ export default function RequirementsPage() {
                 <Info title="操作">
                   <div>
                     <Link
-                      href={`/projects/${req.projectId}/requirements/${req.id}`}
+                      href={`/projects/${req.projectId}/requirements/${req.id}?view=requirement&tab=requirement`}
                       className="inline-flex items-center gap-1 text-primary text-sm hover:underline mt-2"
                     >
                       查看需求详情

@@ -29,6 +29,7 @@ type Props = {
   requirementId: string;
   requestedTab?: string;
   requestedGuide?: string;
+  viewMode?: "requirement" | "tasks";
   initialRequirements: Requirement[];
   wideTables: WideTable[];
   wideTableRecords: WideTableRecord[];
@@ -43,6 +44,7 @@ export default function ProjectRequirementDetailPanel({
   requirementId,
   requestedTab,
   requestedGuide,
+  viewMode,
   initialRequirements,
   wideTables,
   wideTableRecords,
@@ -128,11 +130,21 @@ export default function ProjectRequirementDetailPanel({
     return (
       <div className="p-8 space-y-4">
         <Link
-          href={`/projects/${project.id}`}
+          href={
+            viewMode === "requirement"
+              ? "/requirements"
+              : viewMode === "tasks"
+              ? "/collection-tasks"
+              : `/projects/${project.id}`
+          }
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回项目
+          {viewMode === "requirement"
+            ? "返回需求管理"
+            : viewMode === "tasks"
+            ? "返回采集任务管理"
+            : "返回项目"}
         </Link>
         <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
           {hydrated ? "未找到该需求，请返回项目列表刷新后重试。" : "正在加载需求..."}
@@ -197,8 +209,23 @@ export default function ProjectRequirementDetailPanel({
   };
 
   const basePath = `/projects/${project.id}/requirements/${requirement.id}`;
+  const isRequirementOnlyView = viewMode === "requirement";
+  const isTasksOnlyView = viewMode === "tasks";
+  const viewQueryPrefix = isRequirementOnlyView
+    ? "view=requirement&"
+    : isTasksOnlyView
+    ? "view=tasks&"
+    : "";
+  const requirementTabHref = `${basePath}?${viewQueryPrefix}tab=requirement`;
+  const tasksTabHref = `${basePath}?${viewQueryPrefix}tab=tasks`;
+  const processingTabHref = `${basePath}?${viewQueryPrefix}tab=processing`;
+  const acceptanceTabHref = `${basePath}?${viewQueryPrefix}tab=acceptance`;
   const activeTab: TabKey =
-    requestedTab === "tasks"
+    isRequirementOnlyView
+      ? "requirement"
+      : isTasksOnlyView
+      ? "tasks"
+      : requestedTab === "tasks"
       ? "tasks"
       : requestedTab === "processing"
       ? "processing"
@@ -206,17 +233,27 @@ export default function ProjectRequirementDetailPanel({
       ? "acceptance"
       : "requirement";
   const needsProductionScopeRefresh = !isDemoRequirement && requirement.status === "aligning";
-  const productionScopeGuideHref = `${basePath}?tab=requirement&guide=production-scope#scope-generation`;
+  const productionScopeGuideHref = `${basePath}?${viewQueryPrefix}tab=requirement&guide=production-scope#scope-generation`;
 
   return (
     <div className="p-8 space-y-6">
       <header className="space-y-2">
         <Link
-          href={`/projects/${project.id}`}
+          href={
+            isRequirementOnlyView
+              ? "/requirements"
+              : isTasksOnlyView
+              ? "/collection-tasks"
+              : `/projects/${project.id}`
+          }
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回项目
+          {isRequirementOnlyView
+            ? "返回需求管理"
+            : isTasksOnlyView
+            ? "返回采集任务管理"
+            : "返回项目"}
         </Link>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <ClipboardList className="h-5 w-5 text-primary" />
@@ -228,7 +265,7 @@ export default function ProjectRequirementDetailPanel({
       </header>
 
       <section className="rounded-xl border bg-card p-3">
-        {needsProductionScopeRefresh && activeTab !== "requirement" ? (
+        {!isTasksOnlyView && needsProductionScopeRefresh && activeTab !== "requirement" ? (
           <div className="mb-3 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
               <div className="font-medium">下一步需要回到“需求”确认数据范围与更新方式</div>
@@ -246,27 +283,44 @@ export default function ProjectRequirementDetailPanel({
             </Link>
           </div>
         ) : null}
-        <div className={cn("grid auto-rows-fr gap-2", isDemoRequirement ? "grid-cols-3" : "grid-cols-4")}>
-          <TabLink
-            href={needsProductionScopeRefresh ? productionScopeGuideHref : `${basePath}?tab=requirement`}
-            active={activeTab === "requirement"}
-            emphasized={needsProductionScopeRefresh && activeTab !== "requirement"}
-            badge={needsProductionScopeRefresh && activeTab !== "requirement" ? "下一步" : undefined}
-          >
-            需求
-          </TabLink>
-          <TabLink href={`${basePath}?tab=tasks`} active={activeTab === "tasks"}>
-            任务
-          </TabLink>
-          <TabLink href={`${basePath}?tab=processing`} active={activeTab === "processing"}>
-            数据产出
-          </TabLink>
-          {!isDemoRequirement ? (
-            <TabLink href={`${basePath}?tab=acceptance`} active={activeTab === "acceptance"}>
-              验收
+        {isRequirementOnlyView ? (
+          <div className="grid auto-rows-fr gap-2 grid-cols-1">
+            <TabLink
+              href={needsProductionScopeRefresh ? productionScopeGuideHref : requirementTabHref}
+              active
+            >
+              需求
             </TabLink>
-          ) : null}
-        </div>
+          </div>
+        ) : isTasksOnlyView ? (
+          <div className="grid auto-rows-fr gap-2 grid-cols-1">
+            <TabLink href={tasksTabHref} active>
+              任务
+            </TabLink>
+          </div>
+        ) : (
+          <div className={cn("grid auto-rows-fr gap-2", isDemoRequirement ? "grid-cols-3" : "grid-cols-4")}>
+            <TabLink
+              href={needsProductionScopeRefresh ? productionScopeGuideHref : requirementTabHref}
+              active={activeTab === "requirement"}
+              emphasized={needsProductionScopeRefresh && activeTab !== "requirement"}
+              badge={needsProductionScopeRefresh && activeTab !== "requirement" ? "下一步" : undefined}
+            >
+              需求
+            </TabLink>
+            <TabLink href={tasksTabHref} active={activeTab === "tasks"}>
+              任务
+            </TabLink>
+            <TabLink href={processingTabHref} active={activeTab === "processing"}>
+              数据产出
+            </TabLink>
+            {!isDemoRequirement ? (
+              <TabLink href={acceptanceTabHref} active={activeTab === "acceptance"}>
+                验收
+              </TabLink>
+            ) : null}
+          </div>
+        )}
       </section>
 
       {activeTab === "requirement" ? (

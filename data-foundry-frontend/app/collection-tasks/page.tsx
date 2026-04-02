@@ -100,7 +100,7 @@ export default function CollectionTasksPage() {
                 </p>
                 {req && (
                   <Link
-                    href={`/projects/${req.projectId}/requirements/${req.id}?tab=tasks`}
+                    href={`/projects/${req.projectId}/requirements/${req.id}?view=tasks&tab=tasks${wt ? `&wt=${encodeURIComponent(wt.id)}` : ""}&tg=${encodeURIComponent(tg.id)}`}
                     className="mt-2 inline-flex text-xs text-primary hover:underline"
                   >
                     查看任务详情
