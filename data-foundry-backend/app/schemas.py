@@ -315,22 +315,13 @@ class Requirement(BaseModel):
 
     @model_validator(mode="after")
     def validate_requirement(self) -> "Requirement":
-        if self.phase == "demo" and self.schema_locked:
-            raise ValueError("demo requirement must keep schema unlocked")
-        if self.phase == "production":
-            if not self.schema_locked:
-                raise ValueError("production requirement must lock schema")
+        # Demo 阶段已取消：phase 字段仅作为历史数据兼容存在；业务逻辑不再依赖 demo/production 差异。
+        # schema_locked 的语义调整为：进入运行态后锁定 Schema（由服务端在生成计划/运行时写入）。
         if self.wide_table is None and self.status != "draft":
             raise ValueError("non-draft requirement must define a wide table")
         inferred_mode = infer_requirement_data_update_mode(self.wide_table)
         if self.data_update_enabled:
             self.data_update_mode = self.data_update_mode or inferred_mode
-            if (
-                inferred_mode is not None
-                and self.data_update_mode is not None
-                and self.data_update_mode != inferred_mode
-            ):
-                raise ValueError("data update mode must match the wide table coverage mode")
         else:
             self.data_update_mode = None
         return self
@@ -618,7 +609,7 @@ class ProjectUpdateInput(BaseModel):
 
 class RequirementCreateInput(BaseModel):
     title: str
-    phase: RequirementPhase = "demo"
+    phase: RequirementPhase = "production"
     owner: str
     assignee: str
     business_goal: str

@@ -6,21 +6,19 @@ import {
 } from "@/lib/requirement-task-group-actions";
 
 describe("task group action visibility", () => {
-  it("shows the execute action for demo planned task groups", () => {
+  it("shows the execute action for planned task groups", () => {
     expect(canShowTaskGroupRunAction({
       id: "tg_planned_2026-02-28",
       isReal: false,
       displayStatus: "pending",
-      requirementType: "demo",
     })).toBe(true);
   });
 
-  it("keeps production planned task groups non-runnable", () => {
+  it("hides the execute action for non-local planned groups", () => {
     expect(canShowTaskGroupRunAction({
-      id: "tg_planned_2026-02-28",
+      id: "tg_other_2026-02-28",
       isReal: false,
       displayStatus: "pending",
-      requirementType: "production",
     })).toBe(false);
   });
 });

@@ -13,9 +13,9 @@ import type {
 import type { AcceptanceTicket, ScheduleJob } from "@/lib/domain";
 import { loadRequirementDetailData, updateRequirement } from "@/lib/api-client";
 import { ArrowLeft, ClipboardList } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { formatBusinessDateLabel } from "@/lib/business-date";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
+import { cn } from "@/lib/utils";
 import RequirementDefinitionForm from "@/components/RequirementDefinitionForm";
 import RequirementTasksPanel from "@/components/RequirementTasksPanel";
 import RequirementDataProcessingPanel from "@/components/RequirementDataProcessingPanel";
@@ -153,7 +153,6 @@ export default function ProjectRequirementDetailPanel({
     );
   }
 
-  const isDemoRequirement = requirement.requirementType === "demo";
   const availableSchemaTemplates = useMemo(() => {
     const mergedTemplates = new Map<string, WideTable>();
     for (const wideTable of wideTables) {
@@ -220,20 +219,26 @@ export default function ProjectRequirementDetailPanel({
   const tasksTabHref = `${basePath}?${viewQueryPrefix}tab=tasks`;
   const processingTabHref = `${basePath}?${viewQueryPrefix}tab=processing`;
   const acceptanceTabHref = `${basePath}?${viewQueryPrefix}tab=acceptance`;
+  const isRequirementSubmitted = requirement.status !== "draft";
+  const isDownstreamTabRequested = requestedTab === "tasks"
+    || requestedTab === "processing"
+    || requestedTab === "acceptance"
+    || requestedTab === "audit";
+  const shouldForceRequirementTab = !isRequirementSubmitted && !isRequirementOnlyView && !isTasksOnlyView && isDownstreamTabRequested;
   const activeTab: TabKey =
     isRequirementOnlyView
       ? "requirement"
       : isTasksOnlyView
       ? "tasks"
+      : shouldForceRequirementTab
+      ? "requirement"
       : requestedTab === "tasks"
       ? "tasks"
       : requestedTab === "processing"
       ? "processing"
-      : !isDemoRequirement && (requestedTab === "acceptance" || requestedTab === "audit")
+      : requestedTab === "acceptance" || requestedTab === "audit"
       ? "acceptance"
       : "requirement";
-  const needsProductionScopeRefresh = !isDemoRequirement && requirement.status === "aligning";
-  const productionScopeGuideHref = `${basePath}?${viewQueryPrefix}tab=requirement&guide=production-scope#scope-generation`;
 
   return (
     <div className="p-8 space-y-6">
@@ -265,28 +270,10 @@ export default function ProjectRequirementDetailPanel({
       </header>
 
       <section className="rounded-xl border bg-card p-3">
-        {!isTasksOnlyView && needsProductionScopeRefresh && activeTab !== "requirement" ? (
-          <div className="mb-3 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1">
-              <div className="font-medium">下一步需要回到“需求”确认数据范围与更新方式</div>
-              <div className="text-xs text-amber-800">
-                {containsFullSnapshotTable
-                  ? "正式需求已经创建成功。请先在“需求 > 数据范围”里确认正式范围，再到“数据更新”里确认是否持续全量更新，并重新生成预览。"
-                  : "正式需求已经创建成功。请先在“需求 > 数据范围”里确认正式范围；如需持续增量更新，请将结束方式改为“永不”，再到“数据更新”里确认更新方式并重新生成预览。"}
-              </div>
-            </div>
-            <Link
-              href={productionScopeGuideHref}
-              className="inline-flex items-center justify-center rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600"
-            >
-              去确认正式配置
-            </Link>
-          </div>
-        ) : null}
         {isRequirementOnlyView ? (
           <div className="grid auto-rows-fr gap-2 grid-cols-1">
             <TabLink
-              href={needsProductionScopeRefresh ? productionScopeGuideHref : requirementTabHref}
+              href={requirementTabHref}
               active
             >
               需求
@@ -299,29 +286,31 @@ export default function ProjectRequirementDetailPanel({
             </TabLink>
           </div>
         ) : (
-          <div className={cn("grid auto-rows-fr gap-2", isDemoRequirement ? "grid-cols-3" : "grid-cols-4")}>
+          <div className="grid auto-rows-fr gap-2 grid-cols-4">
             <TabLink
-              href={needsProductionScopeRefresh ? productionScopeGuideHref : requirementTabHref}
+              href={requirementTabHref}
               active={activeTab === "requirement"}
-              emphasized={needsProductionScopeRefresh && activeTab !== "requirement"}
-              badge={needsProductionScopeRefresh && activeTab !== "requirement" ? "下一步" : undefined}
             >
               需求
             </TabLink>
-            <TabLink href={tasksTabHref} active={activeTab === "tasks"}>
+            <TabLink href={tasksTabHref} active={activeTab === "tasks"} disabled={!isRequirementSubmitted}>
               任务
             </TabLink>
-            <TabLink href={processingTabHref} active={activeTab === "processing"}>
+            <TabLink href={processingTabHref} active={activeTab === "processing"} disabled={!isRequirementSubmitted}>
               数据产出
             </TabLink>
-            {!isDemoRequirement ? (
-              <TabLink href={acceptanceTabHref} active={activeTab === "acceptance"}>
-                验收
-              </TabLink>
-            ) : null}
+            <TabLink href={acceptanceTabHref} active={activeTab === "acceptance"} disabled={!isRequirementSubmitted}>
+              验收
+            </TabLink>
           </div>
         )}
       </section>
+
+      {!isRequirementSubmitted && !isRequirementOnlyView && !isTasksOnlyView ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          当前需求尚未提交。请先在【需求】Tab 完成录入并点击“提交”，提交后才能进入任务、数据产出与验收环节。
+        </div>
+      ) : null}
 
       {activeTab === "requirement" ? (
         <RequirementDefinitionForm
@@ -333,7 +322,6 @@ export default function ProjectRequirementDetailPanel({
           taskGroups={reqTaskGroups}
           fetchTasks={reqFetchTasks}
           availableSchemaTemplates={availableSchemaTemplates}
-          isDemoRequirement={isDemoRequirement}
           onRequirementChange={handleRequirementChange}
           onProjectChange={setProjectState}
           onWideTablesChange={handleReplaceRequirementWideTables}
@@ -411,7 +399,7 @@ export default function ProjectRequirementDetailPanel({
         />
       ) : null}
 
-      {!isDemoRequirement && activeTab === "acceptance" ? (
+      {activeTab === "acceptance" ? (
         <RequirementAcceptancePanel
           requirement={requirement}
           wideTables={reqWideTables}
@@ -448,32 +436,42 @@ function TabLink({
   href,
   active,
   emphasized = false,
+  disabled = false,
   badge,
   children,
 }: {
   href: string;
   active: boolean;
   emphasized?: boolean;
+  disabled?: boolean;
   badge?: string;
   children: React.ReactNode;
 }) {
+  const className = cn(
+    "flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors",
+    active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+    emphasized && !active ? "border border-amber-300 bg-amber-50 text-amber-900 shadow-sm ring-1 ring-amber-200/80" : "",
+    disabled ? "cursor-not-allowed opacity-55 hover:bg-transparent hover:text-muted-foreground" : "",
+  );
+
+  const content = (
+    <span className="inline-flex items-center gap-2">
+      <span>{children}</span>
+      {badge ? (
+        <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+          {badge}
+        </span>
+      ) : null}
+    </span>
+  );
+
+  if (disabled) {
+    return <div className={className} aria-disabled="true">{content}</div>;
+  }
+
   return (
-    <Link
-      href={href}
-      className={cn(
-        "flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors",
-        active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        emphasized && !active ? "border border-amber-300 bg-amber-50 text-amber-900 shadow-sm ring-1 ring-amber-200/80" : "",
-      )}
-    >
-      <span className="inline-flex items-center gap-2">
-        <span>{children}</span>
-        {badge ? (
-          <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-            {badge}
-          </span>
-        ) : null}
-      </span>
+    <Link href={href} className={className}>
+      {content}
     </Link>
   );
 }

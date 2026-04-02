@@ -179,13 +179,6 @@ def _build_plan_wide_table_updates(
 
 
 def _sync_requirement_data_update_state(repo, requirement_id: str, requirement, wide_table: WideTable) -> None:
-    if requirement.phase != "production":
-        repo.update_requirement(
-            requirement_id,
-            data_update_enabled=None,
-            data_update_mode=None,
-        )
-        return
     if wide_table.collection_coverage_mode == "incremental_by_business_date":
         repo.update_requirement(
             requirement_id,
@@ -596,25 +589,26 @@ def persist_wide_table_plan(
     persisted_tasks = tasks
     auto_execute_task_group_ids: list[str] = []
 
-    if requirement.phase == "production":
-        persisted_task_groups = _build_production_historical_task_groups(
-            requirement_id=requirement_id,
-            wide_table=updated_wide_table,
-            rows=rows,
-            candidate_task_groups=task_groups,
-            reference_date=date.today(),
-        )
-        persisted_tasks = [
-            task
-            for task in tasks
-            if task.task_group_id in {task_group.id for task_group in persisted_task_groups}
-        ]
-        auto_execute_task_group_ids = [task_group.id for task_group in persisted_task_groups]
+    # Demo 阶段已取消：保存计划时统一走“正式需求”行为：补齐历史任务组并自动执行。
+    persisted_task_groups = _build_production_historical_task_groups(
+        requirement_id=requirement_id,
+        wide_table=updated_wide_table,
+        rows=rows,
+        candidate_task_groups=task_groups,
+        reference_date=date.today(),
+    )
+    persisted_tasks = [
+        task
+        for task in tasks
+        if task.task_group_id in {task_group.id for task_group in persisted_task_groups}
+    ]
+    auto_execute_task_group_ids = [task_group.id for task_group in persisted_task_groups]
 
     repo.replace_wide_table_plan(wide_table_id, rows, persisted_task_groups, persisted_tasks)
 
-    if requirement.phase == "production" and requirement.status != "running":
-        repo.update_requirement(requirement_id, status="running")
+    # 进入运行态后锁定 Schema（schema_locked=True）。
+    if requirement.status != "running":
+        repo.update_requirement(requirement_id, status="running", schema_locked=True)
 
     if auto_execute_task_group_ids:
         scheduler = request.app.state.scheduler

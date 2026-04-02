@@ -199,7 +199,7 @@ export default function SchedulingPage() {
       <section className="rounded-xl border bg-card p-6">
         <h2 className="font-semibold mb-3">任务流转</h2>
         <p className="text-sm text-muted-foreground">
-          需求支持 Demo → 正式生产 的原地转换。正式需求下的宽表可将结束日期设为 never，并通过"业务日期后偏移天数"自动生成未来任务组。
+          宽表可将结束日期设为 never，并通过"业务日期后偏移天数"自动生成未来任务组。
         </p>
       </section>
     </div>

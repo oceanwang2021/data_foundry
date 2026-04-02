@@ -25,9 +25,6 @@ class SchedulerReadyGateTestCase(unittest.TestCase):
 
     def test_trigger_scheduled_skips_ready_production_requirement(self) -> None:
         repo = self.app.state.repository
-
-        response = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-004/convert")
-        self.assertEqual(response.status_code, 200)
         repo.update_requirement("REQ-2026-004", status="ready")
 
         requirement = repo.get_requirement("PROJ-001", "REQ-2026-004")

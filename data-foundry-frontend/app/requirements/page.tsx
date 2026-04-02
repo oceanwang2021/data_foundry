@@ -6,11 +6,6 @@ import type { Project, Requirement, WideTable } from "@/lib/types";
 import { fetchProjects, fetchRequirementWideTables } from "@/lib/api-client";
 import { ClipboardList, FolderKanban, ArrowRight } from "lucide-react";
 
-const typeLabel: Record<string, string> = {
-  demo: "Demo",
-  production: "正式生产",
-};
-
 export default function RequirementsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -77,10 +72,9 @@ export default function RequirementsPage() {
           <div className="rounded-lg border p-4 bg-muted/10">
             <div className="text-sm font-semibold mb-2">需求级别字段</div>
             <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
-              <li>业务目标</li>
-              <li>业务边界</li>
-
-              <li>需求类型（Demo / 正式生产）</li>
+              <li>需求标题</li>
+              <li>背景知识</li>
+              <li>业务负责人 / 执行人</li>
             </ul>
           </div>
           <div className="rounded-lg border p-4 bg-muted/10">
@@ -108,12 +102,10 @@ export default function RequirementsPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs px-2 py-1 rounded border bg-muted/30">{req.id}</span>
                 <h3 className="font-semibold">{req.title}</h3>
-                <span className="text-xs px-2 py-1 rounded border">{typeLabel[req.requirementType] ?? req.requirementType}</span>
               </div>
               <div className="grid gap-4 xl:grid-cols-3">
                 <Info title="需求信息">
-                  <p>业务目标：{req.businessGoal || "-"}</p>
-                  <p>业务边界：{req.businessBoundary || "-"}</p>
+                  <p>背景知识：{req.backgroundKnowledge ?? req.businessGoal ?? "-"}</p>
 
                 </Info>
                 <Info title="宽表与数据">

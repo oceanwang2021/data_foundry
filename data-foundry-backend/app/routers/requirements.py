@@ -77,9 +77,11 @@ def create_requirement(project_id: str, body: RequirementCreateInput, request: R
         id=req_id,
         project_id=project_id,
         title=body.title,
-        phase=body.phase,
+        # Demo 阶段已取消：新建需求一律按正式需求处理。
+        phase="production",
         parent_requirement_id=None,
-        schema_locked=body.phase == "production",
+        # Schema 在首次运行前可编辑，进入运行态后锁定。
+        schema_locked=False,
         status="draft",
         owner=body.owner,
         assignee=body.assignee,
@@ -121,28 +123,6 @@ def delete_requirement(project_id: str, requirement_id: str, request: Request):
     repo.delete_requirement(requirement_id)
 
 
-@router.post("/{requirement_id}/convert", response_model=Requirement)
-def convert_requirement(project_id: str, requirement_id: str, request: Request):
-    """Convert a demo requirement to production."""
-    repo = _repo(request)
-    existing = repo.get_requirement(project_id, requirement_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Requirement not found")
-    if existing.phase == "production":
-        return existing
-    if existing.phase != "demo":
-        raise HTTPException(status_code=400, detail="Only demo requirements can be converted")
-    if existing.wide_table is not None:
-        next_scope = existing.wide_table.scope.model_copy(deep=True)
-        if next_scope.business_date is not None and next_scope.business_date.end != "never":
-            next_scope.business_date.end = "never"
-            repo.update_wide_table(existing.wide_table.id, scope=next_scope)
-    repo.update_requirement(
-        requirement_id,
-        phase="production",
-        schema_locked=True,
-        status="scoping",
-        data_update_enabled=None,
-        data_update_mode=None,
-    )
-    return repo.get_requirement(project_id, requirement_id)
+#
+# Demo → 正式转换流程已取消：不再提供 convert 接口。
+#

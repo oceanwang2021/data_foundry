@@ -1509,14 +1509,25 @@ class DataFoundryRepository:
         )
 
     def _row_to_requirement(self, row: sqlite3.Row) -> Requirement:
+        phase = row["phase"]
+        # Demo 阶段已取消：历史数据中的 demo 一律按 production 处理。
+        if phase == "demo":
+            phase = "production"
+
+        schema_locked = bool(row["schema_locked"])
+        status = row["status"]
+        # 进入运行态后必须锁定 Schema；对历史数据做兜底修正。
+        if status in ("running", "stabilized") and not schema_locked:
+            schema_locked = True
+
         return Requirement(
             id=row["id"],
             project_id=row["project_id"],
             title=row["title"],
-            phase=row["phase"],
+            phase=phase,
             parent_requirement_id=row["parent_requirement_id"],
-            schema_locked=bool(row["schema_locked"]),
-            status=row["status"],
+            schema_locked=schema_locked,
+            status=status,
             owner=row["owner"],
             assignee=row["assignee"],
             business_goal=row["business_goal"],

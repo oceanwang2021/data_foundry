@@ -34,7 +34,7 @@ export type Project = {
 
 // ==================== 需求 ====================
 
-export type RequirementType = "demo" | "production";
+export type RequirementType = "production";
 export type RequirementDataUpdateMode = "full" | "incremental";
 export type RequirementCollectionPolicy = {
   searchEngines: SearchEngineProvider[];
@@ -52,6 +52,7 @@ export type Requirement = {
   requirementType: RequirementType;
   title: string;
   status: "draft" | "aligning" | "ready" | "running";
+  schemaLocked?: boolean;
   owner: string;
   assignee: string;
   businessGoal: string;

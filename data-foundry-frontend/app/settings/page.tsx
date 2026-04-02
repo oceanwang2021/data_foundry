@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   fetchRuntimeSettings,
-  resetDemoData,
   updateRuntimeSettings,
 } from "@/lib/api-client";
 import type { RuntimeSettings } from "@/lib/domain";
@@ -34,9 +33,6 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [isResetDemoDialogOpen, setIsResetDemoDialogOpen] = useState(false);
-  const [isResettingDemoData, setIsResettingDemoData] = useState(false);
-  const [dataActionMessage, setDataActionMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -125,21 +121,6 @@ export default function SettingsPage() {
       setMessage(`保存失败：${formatSettingsError(error)}`);
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleResetDemoData = async () => {
-    setIsResettingDemoData(true);
-    setDataActionMessage("");
-    try {
-      const result = await resetDemoData();
-      setDataActionMessage(result.message ?? "演示数据已重置");
-      setIsResetDemoDialogOpen(false);
-    } catch (error) {
-      setDataActionMessage(`重置失败：${formatSettingsError(error)}`);
-      setIsResetDemoDialogOpen(false);
-    } finally {
-      setIsResettingDemoData(false);
     }
   };
 
@@ -493,43 +474,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold">数据管理</h2>
-          <p className="text-sm text-muted-foreground">
-            管理当前系统数据。你可以将当前业务数据重置为初始演示状态。
-          </p>
-        </div>
-
-        <div className="mt-6 rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
-          重置演示数据会清空当前业务内容，并重建 2 个项目、3 个需求，以及对应的宽表、任务和知识库配置。
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setIsResetDemoDialogOpen(true)}
-            disabled={isResettingDemoData}
-            className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            重置演示数据
-          </button>
-        </div>
-
-        {dataActionMessage ? (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            {dataActionMessage}
-          </div>
-        ) : null}
-      </section>
-
-      <ResetDemoDataDialog
-        open={isResetDemoDialogOpen}
-        loading={isResettingDemoData}
-        onCancel={() => setIsResetDemoDialogOpen(false)}
-        onConfirm={() => void handleResetDemoData()}
-      />
-
       {message ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
           {message}
@@ -591,96 +535,6 @@ function FieldBlock({
         <div className="text-xs text-muted-foreground">{description}</div>
       </div>
       {children}
-    </div>
-  );
-}
-
-function ResetDemoDataDialog({
-  open,
-  loading,
-  onCancel,
-  onConfirm,
-}: {
-  open: boolean;
-  loading: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !loading) {
-        onCancel();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [loading, onCancel, open]);
-
-  if (!open) {
-    return null;
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={() => {
-        if (!loading) {
-          onCancel();
-        }
-      }}
-    >
-      <div
-        className="w-full max-w-lg rounded-xl border bg-card shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="reset-demo-data-title"
-        aria-describedby="reset-demo-data-description"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="space-y-1 border-b px-5 py-4">
-          <h4 id="reset-demo-data-title" className="text-sm font-semibold">
-            确认重置演示数据
-          </h4>
-          <p id="reset-demo-data-description" className="text-xs leading-relaxed text-muted-foreground">
-            这会清空当前业务内容，并重新生成演示数据。此操作会覆盖现有配置，确认前请先完成必要导出。
-          </p>
-        </div>
-
-        <div className="space-y-4 px-5 py-4">
-          <div className="rounded-md border bg-muted/10 p-3 text-xs text-muted-foreground space-y-1">
-            <div className="font-medium text-foreground">重置后会恢复为</div>
-            <div>2 个项目</div>
-            <div>3 个需求</div>
-            <div>对应的宽表、任务和知识库配置</div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={loading}
-              className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={loading}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? "重置中..." : "确认重置"}
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

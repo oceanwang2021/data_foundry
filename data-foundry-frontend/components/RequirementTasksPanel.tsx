@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type {
   ColumnDefinition,
@@ -19,7 +20,7 @@ import {
   persistWideTablePreview,
   retryTask,
 } from "@/lib/api-client";
-import { ListTree, RotateCcw } from "lucide-react";
+import { ChevronRight, ListTree, RotateCcw } from "lucide-react";
 import {
   buildFetchTaskCardViews,
   getVisibleNarrowTableContextColumns,
@@ -61,6 +62,7 @@ import {
   isLocalTaskId,
 } from "@/lib/requirement-task-group-actions";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
+import { generateWideTablePreviewRecords } from "@/lib/wide-table-preview";
 import {
   buildFullSnapshotTaskGroupPages,
   describeFullSnapshotScheduleRule,
@@ -94,6 +96,23 @@ const triggerLabel: Record<string, string> = {
   manual_retry: "手动重试",
 };
 
+const DEFAULT_INDICATOR_GROUP_PREFIX = "ig_default_";
+
+const buildDefaultIndicatorGroupId = (wideTableId: string) =>
+  `${DEFAULT_INDICATOR_GROUP_PREFIX}${wideTableId}`;
+
+const buildDefaultIndicatorGroup = (
+  wideTable: WideTable,
+  indicatorColumns: ColumnDefinition[],
+): WideTable["indicatorGroups"][number] => ({
+  id: buildDefaultIndicatorGroupId(wideTable.id),
+  wideTableId: wideTable.id,
+  name: "统一提示词",
+  indicatorColumns: indicatorColumns.map((column) => column.name),
+  priority: 1,
+  description: "",
+});
+
 export default function RequirementTasksPanel({
   requirement,
   wideTables,
@@ -116,8 +135,10 @@ export default function RequirementTasksPanel({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [taskActionMessage, setTaskActionMessage] = useState("");
   const [indicatorGroupMessage, setIndicatorGroupMessage] = useState("");
+  const [promptSaveMessage, setPromptSaveMessage] = useState("");
   const [isIndicatorGroupModalOpen, setIsIndicatorGroupModalOpen] = useState(false);
   const [isPersistingIndicatorGroups, setIsPersistingIndicatorGroups] = useState(false);
+  const [isPersistingPrompts, setIsPersistingPrompts] = useState(false);
   const [promptEditorModes, setPromptEditorModes] = useState<Record<string, "sections" | "markdown">>({});
   const [promptMarkdownDrafts, setPromptMarkdownDrafts] = useState<Record<string, string>>({});
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
@@ -197,64 +218,138 @@ export default function RequirementTasksPanel({
     () => selectedWt?.schema.columns.filter((column) => column.category === "indicator") ?? [],
     [selectedWt],
   );
+  const defaultIndicatorGroupId = selectedWt ? buildDefaultIndicatorGroupId(selectedWt.id) : "";
+  const userDefinedIndicatorGroups = useMemo(
+    () => (
+      selectedWt
+        ? selectedWt.indicatorGroups.filter((group) => group.id !== defaultIndicatorGroupId)
+        : []
+    ),
+    [defaultIndicatorGroupId, selectedWt],
+  );
+  const hasUserDefinedGrouping = userDefinedIndicatorGroups.length > 0;
+  const defaultIndicatorGroup = useMemo(() => {
+    if (!selectedWt) {
+      return null;
+    }
+    return (
+      selectedWt.indicatorGroups.find((group) => group.id === defaultIndicatorGroupId)
+      ?? buildDefaultIndicatorGroup(selectedWt, indicatorColumns)
+    );
+  }, [defaultIndicatorGroupId, indicatorColumns, selectedWt]);
+  const effectiveIndicatorGroups = useMemo(() => {
+    if (!selectedWt) {
+      return [];
+    }
+    if (indicatorColumns.length === 0) {
+      return [];
+    }
+    if (hasUserDefinedGrouping) {
+      return userDefinedIndicatorGroups;
+    }
+    return defaultIndicatorGroup ? [defaultIndicatorGroup] : [];
+  }, [
+    defaultIndicatorGroup,
+    hasUserDefinedGrouping,
+    indicatorColumns.length,
+    selectedWt,
+    userDefinedIndicatorGroups,
+  ]);
+  const effectiveWideTable = useMemo(
+    () => (selectedWt ? { ...selectedWt, indicatorGroups: effectiveIndicatorGroups } : null),
+    [effectiveIndicatorGroups, selectedWt],
+  );
   const columnGroupMap = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
-    for (const group of selectedWt?.indicatorGroups ?? []) {
+    for (const group of userDefinedIndicatorGroups) {
       for (const column of group.indicatorColumns) {
         map.set(column, { id: group.id, name: group.name });
       }
     }
     return map;
-  }, [selectedWt]);
+  }, [userDefinedIndicatorGroups]);
   const hasIndicatorColumns = indicatorColumns.length > 0;
-  const isPromptEditable = requirement.requirementType === "demo";
-  const isIndicatorGroupingComplete = selectedWt ? isStepBComplete(selectedWt) : false;
+  const isDefinitionSubmitted = requirement.status !== "draft";
+  const isPromptEditable = !requirement.schemaLocked;
+  const isIndicatorGroupingComplete = useMemo(() => {
+    if (!selectedWt) {
+      return false;
+    }
+    if (!hasIndicatorColumns) {
+      return true;
+    }
+    if (!hasUserDefinedGrouping) {
+      // 默认不要求分组：所有指标共享一份采集提示词。
+      return true;
+    }
+    return isStepBComplete({ ...selectedWt, indicatorGroups: userDefinedIndicatorGroups });
+  }, [hasIndicatorColumns, hasUserDefinedGrouping, selectedWt, userDefinedIndicatorGroups]);
   const hasPreviewRecords = currentWideTableRecords.length > 0;
   const currentTaskPlanFingerprint = useMemo(
     () => (
-      selectedWt && hasPreviewRecords
-        ? buildTaskPlanFingerprint(selectedWt, currentWideTableRecords)
+      effectiveWideTable && hasPreviewRecords
+        ? buildTaskPlanFingerprint(effectiveWideTable, currentWideTableRecords)
         : ""
     ),
-    [currentWideTableRecords, hasPreviewRecords, selectedWt],
+    [currentWideTableRecords, effectiveWideTable, hasPreviewRecords],
   );
   const isIndicatorGroupingDirty = Boolean(
-    selectedWt
-    && hasPreviewRecords
+    hasUserDefinedGrouping
+    && selectedWt
     && isIndicatorGroupingComplete
+    && hasPreviewRecords
     && selectedWt.currentPlanFingerprint
     && selectedWt.currentPlanFingerprint !== currentTaskPlanFingerprint,
   );
   const canGenerateTaskPlan = Boolean(
     selectedWt
     && isIndicatorGroupingComplete
-    && hasPreviewRecords
-    && !isIndicatorGroupingDirty,
+    && !isIndicatorGroupingDirty
+    && isDefinitionSubmitted,
   );
-  const needsProductionScopeRefresh = requirement.requirementType === "production" && requirement.status === "aligning";
-  const taskPlanBlockerMessage = needsProductionScopeRefresh
-    ? "请先回到【定义】Tab 调整维度范围并确认，正式任务组才会生成。"
+  const needsScopeRefresh = requirement.status === "aligning";
+  const taskPlanBlockerMessage = needsScopeRefresh
+    ? "范围配置已变更。请先回到【需求】Tab 调整数据范围并保存后，再回到这里生成任务组。"
+    : !isDefinitionSubmitted
+      ? "请先在【需求】Tab 提交需求后，再进入任务环节配置指标分组并生成任务组。"
     : !hasIndicatorColumns
       ? "当前宽表没有指标列，暂不需要任务组拆分。"
-      : !hasPreviewRecords
-        ? "请先回到【定义】Tab 确认范围并生成预览，再到这里生成任务组。"
-        : isIndicatorGroupingDirty
+    : isIndicatorGroupingDirty
           ? "指标分组已修改，请先保存分组并重建任务组。"
-        : !isIndicatorGroupingComplete
+        : hasUserDefinedGrouping && !isIndicatorGroupingComplete
           ? "请先完成指标分组并覆盖全部指标列，任务组才会按“宽表行 × 指标组”正确拆分。"
           : "";
+  const promptEditorGroups = useMemo(() => {
+    if (!selectedWt) {
+      return [] as WideTable["indicatorGroups"];
+    }
+    if (!hasIndicatorColumns) {
+      return [] as WideTable["indicatorGroups"];
+    }
+    return hasUserDefinedGrouping
+      ? userDefinedIndicatorGroups
+      : defaultIndicatorGroup
+        ? [defaultIndicatorGroup]
+        : [];
+  }, [
+    defaultIndicatorGroup,
+    hasIndicatorColumns,
+    hasUserDefinedGrouping,
+    selectedWt,
+    userDefinedIndicatorGroups,
+  ]);
   const indicatorGroupPromptMap = useMemo(
     () => (
-      !selectedWt
+      !effectiveWideTable
         ? new Map<string, ReturnType<typeof buildIndicatorGroupPrompt>>()
         : new Map(
-            selectedWt.indicatorGroups.map((group) => [
+            promptEditorGroups.map((group) => [
               group.id,
-              buildIndicatorGroupPrompt(requirement, selectedWt, group),
+              buildIndicatorGroupPrompt(requirement, effectiveWideTable, group),
             ]),
           )
     ),
-    [requirement, selectedWt],
+    [effectiveWideTable, promptEditorGroups, requirement],
   );
   const updateSelectedWideTable = (updater: (wideTable: WideTable) => WideTable) => {
     if (!selectedWt || !onUpdateWideTable) {
@@ -265,7 +360,7 @@ export default function RequirementTasksPanel({
 
   const wtTaskGroups = useMemo(
     () => (
-      needsProductionScopeRefresh || !canGenerateTaskPlan
+      needsScopeRefresh || !canGenerateTaskPlan
         ? []
         : taskGroups
             .filter(
@@ -275,7 +370,7 @@ export default function RequirementTasksPanel({
             )
             .sort((a, b) => b.businessDate.localeCompare(a.businessDate))
     ),
-    [canGenerateTaskPlan, currentPlanVersion, needsProductionScopeRefresh, selectedWtId, taskGroups],
+    [canGenerateTaskPlan, currentPlanVersion, needsScopeRefresh, selectedWtId, taskGroups],
   );
 
   const archivedTaskGroups = useMemo(
@@ -316,7 +411,7 @@ export default function RequirementTasksPanel({
               const fallbackSummary = buildTaskGroupExecutionSummary(taskGroup, scopedFetchTasks);
               const taskCards = buildFetchTaskCardViews({
                 requirement,
-                wideTable: selectedWt,
+                wideTable: effectiveWideTable ?? undefined,
                 taskGroup,
                 fetchTasks: scopedFetchTasks,
                 wideTableRecords: currentWideTableRecords,
@@ -331,19 +426,19 @@ export default function RequirementTasksPanel({
             }),
           )
     ),
-    [currentWideTableRecords, fetchTasks, selectedWt, wtTaskGroups],
+    [currentWideTableRecords, effectiveWideTable, fetchTasks, wtTaskGroups],
   );
   const taskPlan = useMemo(
-    () => (selectedWt && isIndicatorGroupingComplete ? buildTaskPlanView(selectedWt) : null),
-    [isIndicatorGroupingComplete, selectedWt],
+    () => (effectiveWideTable && isIndicatorGroupingComplete ? buildTaskPlanView(effectiveWideTable) : null),
+    [effectiveWideTable, isIndicatorGroupingComplete],
   );
   const taskGroupRunViews = useMemo(
     () => (
-      selectedWt && taskPlan && canGenerateTaskPlan
-        ? buildTaskGroupRunViews(requirement, selectedWt, taskPlan, wtTaskGroups, taskGroupSummaryMap, wtScheduleJobs)
+      effectiveWideTable && taskPlan && canGenerateTaskPlan
+        ? buildTaskGroupRunViews(requirement, effectiveWideTable, taskPlan, wtTaskGroups, taskGroupSummaryMap, wtScheduleJobs)
         : []
     ),
-    [canGenerateTaskPlan, requirement, selectedWt, taskPlan, wtScheduleJobs, wtTaskGroups, taskGroupSummaryMap],
+    [canGenerateTaskPlan, effectiveWideTable, requirement, taskPlan, wtScheduleJobs, wtTaskGroups, taskGroupSummaryMap],
   );
   const expandedTaskGroupView = useMemo(
     () => taskGroupRunViews.find((taskGroup) => taskGroup.id === expandedTgId) ?? null,
@@ -357,12 +452,12 @@ export default function RequirementTasksPanel({
     () =>
       buildFetchTaskCardViews({
         requirement,
-        wideTable: selectedWt,
+        wideTable: effectiveWideTable ?? undefined,
         taskGroup: expandedTaskGroupView?.taskGroupForTasks ?? null,
         fetchTasks: tgFetchTasks,
         wideTableRecords: currentWideTableRecords,
       }),
-    [currentWideTableRecords, selectedWt, expandedTaskGroupView, tgFetchTasks],
+    [currentWideTableRecords, effectiveWideTable, expandedTaskGroupView, tgFetchTasks, requirement],
   );
   const selectedTask = useMemo(
     () => expandedTaskCards.find((task) => task.id === selectedTaskId) ?? null,
@@ -376,48 +471,59 @@ export default function RequirementTasksPanel({
   useEffect(() => {
     setIndicatorGroupMessage("");
     setIsIndicatorGroupModalOpen(false);
+    setPromptSaveMessage("");
     setPromptEditorModes({});
     setPromptMarkdownDrafts({});
   }, [selectedWtId]);
 
-  const initializePromptEditorState = (wideTable: WideTable) => {
-    setPromptMarkdownDrafts(
-      Object.fromEntries(
-        wideTable.indicatorGroups.map((group) => [
-          group.id,
-          buildIndicatorGroupPrompt(requirement, wideTable, group).markdown,
-        ]),
-      ),
-    );
-    setPromptEditorModes((current) => (
-      Object.fromEntries(
-        wideTable.indicatorGroups.map((group) => [
-          group.id,
-          current[group.id] ?? "sections",
-        ]),
-      )
-    ));
-  };
+  useEffect(() => {
+    if (!selectedWt) {
+      return;
+    }
+
+    const baseWideTable = effectiveWideTable ?? selectedWt;
+    setPromptEditorModes((current) => {
+      const next = { ...current };
+      for (const group of promptEditorGroups) {
+        next[group.id] = next[group.id] ?? "sections";
+      }
+      return next;
+    });
+
+    setPromptMarkdownDrafts((current) => {
+      const next = { ...current };
+      for (const group of promptEditorGroups) {
+        next[group.id] = next[group.id] ?? buildIndicatorGroupPrompt(requirement, baseWideTable, group).markdown;
+      }
+      return next;
+    });
+  }, [effectiveWideTable, promptEditorGroups, requirement, selectedWt]);
 
   const handleAddIndicatorGroup = () => {
     if (!selectedWt) {
       return;
     }
 
-    const nextIndex = selectedWt.indicatorGroups.length + 1;
     updateSelectedWideTable((wideTable) => ({
       ...wideTable,
-      indicatorGroups: [
-        ...wideTable.indicatorGroups,
-        {
-          id: `ig_${wideTable.id}_${Date.now()}`,
-          wideTableId: wideTable.id,
-          name: `新指标组${nextIndex}`,
-          indicatorColumns: [],
-          priority: nextIndex,
-          description: "",
-        },
-      ],
+      indicatorGroups: (() => {
+        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
+        const existingUserGroups = wideTable.indicatorGroups.filter(
+          (group) => group.id !== defaultGroupId,
+        );
+        const nextIndex = existingUserGroups.length + 1;
+        return [
+          ...existingUserGroups,
+          {
+            id: `ig_${wideTable.id}_${Date.now()}`,
+            wideTableId: wideTable.id,
+            name: `新指标组${nextIndex}`,
+            indicatorColumns: [],
+            priority: nextIndex,
+            description: "",
+          },
+        ];
+      })(),
       updatedAt: new Date().toISOString(),
     }));
   };
@@ -425,12 +531,15 @@ export default function RequirementTasksPanel({
   const handleDeleteIndicatorGroup = (groupId: string) => {
     updateSelectedWideTable((wideTable) => ({
       ...wideTable,
-      indicatorGroups: wideTable.indicatorGroups
-        .filter((group) => group.id !== groupId)
-        .map((group, index) => ({
-          ...group,
-          priority: index + 1,
-        })),
+      indicatorGroups: (() => {
+        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
+        return wideTable.indicatorGroups
+          .filter((group) => group.id !== defaultGroupId && group.id !== groupId)
+          .map((group, index) => ({
+            ...group,
+            priority: index + 1,
+          }));
+      })(),
       updatedAt: new Date().toISOString(),
     }));
   };
@@ -455,18 +564,31 @@ export default function RequirementTasksPanel({
   ) => {
     updateSelectedWideTable((wideTable) => ({
       ...wideTable,
-      indicatorGroups: wideTable.indicatorGroups.map((group) => (
-        group.id === groupId
-          ? {
-              ...group,
-              promptConfig: {
-                ...(group.promptConfig ?? {}),
-                [key]: value,
-                lastEditedAt: new Date().toISOString(),
-              },
-            }
-          : group
-      )),
+      indicatorGroups: (() => {
+        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
+        const hasTarget = wideTable.indicatorGroups.some((group) => group.id === groupId);
+        const indicatorColumnsForDefault = wideTable.schema.columns.filter(
+          (column) => column.category === "indicator",
+        );
+        const hydratedGroups = (
+          !hasTarget && groupId === defaultGroupId
+            ? [...wideTable.indicatorGroups, buildDefaultIndicatorGroup(wideTable, indicatorColumnsForDefault)]
+            : wideTable.indicatorGroups
+        );
+
+        return hydratedGroups.map((group) => (
+          group.id === groupId
+            ? {
+                ...group,
+                promptConfig: {
+                  ...(group.promptConfig ?? {}),
+                  [key]: value,
+                  lastEditedAt: new Date().toISOString(),
+                },
+              }
+            : group
+        ));
+      })(),
       updatedAt: new Date().toISOString(),
     }));
   };
@@ -475,7 +597,23 @@ export default function RequirementTasksPanel({
     wideTable: WideTable,
     editedAt: string,
   ): WideTable => {
-    const indicatorGroups = wideTable.indicatorGroups.map((group) => {
+    const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
+    const schemaIndicatorColumns = wideTable.schema.columns.filter(
+      (column) => column.category === "indicator",
+    );
+    const storedDefaultGroup = wideTable.indicatorGroups.find(
+      (group) => group.id === defaultGroupId,
+    );
+    const userGroups = wideTable.indicatorGroups.filter(
+      (group) => group.id !== defaultGroupId,
+    );
+    const baseGroups = userGroups.length > 0
+      ? userGroups
+      : schemaIndicatorColumns.length > 0
+        ? [storedDefaultGroup ?? buildDefaultIndicatorGroup(wideTable, schemaIndicatorColumns)]
+        : [];
+
+    const indicatorGroups = baseGroups.map((group) => {
       const editMode = promptEditorModes[group.id] ?? "sections";
       let nextGroup = group;
 
@@ -521,22 +659,57 @@ export default function RequirementTasksPanel({
     };
   };
 
+  const handlePersistPromptTemplates = async () => {
+    if (!selectedWt) {
+      return;
+    }
+
+    if (!isDefinitionSubmitted) {
+      setPromptSaveMessage("请先在【需求】Tab 提交需求后再配置采集提示词。");
+      return;
+    }
+
+    if (!isPromptEditable) {
+      setPromptSaveMessage("提示词已锁定为只读；如需调整，请先回到需求侧修改并重新生成计划。");
+      return;
+    }
+
+    setIsPersistingPrompts(true);
+    try {
+      const now = new Date().toISOString();
+      const nextWideTable = buildWideTableWithPromptDrafts(selectedWt, now);
+      await persistWideTablePreview(requirement.id, nextWideTable, currentWideTableRecords);
+      updateSelectedWideTable(() => nextWideTable);
+      setPromptSaveMessage("已保存采集提示词配置。");
+      await onRefreshData?.();
+    } catch (error) {
+      setPromptSaveMessage(`保存失败：${formatTaskActionError(error)}`);
+    } finally {
+      setIsPersistingPrompts(false);
+    }
+  };
+
   const handleAssignIndicatorColumnToGroup = (columnName: string, groupId: string) => {
     updateSelectedWideTable((wideTable) => ({
       ...wideTable,
-      indicatorGroups: wideTable.indicatorGroups.map((group) => {
-        const nextColumns = group.indicatorColumns.filter((column) => column !== columnName);
-        if (group.id === groupId) {
-          return {
-            ...group,
-            indicatorColumns: [...nextColumns, columnName],
-          };
-        }
-        return {
-          ...group,
-          indicatorColumns: nextColumns,
-        };
-      }),
+      indicatorGroups: (() => {
+        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
+        return wideTable.indicatorGroups
+          .filter((group) => group.id !== defaultGroupId)
+          .map((group) => {
+            const nextColumns = group.indicatorColumns.filter((column) => column !== columnName);
+            if (group.id === groupId) {
+              return {
+                ...group,
+                indicatorColumns: [...nextColumns, columnName],
+              };
+            }
+            return {
+              ...group,
+              indicatorColumns: nextColumns,
+            };
+          });
+      })(),
       updatedAt: new Date().toISOString(),
     }));
   };
@@ -544,16 +717,76 @@ export default function RequirementTasksPanel({
   const handleClearIndicatorColumnGroup = (columnName: string) => {
     updateSelectedWideTable((wideTable) => ({
       ...wideTable,
-      indicatorGroups: wideTable.indicatorGroups.map((group) => ({
-        ...group,
-        indicatorColumns: group.indicatorColumns.filter((column) => column !== columnName),
-      })),
+      indicatorGroups: (() => {
+        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
+        return wideTable.indicatorGroups
+          .filter((group) => group.id !== defaultGroupId)
+          .map((group) => ({
+            ...group,
+            indicatorColumns: group.indicatorColumns.filter((column) => column !== columnName),
+          }));
+      })(),
       updatedAt: new Date().toISOString(),
     }));
   };
 
+  const ensurePreviewRows = async (wideTable: WideTable, now: string) => {
+    if (currentWideTableRecords.length > 0) {
+      return { wideTable, records: currentWideTableRecords };
+    }
+
+    const { records, totalCount } = generateWideTablePreviewRecords(wideTable, currentWideTableRecords, wideTableRecords);
+    if (totalCount === 0) {
+      throw new Error(
+        usesBusinessDateAxis
+          ? "当前业务日期范围或维度取值不足，无法生成预览行。请先回到【需求】完善数据范围。"
+          : "当前维度取值不足，无法生成快照预览行。请先回到【需求】完善数据范围。",
+      );
+    }
+
+    const reconciliation = reconcileTaskPlanChange({
+      requirement,
+      wideTable,
+      previousRecords: currentWideTableRecords,
+      nextRecords: records,
+      taskGroups,
+      fetchTasks,
+    });
+    const nextPlanVersion = reconciliation.nextPlanVersion || Math.max(
+      1,
+      resolveCurrentPlanVersion(wideTable, currentWideTableRecords, taskGroups),
+    );
+    const nextPlanFingerprint = reconciliation.nextPlanFingerprint || buildTaskPlanFingerprint(wideTable, records);
+    const recordsToPersist = records.map((record) => ({
+      ...record,
+      _metadata: {
+        ...record._metadata,
+        planVersion: nextPlanVersion,
+        snapshotKind: "baseline" as const,
+      },
+    }));
+    const persistedWideTable: WideTable = {
+      ...wideTable,
+      currentPlanVersion: nextPlanVersion,
+      currentPlanFingerprint: nextPlanFingerprint,
+      recordCount: totalCount,
+      status: wideTable.status === "active" ? "active" : "initialized",
+      updatedAt: now,
+    };
+
+    await persistWideTablePreview(requirement.id, persistedWideTable, recordsToPersist);
+    updateSelectedWideTable(() => persistedWideTable);
+    onReplaceWideTableRecords?.(wideTable.id, recordsToPersist);
+    return { wideTable: persistedWideTable, records: recordsToPersist };
+  };
+
   const handlePersistIndicatorGroups = async () => {
     if (!selectedWt) {
+      return;
+    }
+
+    if (!isDefinitionSubmitted) {
+      setIndicatorGroupMessage("请先在【需求】Tab 提交需求后再配置指标分组并生成任务组。");
       return;
     }
 
@@ -567,40 +800,40 @@ export default function RequirementTasksPanel({
 
     setIsPersistingIndicatorGroups(true);
     try {
-      if (!isIndicatorGroupingComplete || !hasPreviewRecords) {
+      if (!isIndicatorGroupingComplete) {
         await persistWideTablePreview(requirement.id, nextWideTable, currentWideTableRecords);
         updateSelectedWideTable(() => nextWideTable);
-        setIndicatorGroupMessage(
-          !hasPreviewRecords
-            ? "已保存指标分组草稿。请先回到【定义】Tab 确认范围并生成预览，再生成任务组。"
-            : "已保存指标分组草稿。请把所有指标分配到分组后，再生成任务组。",
-        );
+        setIndicatorGroupMessage("已保存指标分组草稿。请把所有指标分配到分组后，再保存并生成任务组。");
         return;
       }
 
+      const ensuredPreview = await ensurePreviewRows(nextWideTable, now);
+      const previewWideTable = ensuredPreview.wideTable;
+      const previewRecords = ensuredPreview.records;
+
       const reconciliation = reconcileTaskPlanChange({
         requirement,
-        wideTable: nextWideTable,
-        previousRecords: currentWideTableRecords,
-        nextRecords: currentWideTableRecords,
+        wideTable: previewWideTable,
+        previousRecords: previewRecords,
+        nextRecords: previewRecords,
         taskGroups,
         fetchTasks,
       });
       const nextPlanVersion = reconciliation.nextPlanVersion || Math.max(
         1,
-        resolveCurrentPlanVersion(nextWideTable, currentWideTableRecords, taskGroups),
+        resolveCurrentPlanVersion(previewWideTable, previewRecords, taskGroups),
       );
       const nextPlanFingerprint = reconciliation.nextPlanFingerprint || buildTaskPlanFingerprint(
-        nextWideTable,
-        currentWideTableRecords,
+        previewWideTable,
+        previewRecords,
       );
-      const annotatedRecords = annotateCurrentPlanRecords(currentWideTableRecords, nextPlanVersion);
+      const annotatedRecords = annotateCurrentPlanRecords(previewRecords, nextPlanVersion);
       const persistedWideTable: WideTable = {
-        ...nextWideTable,
+        ...previewWideTable,
         currentPlanVersion: nextPlanVersion,
         currentPlanFingerprint: nextPlanFingerprint,
-        recordCount: nextWideTable.recordCount > 0 ? nextWideTable.recordCount : annotatedRecords.length,
-        status: nextWideTable.status === "active" ? "active" : "initialized",
+        recordCount: previewWideTable.recordCount > 0 ? previewWideTable.recordCount : annotatedRecords.length,
+        status: previewWideTable.status === "active" ? "active" : "initialized",
         updatedAt: now,
       };
 
@@ -623,16 +856,17 @@ export default function RequirementTasksPanel({
         await persistWideTablePreview(
           requirement.id,
           persistedWideTable,
-          currentWideTableRecords,
+          annotatedRecords,
         );
         setIndicatorGroupMessage("已保存指标分组配置，当前任务计划无需重建。");
       }
 
       updateSelectedWideTable(() => persistedWideTable);
-      if (requirement.requirementType === "production" && requirement.status !== "running") {
+      if (reconciliation.structuralChange && requirement.status !== "running") {
         onRequirementChange?.({
           ...requirement,
           status: "running",
+          schemaLocked: true,
           updatedAt: now,
         });
       }
@@ -699,7 +933,7 @@ export default function RequirementTasksPanel({
     onTaskGroupRunsChange([...scheduleJobs, runRecord]);
     setRunningTaskGroupIds((prev) => (prev.includes(taskGroupView.id) ? prev : [...prev, taskGroupView.id]));
       setTaskActionMessage(
-        requirement.requirementType === "demo" && (taskGroupView.displayStatus === "pending" || taskGroupView.displayStatus === "invalidated")
+        taskGroupView.displayStatus === "pending" || taskGroupView.displayStatus === "invalidated"
         ? `已发起任务组 ${taskGroupView.displayLabel} 的手动执行，正在同步最新结果。`
         : `已发起任务组 ${taskGroupView.displayLabel} 的整组重执行，正在同步最新结果。`,
       );
@@ -783,17 +1017,33 @@ export default function RequirementTasksPanel({
 
   return (
     <div className="space-y-6">
+      {!isDefinitionSubmitted ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-2">
+          <div className="font-semibold">需求尚未提交</div>
+          <div>
+            提交需求后才能进入任务环节并生成任务组。请先回到需求页面完成录入并点击“提交”。
+          </div>
+          <div>
+            <Link
+              href={`/projects/${requirement.projectId}/requirements/${requirement.id}?view=requirement&tab=requirement`}
+              className="text-amber-900 underline underline-offset-4 hover:opacity-80"
+            >
+              去提交需求
+            </Link>
+          </div>
+        </section>
+      ) : null}
       <section className="rounded-xl border bg-card p-6 space-y-4">
         <div className="flex items-center gap-2">
           <ListTree className="h-4 w-4 text-primary" />
           <h2 className="font-semibold">执行</h2>
         </div>
         <p className="text-xs text-muted-foreground">
-          指标分组属于执行层配置，用来降低单次 Agent 请求的心智负担。只有先完成指标分组，系统才能按“宽表行 × 指标组”正确生成任务组。
+          默认情况下不要求对指标分组，系统会用统一提示词生成任务组；如需对不同指标组配置不同提示词，可通过指标分组将指标拆分后再生成任务组。
         </p>
-        {needsProductionScopeRefresh ? (
+        {needsScopeRefresh ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            当前需求刚转为正式。请先回到【定义】Tab 调整维度范围并确认，再回到这里配置指标分组并生成正式任务组。
+            请先回到【需求】确认数据范围与时间范围，再回到这里配置指标分组并生成任务组。
           </div>
         ) : null}
       </section>
@@ -823,17 +1073,68 @@ export default function RequirementTasksPanel({
 
       {selectedWt ? (
         <section className="rounded-xl border bg-card p-6 space-y-4">
-          <div>
-            <h3 className="font-semibold">指标分组</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              指标分组决定单次任务的执行边界，也是生成任务组前的阻塞条件。
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">待采集指标</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                默认不对指标进行分组，所有指标共享一份采集提示词；如有需要，可通过【指标分组】拆分成多个指标组，每个指标组的提示词独立配置。
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsIndicatorGroupModalOpen(true)}
+                disabled={!hasIndicatorColumns || !isDefinitionSubmitted}
+                className={cn(
+                  "rounded-md border px-3 py-1.5 text-xs",
+                  !hasIndicatorColumns || !isDefinitionSubmitted
+                    ? "cursor-not-allowed text-muted-foreground opacity-50"
+                    : "text-primary hover:bg-primary/5",
+                )}
+              >
+                指标分组
+              </button>
+              <button
+                type="button"
+                onClick={() => void handlePersistIndicatorGroups()}
+                disabled={!canGenerateTaskPlan || needsScopeRefresh || isPersistingIndicatorGroups}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium",
+                  !canGenerateTaskPlan || needsScopeRefresh || isPersistingIndicatorGroups
+                    ? "cursor-not-allowed bg-muted text-muted-foreground"
+                    : "bg-primary text-primary-foreground hover:opacity-90",
+                )}
+              >
+                {isPersistingIndicatorGroups
+                  ? "生成中..."
+                  : hasCurrentVersionTaskGroups ? "重建任务组" : "生成任务组"}
+              </button>
+            </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <PlanMetricCard title="指标列数" value={String(indicatorColumns.length)} hint={selectedWt.name} />
-            <PlanMetricCard title="已建分组" value={String(selectedWt.indicatorGroups.length)} hint={selectedWt.indicatorGroups.map((group) => group.name).join("、") || "尚未配置"} />
-            <PlanMetricCard title="分组完成度" value={isIndicatorGroupingComplete ? "已完成" : "待补齐"} hint={hasPreviewRecords ? "完成后可生成任务组" : "请先准备预览数据"} />
+          <div className="rounded-lg border bg-background p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div>
+                共 {indicatorColumns.length} 个指标
+                {hasUserDefinedGrouping ? ` · 已分组 ${userDefinedIndicatorGroups.length} 组` : " · 未分组"}
+              </div>
+              <div className="truncate">{selectedWt.name}</div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {indicatorColumns.length === 0 ? (
+                <span className="text-xs text-muted-foreground">当前宽表没有指标列。</span>
+              ) : (
+                indicatorColumns.map((column) => (
+                  <span
+                    key={column.id}
+                    className="rounded-full border bg-muted/10 px-2 py-1 text-[11px]"
+                    title={column.description || ""}
+                  >
+                    {column.chineseName ?? column.name}{column.unit ? `（${column.unit}）` : ""}
+                  </span>
+                ))
+              )}
+            </div>
           </div>
 
           {indicatorGroupMessage ? (
@@ -844,43 +1145,24 @@ export default function RequirementTasksPanel({
 
           {!hasIndicatorColumns ? (
             <div className="text-sm text-muted-foreground">当前宽表没有指标列，暂不需要指标分组。</div>
-          ) : (
+          ) : hasUserDefinedGrouping ? (
             <div className="space-y-4">
               <div className="rounded-lg border">
-                <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/20 px-4 py-3">
-                  <div>
-                    <h4 className="text-sm font-semibold">分组概览</h4>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      页面内只展示分组结果，不直接编辑。不同颜色对应不同分组，与弹窗内保持一致。
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!selectedWt) {
-                        return;
-                      }
-                      initializePromptEditorState(selectedWt);
-                      setIsIndicatorGroupModalOpen(true);
-                    }}
-                    disabled={!selectedWt || !hasIndicatorColumns}
-                    className={cn(
-                      "rounded-md border px-3 py-1.5 text-xs",
-                      !selectedWt || !hasIndicatorColumns
-                        ? "cursor-not-allowed text-muted-foreground opacity-50"
-                        : "text-primary hover:bg-primary/5",
-                    )}
-                  >
-                    分组管理
-                  </button>
+                <div className="border-b bg-muted/20 px-4 py-3">
+                  <h4 className="text-sm font-semibold">分组概览</h4>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    仅当你对指标进行分组后才会展示分组结果。不同颜色对应不同分组，与弹窗内保持一致。
+                  </p>
                 </div>
                 <div className="space-y-3 px-4 py-4">
-                  {selectedWt.indicatorGroups.length > 0 ? (
-                    <div className="grid gap-3 lg:grid-cols-2">
-                      {selectedWt.indicatorGroups.map((group) => (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {userDefinedIndicatorGroups
+                      .slice()
+                      .sort((a, b) => a.priority - b.priority)
+                      .map((group) => (
                         <div
                           key={group.id}
-                          className={cn("rounded-lg border px-4 py-3", groupToneClass(group.id, selectedWt.indicatorGroups))}
+                          className={cn("rounded-lg border px-4 py-3", groupToneClass(group.id, userDefinedIndicatorGroups))}
                         >
                           <div className="text-sm font-medium">{group.name}</div>
                           <div className="mt-1 text-[11px] opacity-80">
@@ -891,7 +1173,7 @@ export default function RequirementTasksPanel({
                               group.indicatorColumns.map((columnName) => (
                                 <span
                                   key={columnName}
-                                  className={cn("rounded-full border px-2 py-1 text-[11px]", groupToneClass(group.id, selectedWt.indicatorGroups))}
+                                  className={cn("rounded-full border px-2 py-1 text-[11px]", groupToneClass(group.id, userDefinedIndicatorGroups))}
                                 >
                                   {findIndicatorColumnLabel(indicatorColumns, columnName)}
                                 </span>
@@ -902,12 +1184,7 @@ export default function RequirementTasksPanel({
                           </div>
                         </div>
                       ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-                      还没有指标分组。点击右上角“分组管理”开始配置。
-                    </div>
-                  )}
+                  </div>
 
                   {indicatorColumns.some((column) => !columnGroupMap.has(column.name)) ? (
                     <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
@@ -929,6 +1206,17 @@ export default function RequirementTasksPanel({
                 </div>
               ) : null}
             </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-dashed bg-background px-4 py-6 text-sm text-muted-foreground">
+                当前未对指标进行分组，系统将使用统一提示词采集全部指标。如需按不同指标组配置提示词，请点击右上角【指标分组】。
+              </div>
+              {taskPlanBlockerMessage ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {taskPlanBlockerMessage}
+                </div>
+              ) : null}
+            </div>
           )}
         </section>
       ) : null}
@@ -940,17 +1228,17 @@ export default function RequirementTasksPanel({
               <div>
                 <h4 className="text-sm font-semibold">分组管理</h4>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  在这里统一维护分组名称、执行说明、指标归属，以及各指标组对应的 Agent 提示词。
+                    在这里统一维护分组名称、执行说明与指标归属。采集提示词请在下方【采集提示词管理】模块中配置。
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleAddIndicatorGroup}
-                  disabled={!selectedWt || !hasIndicatorColumns || isPersistingIndicatorGroups}
+                  disabled={!selectedWt || !hasIndicatorColumns || !isDefinitionSubmitted || isPersistingIndicatorGroups}
                   className={cn(
                     "rounded-md border px-3 py-1.5 text-xs",
-                    !selectedWt || !hasIndicatorColumns || isPersistingIndicatorGroups
+                    !selectedWt || !hasIndicatorColumns || !isDefinitionSubmitted || isPersistingIndicatorGroups
                       ? "cursor-not-allowed text-muted-foreground opacity-50"
                       : "text-primary hover:bg-primary/5",
                   )}
@@ -960,17 +1248,17 @@ export default function RequirementTasksPanel({
                 <button
                   type="button"
                   onClick={() => void handlePersistIndicatorGroups()}
-                  disabled={!selectedWt || isPersistingIndicatorGroups}
+                  disabled={!selectedWt || !isDefinitionSubmitted || isPersistingIndicatorGroups}
                   className={cn(
                     "rounded-md px-3 py-1.5 text-xs font-medium",
-                    !selectedWt || isPersistingIndicatorGroups
+                    !selectedWt || !isDefinitionSubmitted || isPersistingIndicatorGroups
                       ? "cursor-not-allowed bg-muted text-muted-foreground"
                       : "bg-primary text-primary-foreground hover:opacity-90",
                   )}
                 >
                   {isPersistingIndicatorGroups
                     ? "保存中..."
-                    : hasPreviewRecords && isIndicatorGroupingComplete
+                    : isIndicatorGroupingComplete
                       ? hasCurrentVersionTaskGroups ? "保存分组并重建任务组" : "保存分组并生成任务组"
                       : "保存分组"}
                 </button>
@@ -985,11 +1273,11 @@ export default function RequirementTasksPanel({
             </div>
 
             <div className="max-h-[80vh] space-y-4 overflow-y-auto px-5 py-4">
-              <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
-                {isPromptEditable
-                  ? "提示词支持分段编辑和整体 Markdown 编辑。默认内容来自需求定义，Demo 阶段可以在弹窗内直接改写。"
-                  : "当前为正式需求阶段。提示词仅展示，不允许在执行阶段继续编辑。"}
-              </div>
+                <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
+                  {isPromptEditable
+                    ? "提示词支持分段编辑和整体 Markdown 编辑。默认内容来自需求定义，可在弹窗内直接改写。"
+                    : "提示词已锁定为只读展示；如需调整，请先回到需求侧修改并重新生成计划。"}
+                </div>
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full text-xs">
                   <thead className="border-b bg-muted/30">
@@ -1019,11 +1307,11 @@ export default function RequirementTasksPanel({
                             }}
                             className={cn(
                               "w-full rounded-md border px-3 py-2 text-xs",
-                              groupSelectClass(columnGroupMap.get(column.name)?.id, selectedWt.indicatorGroups),
+                              groupSelectClass(columnGroupMap.get(column.name)?.id, userDefinedIndicatorGroups),
                             )}
                           >
                             <option value="">未分组</option>
-                            {selectedWt.indicatorGroups.map((group) => (
+                            {userDefinedIndicatorGroups.map((group) => (
                               <option key={group.id} value={group.id}>
                                 {group.name}
                               </option>
@@ -1036,25 +1324,21 @@ export default function RequirementTasksPanel({
                 </table>
               </div>
 
-              {selectedWt.indicatorGroups.length === 0 ? (
+              {userDefinedIndicatorGroups.length === 0 ? (
                 <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-sm text-muted-foreground">
                   还没有指标分组。请先新增分组，并把所有指标列分配进去。
                 </div>
               ) : (
                 <div className="grid gap-3 lg:grid-cols-2">
-                  {selectedWt.indicatorGroups.map((group) => {
-                    const promptBundle = indicatorGroupPromptMap.get(group.id)
-                      ?? buildIndicatorGroupPrompt(requirement, selectedWt, group);
-                    const editMode = promptEditorModes[group.id] ?? "sections";
-                    const markdownDraft = promptMarkdownDrafts[group.id] ?? promptBundle.markdown;
+                  {userDefinedIndicatorGroups.map((group) => {
                     return (
-                      <div key={group.id} className={cn("rounded-lg border bg-background p-4 space-y-3", groupToneClass(group.id, selectedWt.indicatorGroups))}>
+                      <div key={group.id} className={cn("rounded-lg border bg-background p-4 space-y-3", groupToneClass(group.id, userDefinedIndicatorGroups))}>
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 space-y-2">
                             <input
                               value={group.name}
                               onChange={(event) => handleIndicatorGroupChange(group.id, { name: event.target.value })}
-                              className={cn("w-full rounded-md border bg-background px-3 py-2 text-sm", groupToneClass(group.id, selectedWt.indicatorGroups))}
+                              className={cn("w-full rounded-md border bg-background px-3 py-2 text-sm", groupToneClass(group.id, userDefinedIndicatorGroups))}
                               placeholder="指标组名称"
                             />
                             <textarea
@@ -1081,115 +1365,13 @@ export default function RequirementTasksPanel({
                             group.indicatorColumns.map((columnName) => (
                               <span
                                 key={columnName}
-                                className={cn("rounded-full border px-2 py-1 text-[11px]", groupToneClass(group.id, selectedWt.indicatorGroups))}
+                                className={cn("rounded-full border px-2 py-1 text-[11px]", groupToneClass(group.id, userDefinedIndicatorGroups))}
                               >
                                 {findIndicatorColumnLabel(indicatorColumns, columnName)}
                               </span>
                             ))
                           ) : (
                             <span className="text-[11px] text-muted-foreground">该分组还没有分配指标。</span>
-                          )}
-                        </div>
-
-                        <div className="rounded-lg border bg-muted/10 p-3 space-y-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-sm font-medium">Agent 提示词</div>
-                              <div className="text-[11px] text-muted-foreground">
-                                Demo 可编辑核心查询需求、业务知识和输出限制；指标与维度信息始终由需求定义生成。
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setPromptEditorModes((current) => ({ ...current, [group.id]: "sections" }))}
-                                className={cn(
-                                  "rounded-md border px-2.5 py-1 text-[11px]",
-                                  editMode === "sections"
-                                    ? "border-primary bg-primary/10 text-primary"
-                                    : "text-muted-foreground hover:text-foreground",
-                                )}
-                              >
-                                分段编辑
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPromptEditorModes((current) => ({ ...current, [group.id]: "markdown" }));
-                                  setPromptMarkdownDrafts((current) => ({
-                                    ...current,
-                                    [group.id]: current[group.id] ?? buildIndicatorGroupPrompt(requirement, selectedWt, group).markdown,
-                                  }));
-                                }}
-                                className={cn(
-                                  "rounded-md border px-2.5 py-1 text-[11px]",
-                                  editMode === "markdown"
-                                    ? "border-primary bg-primary/10 text-primary"
-                                    : "text-muted-foreground hover:text-foreground",
-                                )}
-                              >
-                                整体 Markdown
-                              </button>
-                            </div>
-                          </div>
-
-                          {editMode === "sections" ? (
-                            <div className="space-y-3">
-                              <PromptSectionField
-                                label="核心查询需求"
-                                value={promptBundle.sections.coreQueryRequirement}
-                                editable={isPromptEditable}
-                                rows={5}
-                                onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "coreQueryRequirement", value)}
-                              />
-                              <PromptSectionField
-                                label="业务知识"
-                                value={promptBundle.sections.businessKnowledge}
-                                editable={isPromptEditable}
-                                rows={4}
-                                onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "businessKnowledge", value)}
-                              />
-                              <PromptReadonlyBlock
-                                label="指标列表"
-                                value={promptBundle.sections.metricList}
-                                editable={isPromptEditable}
-                                rows={8}
-                                onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "metricList", value)}
-                              />
-                              <PromptReadonlyBlock
-                                label="维度列信息"
-                                value={promptBundle.sections.dimensionColumns}
-                                editable={isPromptEditable}
-                                rows={8}
-                                onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "dimensionColumns", value)}
-                              />
-                              <PromptSectionField
-                                label="输出限制"
-                                value={promptBundle.sections.outputConstraints}
-                                editable={isPromptEditable}
-                                rows={6}
-                                onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "outputConstraints", value)}
-                              />
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <div className="text-[11px] text-muted-foreground">
-                                这里编辑的是完整 Markdown 提示词，保存后会同步到当前分组。
-                              </div>
-                              <textarea
-                                value={markdownDraft}
-                                onChange={(event) => setPromptMarkdownDrafts((current) => ({
-                                  ...current,
-                                  [group.id]: event.target.value,
-                                }))}
-                                rows={20}
-                                readOnly={!isPromptEditable}
-                                className={cn(
-                                  "w-full rounded-md border bg-background px-3 py-2 text-xs leading-6",
-                                  !isPromptEditable ? "cursor-default text-muted-foreground" : "",
-                                )}
-                              />
-                            </div>
                           )}
                         </div>
                       </div>
@@ -1200,6 +1382,189 @@ export default function RequirementTasksPanel({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {selectedWt ? (
+        <section className="rounded-xl border bg-card p-6 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">采集提示词管理</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                提示词用于指导 Agent 采集，按指标组折叠配置。提示词配置不会影响指标拆分规则。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handlePersistPromptTemplates()}
+              disabled={!isDefinitionSubmitted || !isPromptEditable || isPersistingPrompts}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs font-medium",
+                !isDefinitionSubmitted || !isPromptEditable || isPersistingPrompts
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-primary text-primary-foreground hover:opacity-90",
+              )}
+            >
+              {isPersistingPrompts ? "保存中..." : "保存提示词"}
+            </button>
+          </div>
+
+          {promptSaveMessage ? (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              {promptSaveMessage}
+            </div>
+          ) : null}
+
+          {!isPromptEditable ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              提示词已锁定为只读展示；如需调整，请先回到需求侧修改并重新生成计划。
+            </div>
+          ) : null}
+
+          {!hasIndicatorColumns ? (
+            <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-sm text-muted-foreground">
+              当前宽表没有指标列，暂不需要配置采集提示词。
+            </div>
+          ) : promptEditorGroups.length === 0 ? (
+            <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-sm text-muted-foreground">
+              暂无可编辑的提示词配置。
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {promptEditorGroups
+                .slice()
+                .sort((a, b) => a.priority - b.priority)
+                .map((group, index) => {
+                  const promptBundle = indicatorGroupPromptMap.get(group.id)
+                    ?? (effectiveWideTable ? buildIndicatorGroupPrompt(requirement, effectiveWideTable, group) : buildIndicatorGroupPrompt(requirement, selectedWt, group));
+                  const editMode = promptEditorModes[group.id] ?? "sections";
+                  const markdownDraft = promptMarkdownDrafts[group.id] ?? promptBundle.markdown;
+                  const shouldOpen = promptEditorGroups.length === 1 || index === 0;
+
+                  return (
+                    <details
+                      key={group.id}
+                      open={shouldOpen}
+                      className={cn(
+                        "group rounded-lg border bg-background",
+                        groupToneClass(group.id, promptEditorGroups),
+                      )}
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold truncate">{group.name}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            已关联 {group.indicatorColumns.length} 个指标
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+                      </summary>
+                      <div className="border-t px-4 py-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium">Agent 提示词</div>
+                            <div className="text-[11px] text-muted-foreground">
+                              未锁定前可编辑核心查询需求、业务知识和输出限制；指标与维度信息始终由需求定义生成。
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPromptEditorModes((current) => ({ ...current, [group.id]: "sections" }))}
+                              className={cn(
+                                "rounded-md border px-2.5 py-1 text-[11px]",
+                                editMode === "sections"
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              分段编辑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPromptEditorModes((current) => ({ ...current, [group.id]: "markdown" }));
+                                setPromptMarkdownDrafts((current) => ({
+                                  ...current,
+                                  [group.id]: current[group.id] ?? promptBundle.markdown,
+                                }));
+                              }}
+                              className={cn(
+                                "rounded-md border px-2.5 py-1 text-[11px]",
+                                editMode === "markdown"
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              整体 Markdown
+                            </button>
+                          </div>
+                        </div>
+
+                        {editMode === "sections" ? (
+                          <div className="space-y-3">
+                            <PromptSectionField
+                              label="核心查询需求"
+                              value={promptBundle.sections.coreQueryRequirement}
+                              editable={isPromptEditable}
+                              rows={5}
+                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "coreQueryRequirement", value)}
+                            />
+                            <PromptSectionField
+                              label="业务知识"
+                              value={promptBundle.sections.businessKnowledge}
+                              editable={isPromptEditable}
+                              rows={4}
+                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "businessKnowledge", value)}
+                            />
+                            <PromptReadonlyBlock
+                              label="指标列表"
+                              value={promptBundle.sections.metricList}
+                              editable={isPromptEditable}
+                              rows={8}
+                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "metricList", value)}
+                            />
+                            <PromptReadonlyBlock
+                              label="维度列信息"
+                              value={promptBundle.sections.dimensionColumns}
+                              editable={isPromptEditable}
+                              rows={8}
+                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "dimensionColumns", value)}
+                            />
+                            <PromptSectionField
+                              label="输出限制"
+                              value={promptBundle.sections.outputConstraints}
+                              editable={isPromptEditable}
+                              rows={6}
+                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "outputConstraints", value)}
+                            />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="text-[11px] text-muted-foreground">
+                              这里编辑的是完整 Markdown 提示词，保存后会同步到当前分组。
+                            </div>
+                            <textarea
+                              value={markdownDraft}
+                              onChange={(event) => setPromptMarkdownDrafts((current) => ({
+                                ...current,
+                                [group.id]: event.target.value,
+                              }))}
+                              rows={20}
+                              readOnly={!isPromptEditable}
+                              className={cn(
+                                "w-full rounded-md border bg-background px-3 py-2 text-xs leading-6",
+                                !isPromptEditable ? "cursor-default text-muted-foreground" : "",
+                              )}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
+            </div>
+          )}
+        </section>
       ) : null}
 
       {selectedWt ? (
@@ -1268,19 +1633,17 @@ export default function RequirementTasksPanel({
               : `共 ${wtTaskGroups.length} 个任务组`}
           </div>
           <div className="mt-1">
-            {requirement.requirementType === "demo"
-              ? "Demo 全部手动执行"
-              : needsProductionScopeRefresh
-                ? "正式任务组待维度范围确认后生成"
-                : !isIndicatorGroupingComplete
-                  ? "完成指标分组后才能生成任务组"
-                : usesBusinessDateAxis
-                  ? dataUpdateEnabled
-                    ? "正式需求按“历史补数 + 未来调度”生成任务组"
-                    : "正式需求按当前固定范围生成一次性任务组"
-                  : dataUpdateEnabled
-                    ? "正式需求按调度规则持续生成全量快照任务组"
-                    : "正式需求按当前快照范围生成一次性交付任务组"}
+            {needsScopeRefresh
+              ? "正式任务组待维度范围确认后生成"
+              : !isIndicatorGroupingComplete
+                ? "完成指标分组后才能生成任务组"
+              : usesBusinessDateAxis
+                ? dataUpdateEnabled
+                  ? "需求按“历史补数 + 未来调度”生成任务组"
+                  : "需求按当前固定范围生成一次性任务组"
+              : dataUpdateEnabled
+                ? "需求按调度规则持续生成全量快照任务组"
+                : "需求按当前快照范围生成一次性交付任务组"}
           </div>
         </div>
 
@@ -1318,16 +1681,16 @@ export default function RequirementTasksPanel({
                           <span className="font-medium text-sm">{tg.displayLabel}</span>
                           <StatusBadge
                             status={tg.displayStatus}
-                            label={getTaskGroupStatusLabel(tg, requirement.requirementType)}
+                            label={getTaskGroupStatusLabel(tg)}
                           />
                           <span className={cn("text-[10px] px-1.5 py-0.5 rounded border bg-background")}>
-                            {getTriggerDisplayLabel(tg.triggeredBy, requirement.requirementType)}
+                            {getTriggerDisplayLabel(tg.triggeredBy)}
                           </span>
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {tg.isReal
                             ? `${tg.id} | 总计 ${tg.totalTasks} | 运行中 ${tg.runningTasks} | 已完成 ${tg.completedTasks} | 失败 ${tg.failedTasks}${tg.pendingTasks > 0 ? ` | 待执行 ${tg.pendingTasks}` : ""}`
-                            : isScheduledFutureTaskGroupView(tg, requirement.requirementType)
+                            : isScheduledFutureTaskGroupView(tg)
                               ? `待调度任务组 | 总计 ${tg.totalTasks} | 到期后由系统自动创建并执行`
                               : `计划任务组 | 总计 ${tg.totalTasks} | 尚未建立运行记录`}
                         </div>
@@ -1359,7 +1722,6 @@ export default function RequirementTasksPanel({
                       id: tg.id,
                       isReal: tg.isReal,
                       displayStatus: tg.displayStatus,
-                      requirementType: requirement.requirementType,
                     }) ? (
                       <button
                         type="button"
@@ -1373,7 +1735,7 @@ export default function RequirementTasksPanel({
                         <RotateCcw className="h-3.5 w-3.5" />
                         {runningTaskGroupIds.includes(tg.id)
                           ? "执行中..."
-                          : requirement.requirementType === "demo" && (tg.displayStatus === "pending" || tg.displayStatus === "invalidated")
+                          : tg.displayStatus === "pending" || tg.displayStatus === "invalidated"
                             ? "执行任务组"
                             : "重新执行任务组"}
                       </button>
@@ -1563,7 +1925,7 @@ export default function RequirementTasksPanel({
                   <tr key={sj.id}>
                     <td className="px-2 py-1.5 font-mono">{sj.id}</td>
                     <td className="px-2 py-1.5 text-muted-foreground">{sj.taskGroupId}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{getTriggerDisplayLabel(sj.triggerType, requirement.requirementType)}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">{getTriggerDisplayLabel(sj.triggerType)}</td>
                     <td className="px-2 py-1.5">
                       <StatusBadge status={sj.status} />
                     </td>
@@ -1614,7 +1976,7 @@ export default function RequirementTasksPanel({
     const runId = buildTaskGroupRunId(scheduleJobs);
     const localArtifacts = materializeLocalTaskGroupArtifacts(taskGroupView, selectedWt, currentWideTableRecords, fetchTasks, startedAt);
     if (!localArtifacts) {
-      setTaskActionMessage(`任务组 ${taskGroupView.displayLabel} 暂无可执行任务，请先确认当前范围已生成对应预览行。`);
+      setTaskActionMessage(`任务组 ${taskGroupView.displayLabel} 暂无可执行任务，请先保存分组并生成任务组（系统会自动生成预览行）。`);
       return;
     }
 
@@ -2328,7 +2690,7 @@ function buildTaskGroupRunViews(
         failedTasks: 0,
         invalidatedTasks: 0,
         progressPercent: 0,
-        triggeredBy: resolvePlannedTriggerType(requirement.requirementType, businessDate, today),
+        triggeredBy: resolvePlannedTriggerType(businessDate, today),
         displayStatus: "pending",
         isReal: false,
         planVersion: wideTable.currentPlanVersion ?? 1,
@@ -2347,7 +2709,7 @@ function buildTaskGroupRunViews(
           totalTasks: totalTasksPerGroup,
           completedTasks: 0,
           failedTasks: 0,
-          triggeredBy: resolvePlannedTriggerType(requirement.requirementType, businessDate, today),
+          triggeredBy: resolvePlannedTriggerType(businessDate, today),
           createdAt: "",
           updatedAt: "",
         },
@@ -2360,14 +2722,9 @@ function compareTaskGroupsForDisplay(left: TaskGroup, right: TaskGroup): number 
 }
 
 function resolvePlannedTriggerType(
-  requirementType: Requirement["requirementType"],
   businessDate: string,
   today: string,
 ): TaskGroup["triggeredBy"] {
-  if (requirementType === "demo") {
-    return "manual";
-  }
-
   return businessDate <= today ? "backfill" : "schedule";
 }
 
@@ -2433,29 +2790,22 @@ function taskFrequencyLabel(frequency: WideTable["businessDateRange"]["frequency
   return "年频";
 }
 
-function getTriggerDisplayLabel(triggerType: string, requirementType: Requirement["requirementType"]): string {
-  if (requirementType === "demo") {
-    return "手动执行";
-  }
-
+function getTriggerDisplayLabel(triggerType: string): string {
   return triggerLabel[triggerType] ?? triggerType;
 }
 
 function isScheduledFutureTaskGroupView(
   taskGroup: Pick<HistoricalTaskGroupView, "triggeredBy" | "businessDate" | "displayStatus">,
-  requirementType: Requirement["requirementType"],
 ): boolean {
-  return requirementType === "production"
-    && taskGroup.triggeredBy === "schedule"
+  return taskGroup.triggeredBy === "schedule"
     && taskGroup.displayStatus === "pending"
     && taskGroup.businessDate > formatBusinessDate(new Date());
 }
 
 function getTaskGroupStatusLabel(
   taskGroup: Pick<HistoricalTaskGroupView, "triggeredBy" | "businessDate" | "displayStatus">,
-  requirementType: Requirement["requirementType"],
 ): string {
-  if (isScheduledFutureTaskGroupView(taskGroup, requirementType)) {
+  if (isScheduledFutureTaskGroupView(taskGroup)) {
     return "待调度";
   }
 

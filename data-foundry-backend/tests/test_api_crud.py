@@ -86,7 +86,7 @@ class ApiCrudTestCase(unittest.TestCase):
     def test_create_draft_requirement_without_wide_table(self):
         body = {
             "title": "空白草稿需求",
-            "phase": "demo",
+            "phase": "production",
             "owner": "业务-待定",
             "assignee": "算法-待定",
             "business_goal": "",
@@ -107,40 +107,13 @@ class ApiCrudTestCase(unittest.TestCase):
         r = self.client.post("/api/projects/PROJ-001/requirements", json=body)
         self.assertEqual(r.status_code, 201)
         created = r.json()
-        self.assertEqual(created["phase"], "demo")
+        self.assertEqual(created["phase"], "production")
         self.assertEqual(created["status"], "draft")
         self.assertIsNone(created["wide_table"])
 
         r2 = self.client.get(f"/api/projects/PROJ-001/requirements/{created['id']}")
         self.assertEqual(r2.status_code, 200)
         self.assertIsNone(r2.json()["wide_table"])
-
-    def test_convert_requirement_persists_phase_and_status(self):
-        r = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-001/convert")
-        self.assertEqual(r.status_code, 200)
-        converted = r.json()
-        self.assertEqual(converted["phase"], "production")
-        self.assertEqual(converted["status"], "scoping")
-        self.assertTrue(converted["schema_locked"])
-        self.assertIsNone(converted["data_update_enabled"])
-        self.assertIsNone(converted["data_update_mode"])
-
-        r2 = self.client.get("/api/projects/PROJ-001/requirements/REQ-2026-001")
-        self.assertEqual(r2.status_code, 200)
-        self.assertEqual(r2.json()["phase"], "production")
-        self.assertEqual(r2.json()["status"], "scoping")
-        self.assertIsNone(r2.json()["data_update_enabled"])
-        self.assertIsNone(r2.json()["data_update_mode"])
-
-    def test_convert_requirement_is_idempotent_after_first_success(self):
-        first = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-001/convert")
-        self.assertEqual(first.status_code, 200)
-
-        second = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-001/convert")
-        self.assertEqual(second.status_code, 200)
-        converted = second.json()
-        self.assertEqual(converted["phase"], "production")
-        self.assertEqual(converted["status"], "scoping")
 
     def test_list_requirement_rows(self):
         r = self.client.get("/api/projects")
@@ -1133,9 +1106,6 @@ class ApiCrudTestCase(unittest.TestCase):
         self.assertEqual(execution_records[0].status, "completed")
 
     def test_production_plan_auto_executes_historical_groups_and_keeps_future_dates_planned(self):
-        converted = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-001/convert")
-        self.assertEqual(converted.status_code, 200)
-
         called_task_ids: list[str] = []
 
         def mock_handler(request: httpx.Request) -> httpx.Response:
@@ -1363,9 +1333,6 @@ class ApiCrudTestCase(unittest.TestCase):
         self.assertEqual(called_task_ids, ["ft_tg_WT-AD-OPS_20260228_r4_IG-AD-OPS-CORE_1"])
 
     def test_production_plan_batch_executes_historical_groups_with_runtime_concurrency_limit(self):
-        converted = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-001/convert")
-        self.assertEqual(converted.status_code, 200)
-
         self.app.state.repository.set_system_setting("max_concurrent_agent_tasks", 2)
         self.app.state.scheduler.set_max_concurrency(2)
         self.assertEqual(self.app.state.scheduler.max_concurrency, 2)
@@ -1539,9 +1506,6 @@ class ApiCrudTestCase(unittest.TestCase):
         self.assertEqual(len(agent_state["calls"]), 4)
 
     def test_trigger_scheduled_reconciles_missing_historical_backfill_groups_from_rows(self):
-        converted = self.client.post("/api/projects/PROJ-001/requirements/REQ-2026-001/convert")
-        self.assertEqual(converted.status_code, 200)
-
         called_task_ids: list[str] = []
 
         def mock_handler(request: httpx.Request) -> httpx.Response:

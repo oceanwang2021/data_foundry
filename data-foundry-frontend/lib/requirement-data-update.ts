@@ -1,14 +1,10 @@
 import type { Requirement, RequirementDataUpdateMode, WideTable } from "./types";
-import { hasWideTableBusinessDateDimension } from "./wide-table-mode";
 
 export function inferRequirementDataUpdateMode(
   wideTable?: Pick<WideTable, "schema">,
 ): RequirementDataUpdateMode | null {
-  if (!wideTable) {
-    return null;
-  }
-
-  return hasWideTableBusinessDateDimension(wideTable) ? "incremental" : "full";
+  // Deprecated: dataUpdateMode is now a user selection, not inferred from schema.
+  return null;
 }
 
 export function resolveRequirementDataUpdateEnabled(
@@ -21,7 +17,7 @@ export function resolveRequirementDataUpdateMode(
   requirement: Pick<Requirement, "dataUpdateMode">,
   wideTable?: Pick<WideTable, "schema">,
 ): RequirementDataUpdateMode | null {
-  return requirement.dataUpdateMode ?? inferRequirementDataUpdateMode(wideTable);
+  return requirement.dataUpdateMode ?? null;
 }
 
 export function formatRequirementDataUpdateMode(

@@ -225,10 +225,9 @@ function shouldRebuildCurrentPlanForRequirementLifecycle(params: {
   currentRevisionTaskGroups: TaskGroup[];
   now: Date;
 }): boolean {
-  const { requirement, wideTable, nextRecordsByDate, currentRevisionTaskGroups, now } = params;
+  const { wideTable, nextRecordsByDate, currentRevisionTaskGroups, now } = params;
   if (
-    requirement.requirementType !== "production"
-    || currentRevisionTaskGroups.length === 0
+    currentRevisionTaskGroups.length === 0
     || !hasWideTableBusinessDateDimension(wideTable)
   ) {
     return false;
@@ -286,12 +285,12 @@ function buildTaskGroup(params: {
   indicatorGroups: IndicatorGroupLike[];
   now: Date;
 }): TaskGroup {
-  const { requirement, wideTable, businessDate, planVersion, rowSnapshots, indicatorGroups, now } = params;
+  const { wideTable, businessDate, planVersion, rowSnapshots, indicatorGroups, now } = params;
   const timestamp = now.toISOString();
   const totalTasks = rowSnapshots.length * indicatorGroups.length;
   const isFullTablePartition = !hasWideTableBusinessDateDimension(wideTable);
   if (isFullTablePartition) {
-    const triggeredBy = requirement.requirementType === "demo" ? "manual" : "schedule";
+    const triggeredBy = "schedule";
     return {
       id: `tg_${wideTable.id}_snapshot_r${planVersion}`,
       wideTableId: wideTable.id,
@@ -316,11 +315,7 @@ function buildTaskGroup(params: {
   }
   const today = formatBusinessDate(now);
   const historical = businessDate <= today;
-  const triggeredBy = requirement.requirementType === "demo"
-    ? "manual"
-    : historical
-      ? "backfill"
-      : "schedule";
+  const triggeredBy = historical ? "backfill" : "schedule";
 
   return {
     id: `tg_${wideTable.id}_${businessDate.replace(/-/g, "")}_r${planVersion}`,

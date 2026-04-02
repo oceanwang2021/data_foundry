@@ -238,7 +238,7 @@ class ModelingRulesTestCase(unittest.TestCase):
             id="REQ-MODEL-001",
             project_id="PROJ-TEST",
             title="测试需求",
-            phase="demo",
+            phase="production",
             schema_locked=False,
             status="draft",
             owner="业务-测试",

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { createRequirement } from "@/lib/api-client";
 import type { Project, Requirement, WideTable, TaskGroup, FetchTask } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { Layers } from "lucide-react";
 
 type Props = {
@@ -37,7 +36,7 @@ export default function ProjectRequirementsPanel({
   const taskGroupCount = taskGroups.length;
   const runningTaskGroups = taskGroups.filter((taskGroup) => taskGroup.status === "running").length;
 
-  const handleCreateDemoRequirement = async () => {
+  const handleCreateRequirement = async () => {
     setCreating(true);
     setMessage("");
     try {
@@ -49,7 +48,7 @@ export default function ProjectRequirementsPanel({
         projectDataSource: project.dataSource,
       });
       setRequirements((prev) => [...prev, createdRequirement]);
-      setMessage(`已创建需求：${createdRequirement.id}（当前处于 Demo 阶段）`);
+      setMessage(`已创建需求：${createdRequirement.id}`);
     } catch (error: any) {
       setMessage(`创建失败：${error.message}`);
     } finally {
@@ -74,7 +73,7 @@ export default function ProjectRequirementsPanel({
           </h2>
           <button
             type="button"
-            onClick={handleCreateDemoRequirement}
+            onClick={handleCreateRequirement}
             disabled={creating}
             className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
           >
@@ -82,14 +81,12 @@ export default function ProjectRequirementsPanel({
           </button>
         </div>
 
-        <p className="text-xs text-muted-foreground">
-          新需求总是先以 Demo 状态创建。Demo 通过后，需要进入该需求的「数据产出」标签，在原需求上直接转为正式需求，不再额外新建正式需求记录。
-        </p>
+        <p className="text-xs text-muted-foreground">创建需求后即可直接录入需求、任务、数据产出与验收配置。</p>
         {message ? <div className="text-xs text-primary">{message}</div> : null}
 
         <div className="rounded-md border bg-muted/10 p-3 text-xs text-muted-foreground space-y-1">
           <div>每个需求只关联一张数据表；创建需求后先关联数据表，再维护 Schema、指标组与范围定义。</div>
-          <div>正式需求由 Demo 原地转换而来；Schema 与指标组只读，仅允许调整范围定义、未来调度和补采。</div>
+          <div>Schema 在首次运行前可调整；进入运行态后将锁定 Schema，避免影响历史数据一致性。</div>
         </div>
 
         {sortedRequirements.length === 0 ? (
@@ -144,19 +141,12 @@ function RequirementRow({
   wideTables: WideTable[];
 }) {
   const reqWideTable = requirement.wideTable ?? wideTables.find((wideTable) => wideTable.requirementId === requirement.id);
-  const typeLabel = requirement.requirementType === "demo" ? "Demo" : "正式生产";
-  const typeClassName = requirement.requirementType === "demo"
-    ? "border-blue-200 bg-blue-50 text-blue-700"
-    : "border-emerald-200 bg-emerald-50 text-emerald-700";
 
   return (
     <tr>
       <td className="px-3 py-2 align-top">
         <div className="flex items-center gap-2">
           <div className="font-medium">{requirement.title}</div>
-          <span className={cn("text-[11px] px-2 py-0.5 rounded border", typeClassName)}>
-            {typeLabel}
-          </span>
         </div>
         <div className="text-xs text-muted-foreground mt-1">{requirement.id}</div>
       </td>
@@ -171,11 +161,7 @@ function RequirementRow({
         {requirement.backgroundKnowledge || requirement.businessGoal || "-"}
       </td>
       <td className="px-3 py-2 align-top text-xs text-muted-foreground">
-        {requirement.requirementType === "demo"
-          ? requirement.status === "ready"
-            ? "已完成 Demo，可转换正式"
-            : "仍处于 Demo 阶段"
-          : "已进入正式需求阶段"}
+        {requirement.status === "running" ? "运行中" : requirement.status === "ready" ? "就绪" : "未运行"}
       </td>
       <td className="px-3 py-2 align-top">
         <Link

@@ -450,8 +450,6 @@ class SchedulerService:
         for project in projects:
             requirements = self.repo.list_requirements(project.id)
             for requirement in requirements:
-                if requirement.phase != "production":
-                    continue
                 if requirement.status == "ready":
                     continue
                 wide_table = requirement.wide_table

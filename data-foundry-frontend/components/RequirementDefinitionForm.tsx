@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import { buildApiUrl } from "@/lib/api-base";
 import {
   fetchRuntimeSettings,
-  persistWideTablePreview,
+  updateRequirementWideTable,
 } from "@/lib/api-client";
 import KnowledgeBaseSelectorModal from "@/components/KnowledgeBaseSelectorModal";
 import SchemaSelectorModal from "@/components/SchemaSelectorModal";
@@ -40,7 +40,7 @@ import {
   describeFullSnapshotScheduleRule,
 } from "@/lib/task-group-display";
 import {
-  buildDemoDefaultDateRange,
+  buildDefaultDateRange,
   buildSelectableBusinessDates,
   extractBusinessDateMonth,
   extractBusinessDateYear,
@@ -51,10 +51,8 @@ import {
   pickDefaultBusinessYear,
   snapToPeriodEnd,
 } from "@/lib/business-date";
-import { generateWideTablePreviewRecords, getWideTableDimensionBindingKey } from "@/lib/wide-table-preview";
+import { generateWideTablePreviewRecords } from "@/lib/wide-table-preview";
 import {
-  buildTaskPlanFingerprint,
-  reconcileTaskPlanChange,
   resolveRecordPlanVersion,
   resolveCurrentPlanVersion,
 } from "@/lib/task-plan-reconciliation";
@@ -84,7 +82,6 @@ type Props = {
   taskGroups?: TaskGroup[];
   fetchTasks?: FetchTask[];
   availableSchemaTemplates?: WideTable[];
-  isDemoRequirement: boolean;
   onWideTablesChange?: (wideTables: WideTable[]) => void;
   onWideTableRecordsChange?: (wideTableRecords: WideTableRecord[]) => void;
   onTaskGroupsChange?: (taskGroups: TaskGroup[]) => void;
@@ -156,7 +153,6 @@ export default function RequirementDefinitionForm({
   taskGroups,
   fetchTasks,
   availableSchemaTemplates,
-  isDemoRequirement,
   onWideTablesChange,
   onWideTableRecordsChange,
   onTaskGroupsChange,
@@ -189,12 +185,7 @@ export default function RequirementDefinitionForm({
   const pendingNavigationRef = useRef<{ sectionId: DefinitionSectionId; targetTop: number } | null>(null);
   const pendingNavigationTimeoutRef = useRef<number | null>(null);
   const selectedWt = useMemo(() => wideTables.find((wt) => wt.id === selectedWtId), [wideTables, selectedWtId]);
-  const visibleDefinitionSectionIds = useMemo<DefinitionSectionId[]>(
-    () => (isDemoRequirement
-      ? definitionSectionIds.filter((sectionId) => sectionId !== "data-update")
-      : [...definitionSectionIds]),
-    [isDemoRequirement],
-  );
+  const visibleDefinitionSectionIds = definitionSectionIds;
   const dataUpdateStatus = useMemo(
     () => deriveDataUpdateSectionStatus(requirement, selectedWt),
     [requirement, selectedWt],
@@ -222,6 +213,100 @@ export default function RequirementDefinitionForm({
     },
     [selectedWideTableAllRecords, selectedWideTablePlanVersion, selectedWt],
   );
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [isSavingDefinition, setIsSavingDefinition] = useState(false);
+  const [isSubmittingDefinition, setIsSubmittingDefinition] = useState(false);
+  const usesBusinessDateAxis = Boolean(selectedWt && hasWideTableBusinessDateDimension(selectedWt));
+  const isOpenEndedRange = Boolean(selectedWt && usesBusinessDateAxis && isOpenEndedBusinessDateRange(selectedWt.businessDateRange));
+  const canSubmit = requirement.status === "draft";
+  const submitBlockerMessage = useMemo(() => {
+    if (!selectedWt) {
+      return "请先关联 Schema 并完成宽表配置。";
+    }
+    if (stepStatuses.A !== "completed") {
+      return "请先在【表结构定义】里关联 Schema，补齐字段定义后再提交。";
+    }
+    if (stepStatuses.C !== "completed") {
+      return "请先在【数据范围】里补齐时间范围与维度取值后再提交。";
+    }
+    if (requirement.dataUpdateEnabled == null) {
+      return "请先在【数据更新】里确认是否持续更新后再提交。";
+    }
+    if (requirement.dataUpdateEnabled === true && !selectedWt.scheduleRule) {
+      return "请先在【数据更新】里配置调度规则后再提交。";
+    }
+    if (dataUpdateStatus !== "completed") {
+      return "数据更新配置尚未完成或存在冲突，请先修正后再提交。";
+    }
+    if (usesBusinessDateAxis && requirement.dataUpdateEnabled === true && !isOpenEndedRange) {
+      return "持续更新需求需要把结束方式设为“永不”。请先到【数据范围】调整时间范围后再提交。";
+    }
+    if (usesBusinessDateAxis && requirement.dataUpdateEnabled === false && isOpenEndedRange) {
+      return "一次性交付需求需要给出固定结束时间。请先到【数据范围】调整时间范围后再提交。";
+    }
+    return "";
+  }, [
+    dataUpdateStatus,
+    isOpenEndedRange,
+    requirement.dataUpdateEnabled,
+    selectedWt,
+    stepStatuses.A,
+    stepStatuses.C,
+    usesBusinessDateAxis,
+  ]);
+
+  const persistDefinition = async () => {
+    if (!selectedWt) {
+      throw new Error("尚未关联数据表，无法保存。");
+    }
+    // Persist every wide table (even if only one) so the backend always has a consistent snapshot.
+    await Promise.all(
+      wideTables.map((wt) => updateRequirementWideTable(requirement.id, wt)),
+    );
+  };
+
+  const handleSaveDefinition = async () => {
+    setSubmitMessage("");
+    setIsSavingDefinition(true);
+    try {
+      await persistDefinition();
+      setSubmitMessage("已保存需求配置。");
+      await onRefreshData?.();
+    } catch (error) {
+      setSubmitMessage(`保存失败：${formatPersistError(error)}`);
+    } finally {
+      setIsSavingDefinition(false);
+    }
+  };
+
+  const handleSubmitDefinition = async () => {
+    setSubmitMessage("");
+    const blocker = submitBlockerMessage;
+    if (blocker) {
+      setSubmitMessage(blocker);
+      return;
+    }
+    if (!canSubmit) {
+      setSubmitMessage("当前需求已提交，无需重复提交。");
+      return;
+    }
+
+    setIsSubmittingDefinition(true);
+    try {
+      await persistDefinition();
+      onRequirementChange?.({
+        ...requirement,
+        status: "ready",
+        updatedAt: new Date().toISOString(),
+      });
+      setSubmitMessage("已提交需求。现在可以进入【任务】配置指标分组并生成任务组。");
+      await onRefreshData?.();
+    } catch (error) {
+      setSubmitMessage(`提交失败：${formatPersistError(error)}`);
+    } finally {
+      setIsSubmittingDefinition(false);
+    }
+  };
   const handleReplaceWideTables = (nextWideTables: WideTable[]) => {
     if (!onWideTablesChange) {
       return;
@@ -276,8 +361,7 @@ export default function RequirementDefinitionForm({
 
   useEffect(() => {
     if (
-      requirement.requirementType !== "production"
-      || requirement.status !== "aligning"
+      requirement.status !== "aligning"
       || !selectedWt
       || selectedWt.businessDateRange.end !== "never"
     ) {
@@ -287,7 +371,7 @@ export default function RequirementDefinitionForm({
     setStepStatuses((current) => (
       current.D === "completed" ? invalidateDownstream(current, "C") : current
     ));
-  }, [requirement.requirementType, requirement.status, selectedWt?.businessDateRange.end, selectedWt?.id]);
+  }, [requirement.status, selectedWt?.businessDateRange.end, selectedWt?.id]);
 
   useEffect(() => {
     const clearPendingNavigation = () => {
@@ -461,7 +545,7 @@ export default function RequirementDefinitionForm({
   }, [visibleDefinitionSectionIds]);
 
   useEffect(() => {
-    if (entryGuide !== "production-scope" || requirement.requirementType !== "production") {
+    if (entryGuide !== "production-scope") {
       return;
     }
 
@@ -478,7 +562,7 @@ export default function RequirementDefinitionForm({
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
     };
-  }, [entryGuide, requirement.requirementType, visibleDefinitionSectionIds]);
+  }, [entryGuide, visibleDefinitionSectionIds]);
 
   return (
     <div className="space-y-4">
@@ -491,7 +575,7 @@ export default function RequirementDefinitionForm({
           aria-label="需求页面导航"
           className={cn(
             "relative z-20 grid overflow-hidden rounded-xl border border-border/80 bg-background/98 shadow-md backdrop-blur-md supports-[backdrop-filter]:bg-background/92",
-            isDemoRequirement ? "grid-cols-4" : "grid-cols-5",
+            "grid-cols-5",
             isNavPinned ? "fixed" : "relative",
           )}
           style={isNavPinned ? { top: navFrame.top, left: navFrame.left, width: navFrame.width } : undefined}
@@ -525,22 +609,20 @@ export default function RequirementDefinitionForm({
             href="#scope-generation"
             index={4}
             title="数据范围"
-            description="配置范围并确认预览。"
+            description="配置范围，预览可选。"
             isActive={activeSection === "scope-generation"}
             onNavigate={handleSectionNavigation("scope-generation")}
             trailing={<StepGroupBadge steps={["C", "D"]} statuses={stepStatuses} />}
           />
-          {!isDemoRequirement ? (
-            <StageSummaryCard
-              href="#data-update"
-              index={5}
-              title="数据更新"
-              description="确认正式需求是否持续更新，以及更新方式。"
-              isActive={activeSection === "data-update"}
-              onNavigate={handleSectionNavigation("data-update")}
-              trailing={<SectionStatusBadge label="数据更新配置" status={dataUpdateStatus} />}
-            />
-          ) : null}
+          <StageSummaryCard
+            href="#data-update"
+            index={5}
+            title="数据更新"
+            description="确认是否持续更新，以及更新方式。"
+            isActive={activeSection === "data-update"}
+            onNavigate={handleSectionNavigation("data-update")}
+            trailing={<SectionStatusBadge label="数据更新配置" status={dataUpdateStatus} />}
+          />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-border/80">
             <div
               className="h-full bg-primary transition-transform duration-200 ease-out"
@@ -569,7 +651,7 @@ export default function RequirementDefinitionForm({
         selectedWtId={selectedWtId}
         selectedWt={selectedWt}
         onSelectWt={setSelectedWtId}
-        isDemoRequirement={isDemoRequirement}
+        schemaLocked={requirement.schemaLocked}
         onReplaceWideTables={handleReplaceWideTables}
         onUpdateWideTable={handleUpdateWideTable}
         onTaskGroupsChange={onTaskGroupsChange}
@@ -590,31 +672,76 @@ export default function RequirementDefinitionForm({
         selectedWt={selectedWt}
         selectedWideTableRecords={selectedWideTableRecords}
         onSelectWt={setSelectedWtId}
-        isDemoRequirement={isDemoRequirement}
         onUpdateWideTable={handleUpdateWideTable}
         onReplaceWideTableRecords={handleReplaceWideTableRecords}
         taskGroups={taskGroups ?? []}
         fetchTasks={fetchTasks ?? []}
         onTaskGroupsChange={onTaskGroupsChange}
         onFetchTasksChange={onFetchTasksChange}
-        onRequirementChange={onRequirementChange}
-        onRefreshData={onRefreshData}
         stepStatuses={stepStatuses}
         onStepStatusesChange={setStepStatuses}
       />
 
-      {!isDemoRequirement ? (
-        <DataUpdateSection
-          requirement={requirement}
-          entryGuide={entryGuide}
-          highlightedSections={highlightedSections}
-          status={dataUpdateStatus}
-          selectedWt={selectedWt}
-          isDemoRequirement={isDemoRequirement}
-          onRequirementChange={onRequirementChange}
-          onUpdateWideTable={handleUpdateWideTable}
-        />
-      ) : null}
+      <DataUpdateSection
+        requirement={requirement}
+        entryGuide={entryGuide}
+        highlightedSections={highlightedSections}
+        status={dataUpdateStatus}
+        selectedWt={selectedWt}
+        onRequirementChange={onRequirementChange}
+        onUpdateWideTable={handleUpdateWideTable}
+      />
+
+      <section className="rounded-xl border bg-card p-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">需求操作</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              保存用于落库当前配置；提交后才能进入任务环节并生成任务组。
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSaveDefinition}
+              disabled={isSavingDefinition || isSubmittingDefinition || stepStatuses.A !== "completed"}
+              className={cn(
+                "rounded-md border px-3 py-2 text-xs font-medium",
+                isSavingDefinition || isSubmittingDefinition || stepStatuses.A !== "completed"
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-background hover:bg-muted/30",
+              )}
+            >
+              {isSavingDefinition ? "保存中..." : "保存"}
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitDefinition}
+              disabled={!canSubmit || Boolean(submitBlockerMessage) || isSavingDefinition || isSubmittingDefinition}
+              className={cn(
+                "rounded-md px-3 py-2 text-xs font-medium",
+                !canSubmit || Boolean(submitBlockerMessage) || isSavingDefinition || isSubmittingDefinition
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-primary text-primary-foreground hover:opacity-90",
+              )}
+            >
+              {isSubmittingDefinition ? "提交中..." : "提交"}
+            </button>
+          </div>
+        </div>
+
+        {submitBlockerMessage && canSubmit ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {submitBlockerMessage}
+          </div>
+        ) : null}
+
+        {submitMessage ? (
+          <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+            {submitMessage}
+          </div>
+        ) : null}
+      </section>
 
       {invalidationDialog?.open && selectedWt ? (
         <InvalidationDialog
@@ -665,10 +792,6 @@ function deriveDataUpdateSectionStatus(
   requirement: Requirement,
   wideTable?: WideTable,
 ): StepStatus {
-  if (requirement.requirementType !== "production") {
-    return "pending";
-  }
-
   if (requirement.dataUpdateEnabled == null) {
     return "pending";
   }
@@ -712,7 +835,7 @@ function buildDraftWideTable(requirementId: string): WideTable {
     },
     dimensionRanges: [],
     businessDateRange: {
-      ...buildDemoDefaultDateRange("monthly"),
+      ...buildDefaultDateRange("monthly"),
       frequency: "monthly",
     },
     indicatorGroups: [],
@@ -893,7 +1016,6 @@ function BasicInfoSection({
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <CompactInfoItem label="需求ID" value={requirement.id} />
-        <CompactInfoItem label="需求类型" value={requirement.requirementType === "demo" ? "Demo" : "正式生产"} />
         <EditableField label="业务负责人" control={
           <input className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             value={requirement.owner} onChange={(e) => update({ owner: e.target.value })} />
@@ -929,7 +1051,6 @@ function DataUpdateSection({
   highlightedSections,
   status,
   selectedWt,
-  isDemoRequirement,
   onRequirementChange,
   onUpdateWideTable,
 }: {
@@ -938,13 +1059,11 @@ function DataUpdateSection({
   highlightedSections?: readonly DefinitionSectionId[];
   status: StepStatus;
   selectedWt?: WideTable;
-  isDemoRequirement: boolean;
   onRequirementChange?: (requirement: Requirement) => void;
   onUpdateWideTable?: (wideTableId: string, updater: (wideTable: WideTable) => WideTable) => void;
 }) {
   const [updateMessage, setUpdateMessage] = useState("");
   const usesBusinessDateAxis = Boolean(selectedWt && hasWideTableBusinessDateDimension(selectedWt));
-  const inferredMode = inferRequirementDataUpdateMode(selectedWt);
   const effectiveMode = resolveRequirementDataUpdateMode(requirement, selectedWt);
   const hasConfirmedDataUpdateEnabled = requirement.dataUpdateEnabled != null;
   const dataUpdateEnabled = requirement.dataUpdateEnabled === true;
@@ -976,7 +1095,7 @@ function DataUpdateSection({
   const handleDataUpdateEnabledChange = (nextEnabled: boolean) => {
     updateRequirement({
       dataUpdateEnabled: nextEnabled,
-      dataUpdateMode: nextEnabled ? (effectiveMode ?? inferredMode ?? "full") : null,
+      dataUpdateMode: nextEnabled ? (requirement.dataUpdateMode ?? null) : null,
     });
     setUpdateMessage(
       nextEnabled
@@ -985,14 +1104,92 @@ function DataUpdateSection({
     );
   };
 
+  const promoteBusinessDateToDimension = (wideTable: WideTable) => {
+    const now = new Date().toISOString();
+    const nextColumns = wideTable.schema.columns.map((col) => ({ ...col }));
+    let found = false;
+
+    for (const col of nextColumns) {
+      // Ensure there is exactly one business date dimension.
+      if (col.isBusinessDate) {
+        col.isBusinessDate = false;
+      }
+    }
+
+    // Prefer an existing biz_date column if present.
+    const candidate = nextColumns.find((col) => col.name.toLowerCase() === "biz_date")
+      ?? nextColumns.find((col) => col.name.toLowerCase() === "business_date");
+    if (candidate) {
+      candidate.category = "dimension";
+      candidate.type = "DATE";
+      candidate.isBusinessDate = true;
+      candidate.chineseName = candidate.chineseName ?? "业务日期";
+      candidate.description = candidate.description || "业务日期维度";
+      found = true;
+    }
+
+    if (!found) {
+      nextColumns.push({
+        id: "biz_date",
+        name: "biz_date",
+        chineseName: "业务日期",
+        type: "DATE",
+        category: "dimension",
+        description: "业务日期维度",
+        required: true,
+        isBusinessDate: true,
+      });
+    }
+
+    return {
+      ...wideTable,
+      schema: { columns: nextColumns },
+      // Ensure scope dimensions won't accidentally include biz_date.
+      dimensionRanges: wideTable.dimensionRanges.filter((range) => range.dimensionName.toLowerCase() !== "biz_date"),
+      recordCount: 0,
+      currentPlanFingerprint: undefined,
+      currentPlanVersion: Math.max(wideTable.currentPlanVersion ?? 0, 0) + 1,
+      status: "draft" as const,
+      updatedAt: now,
+    };
+  };
+
+  const demoteBusinessDateToAttribute = (wideTable: WideTable) => {
+    const now = new Date().toISOString();
+    const nextColumns = wideTable.schema.columns.map((col) => ({ ...col }));
+    const bizDateDimension = nextColumns.find((col) => col.category === "dimension" && col.isBusinessDate);
+    if (bizDateDimension) {
+      bizDateDimension.category = "attribute";
+      bizDateDimension.isBusinessDate = false;
+      bizDateDimension.type = "DATE";
+      bizDateDimension.chineseName = bizDateDimension.chineseName ?? "业务日期";
+      bizDateDimension.description = bizDateDimension.description || "业务日期（属性列）";
+    }
+
+    return {
+      ...wideTable,
+      schema: { columns: nextColumns },
+      dimensionRanges: wideTable.dimensionRanges.filter((range) => range.dimensionName.toLowerCase() !== "biz_date"),
+      recordCount: 0,
+      currentPlanFingerprint: undefined,
+      currentPlanVersion: Math.max(wideTable.currentPlanVersion ?? 0, 0) + 1,
+      status: "draft" as const,
+      updatedAt: now,
+    };
+  };
+
   const handleDataUpdateModeChange = (mode: NonNullable<Requirement["dataUpdateMode"]>) => {
-    if (inferredMode && inferredMode !== mode) {
+    if (!selectedWt) {
+      setUpdateMessage("请先关联数据表，再选择更新方式。");
       return;
     }
     updateRequirement({
       dataUpdateEnabled: true,
       dataUpdateMode: mode,
     });
+    updateSelectedWideTable((wideTable) => (
+      mode === "incremental" ? promoteBusinessDateToDimension(wideTable) : demoteBusinessDateToAttribute(wideTable)
+    ));
     setUpdateMessage(`已切换为${formatRequirementDataUpdateMode(mode)}。`);
   };
 
@@ -1046,19 +1243,16 @@ function DataUpdateSection({
     mode: NonNullable<Requirement["dataUpdateMode"]>;
     title: string;
     description: string;
-    supported: boolean;
   }> = [
     {
       mode: "full",
       title: "全量更新",
       description: "按当前范围整表重跑，每次调度生成新的全量快照任务组。",
-      supported: inferredMode == null || inferredMode === "full",
     },
     {
       mode: "incremental",
       title: "增量更新",
       description: "按业务日期拆分任务组，仅生成新增日期的任务输入。",
-      supported: inferredMode == null || inferredMode === "incremental",
     },
   ];
 
@@ -1071,7 +1265,7 @@ function DataUpdateSection({
       )}
     >
       <div className="space-y-1">
-        {entryGuide === "production-scope" && requirement.requirementType === "production" ? (
+        {entryGuide === "production-scope" ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             你刚从【数据产出】返回。正式范围确认完成后，请在这里补充是否持续更新、更新方式和调度设置；如需持续更新但范围还未改为长期有效，请回到上方的数据范围节继续调整。
           </div>
@@ -1083,28 +1277,23 @@ function DataUpdateSection({
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          正式需求在这里确认是否持续更新，以及采用全量还是增量的更新策略。
+          需求在这里确认是否持续更新，以及采用全量还是增量的更新策略。
         </p>
       </div>
 
       {selectedWt ? (
         <div className="grid gap-3 md:grid-cols-3">
           <CompactInfoItem label="当前数据表" value={selectedWt.name} />
-          <CompactInfoItem label="当前表结构对应方式" value={formatRequirementDataUpdateMode(inferredMode)} />
+          <CompactInfoItem label="当前更新方式" value={formatRequirementDataUpdateMode(effectiveMode)} />
           <CompactInfoItem label="业务日期语义轴" value={usesBusinessDateAxis ? "已启用" : "未启用"} />
         </div>
       ) : (
         <div className="rounded-md border border-dashed px-3 py-4 text-xs text-muted-foreground">
-          先关联 Schema，才能判断正式需求适合走全量更新还是增量更新。
+          先关联 Schema，才能配置更新方式和调度规则。
         </div>
       )}
 
-      {isDemoRequirement ? (
-        <div className="rounded-lg border bg-muted/10 px-4 py-3 text-xs text-muted-foreground">
-          Demo 阶段不配置持续更新策略。转为正式需求后，再在这里确认是否定期更新以及具体更新方式。
-        </div>
-      ) : (
-        <>
+      <>
           <div className="grid items-start gap-3 lg:grid-cols-2">
             <div className="rounded-lg bg-muted/10 p-3 space-y-2.5">
               <div>
@@ -1145,7 +1334,7 @@ function DataUpdateSection({
                 <div>
                   <h4 className="text-sm font-semibold">更新方式</h4>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    这里沿用现有产品方案：有业务日期语义轴时走增量更新，没有业务日期语义轴时走全量更新。
+                    更新方式由你选择。选择“增量更新”会启用业务日期语义轴；选择“全量更新”会把业务日期列降级为属性列。
                   </p>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2">
@@ -1154,16 +1343,10 @@ function DataUpdateSection({
                     return (
                       <CompactChoiceButton
                         key={option.mode}
-                        disabled={!option.supported}
                         onClick={() => handleDataUpdateModeChange(option.mode)}
                         checked={checked}
                         title={option.title}
                         description={option.description}
-                        badge={!option.supported ? (
-                          <span className="rounded-full border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                            当前不可选
-                          </span>
-                        ) : undefined}
                       />
                     );
                   })}
@@ -1183,6 +1366,11 @@ function DataUpdateSection({
                     </div>
                   ) : (
                     <>
+                      {!usesBusinessDateAxis ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          增量更新需要启用业务日期语义轴。请先在上方选择“增量更新”（系统会自动把业务日期列升级为维度列）。
+                        </div>
+                      ) : null}
                       {!selectedWt.scheduleRule ? (
                         <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
                           <div>当前还未配置增量更新调度规则，请先应用一条默认规则。</div>
@@ -1236,6 +1424,11 @@ function DataUpdateSection({
                     </div>
                   ) : (
                     <>
+                      {usesBusinessDateAxis ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          全量更新不使用业务日期语义轴。选择“全量更新”后，业务日期列会降级为属性列，不参与维度拆分。
+                        </div>
+                      ) : null}
                       {!selectedWt.scheduleRule ? (
                         <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
                           <div>当前还未配置全量更新调度规则，请先应用一条默认规则。</div>
@@ -1299,7 +1492,6 @@ function DataUpdateSection({
             </>
           ) : null}
         </>
-      )}
 
       {updateMessage ? (
         <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
@@ -1508,7 +1700,7 @@ function WideTableSchemaSection({
   selectedWtId,
   selectedWt,
   onSelectWt,
-  isDemoRequirement,
+  schemaLocked,
   onReplaceWideTables,
   onUpdateWideTable,
   onTaskGroupsChange,
@@ -1525,7 +1717,7 @@ function WideTableSchemaSection({
   selectedWtId: string;
   selectedWt?: WideTable;
   onSelectWt: (id: string) => void;
-  isDemoRequirement: boolean;
+  schemaLocked?: boolean;
   onReplaceWideTables?: (wideTables: WideTable[]) => void;
   onUpdateWideTable?: (wideTableId: string, updater: (wideTable: WideTable) => WideTable) => void;
   onTaskGroupsChange?: (taskGroups: TaskGroup[]) => void;
@@ -1554,7 +1746,7 @@ function WideTableSchemaSection({
       ),
     [availableSchemaTemplates, selectedWt?.id],
   );
-  const isSchemaMetadataEditable = Boolean(isDemoRequirement && onUpdateWideTable && selectedWt);
+  const isSchemaMetadataEditable = Boolean(!schemaLocked && onUpdateWideTable && selectedWt);
 
   const updateSelectedWideTable = (updater: (wideTable: WideTable) => WideTable) => {
     if (!selectedWt || !onUpdateWideTable) {
@@ -1686,7 +1878,7 @@ function WideTableSchemaSection({
         wideTable.updatedAt = new Date().toISOString();
         return wideTable;
       });
-      setSchemaActionMessage(`已关联 Schema ${template.name}（${template.id}）。当前任务与预览数据已失效，历史已采集数据会保留，请重新确认范围并生成预览。`);
+      setSchemaActionMessage(`已关联 Schema ${template.name}（${template.id}）。当前任务与预览数据将按新 Schema 重建；历史已采集数据会保留。你可以到【数据范围】点击“预览数据”查看最新预览。`);
 
       // Step status: mark A as completed, invalidate downstream (B, C, D)
       onStepStatusesChange(invalidateDownstream(completeStep(stepStatuses, "A"), "A"));
@@ -1779,7 +1971,7 @@ function WideTableSchemaSection({
               </div>
               <div className="grid gap-3 md:grid-cols-4">
                 <CompactInfoItem label="宽表ID" value={selectedWt.id} />
-                {isDemoRequirement ? (
+                {!schemaLocked ? (
                   <div className="rounded-lg bg-muted/10 px-3 py-2.5">
                     <div className="text-[11px] font-medium text-muted-foreground">表名</div>
                     <div className="mt-1 flex items-center gap-2">
@@ -1802,13 +1994,11 @@ function WideTableSchemaSection({
                 <CompactInfoItem label="当前记录" value={String(selectedWt.recordCount)} />
               </div>
 
-              {isDemoRequirement ? (
-                null
-              ) : (
+              {schemaLocked ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                  正式需求沿用 Demo 阶段确认的 Schema，这里只读展示。
+                  Schema 已锁定：字段元数据仅支持只读查看；如需调整，请新建版本并重新生成计划。
                 </div>
-              )}
+              ) : null}
 
               {schemaActionMessage ? (
                 <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
@@ -2006,15 +2196,12 @@ function ScopeAndGroupSection({
   selectedWt,
   selectedWideTableRecords,
   onSelectWt,
-  isDemoRequirement,
   onUpdateWideTable,
   onReplaceWideTableRecords,
   taskGroups,
   fetchTasks,
   onTaskGroupsChange,
   onFetchTasksChange,
-  onRequirementChange,
-  onRefreshData,
   stepStatuses,
   onStepStatusesChange,
 }: {
@@ -2026,21 +2213,19 @@ function ScopeAndGroupSection({
   selectedWt?: WideTable;
   selectedWideTableRecords: WideTableRecord[];
   onSelectWt: (id: string) => void;
-  isDemoRequirement: boolean;
   onUpdateWideTable?: (wideTableId: string, updater: (wideTable: WideTable) => WideTable) => void;
   onReplaceWideTableRecords?: (wideTableId: string, nextWideTableRecords: WideTableRecord[]) => void;
   taskGroups: TaskGroup[];
   fetchTasks: FetchTask[];
   onTaskGroupsChange?: (taskGroups: TaskGroup[]) => void;
   onFetchTasksChange?: (fetchTasks: FetchTask[]) => void;
-  onRequirementChange?: (requirement: Requirement) => void;
-  onRefreshData?: () => Promise<void>;
   stepStatuses: StepStatusMap;
   onStepStatusesChange: (statuses: StepStatusMap) => void;
 }) {
   const [pendingDimensionValues, setPendingDimensionValues] = useState<Record<string, string>>({});
   const [rangeMessage, setRangeMessage] = useState("");
-  const [isPersistingPlan, setIsPersistingPlan] = useState(false);
+  const [previewRecords, setPreviewRecords] = useState<WideTableRecord[]>([]);
+  const [previewTotalCount, setPreviewTotalCount] = useState(0);
   const [selectedPreviewBusinessDate, setSelectedPreviewBusinessDate] = useState("");
   const [selectedPreviewYear, setSelectedPreviewYear] = useState("");
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
@@ -2072,12 +2257,12 @@ function ScopeAndGroupSection({
       :
       Array.from(
         new Set(
-          selectedWideTableRecords
+          previewRecords
             .map((record) => String(record[previewBusinessDateFieldName] ?? ""))
             .filter((value) => value.trim() !== ""),
         ),
       ).sort((left, right) => right.localeCompare(left)),
-    [previewBusinessDateFieldName, selectedWideTableRecords, usesBusinessDateAxis],
+    [previewBusinessDateFieldName, previewRecords, usesBusinessDateAxis],
   );
   const visibleAllPreviewBusinessDates = useMemo(
     () => limitFutureBusinessDates(previewBusinessDates, { now: new Date(), maxFuturePeriods: 1 }),
@@ -2139,40 +2324,25 @@ function ScopeAndGroupSection({
   const visiblePreviewRecords = useMemo(
     () => (
       selectedPreviewBusinessDate
-        ? selectedWideTableRecords.filter(
+        ? previewRecords.filter(
           (record) => String(record[previewBusinessDateFieldName] ?? "") === selectedPreviewBusinessDate,
         )
-        : selectedWideTableRecords
+        : previewRecords
     ),
-    [previewBusinessDateFieldName, selectedPreviewBusinessDate, selectedWideTableRecords],
+    [previewBusinessDateFieldName, previewRecords, selectedPreviewBusinessDate],
   );
   const isRangeEditable = Boolean(onUpdateWideTable && onReplaceWideTableRecords && selectedWt);
   const isCEditable = isStepEditable(stepStatuses, "C");
-  const isDEditable = isStepEditable(stepStatuses, "D");
-  const isStepDCompleted = stepStatuses.D === "completed";
-  const isStepDInvalidated = stepStatuses.D === "invalidated";
-  const isProductionScopeReconfirmable = requirement.requirementType === "production" && requirement.status === "aligning";
-  const isPreviewAttributeEditable = Boolean(isDemoRequirement && onReplaceWideTableRecords && selectedWt);
   const hasConfirmedDataUpdateEnabled = requirement.dataUpdateEnabled != null;
-  const dataUpdateEnabled = !isDemoRequirement && resolveRequirementDataUpdateEnabled(requirement);
+  const dataUpdateEnabled = resolveRequirementDataUpdateEnabled(requirement);
   const isOpenEnded = selectedWt && usesBusinessDateAxis
     ? isOpenEndedBusinessDateRange(selectedWt.businessDateRange)
     : false;
-  const requiresScheduleRuleConfiguration = Boolean(selectedWt && !isDemoRequirement && dataUpdateEnabled);
-  const isDataUpdateRangeReady = !dataUpdateEnabled || !usesBusinessDateAxis || isOpenEnded;
-  const isOneOffRangeReady = isDemoRequirement || dataUpdateEnabled || !usesBusinessDateAxis || !isOpenEnded;
-  const isScheduleRuleConfigured = !requiresScheduleRuleConfiguration || Boolean(selectedWt?.scheduleRule);
-  const isDataUpdateDecisionPending = !isDemoRequirement && requirement.requirementType === "production" && !hasConfirmedDataUpdateEnabled;
-  const isConfirmButtonDisabled = !isDEditable
-    || isPersistingPlan
-    || (isStepDCompleted && !isProductionScopeReconfirmable)
-    || isDataUpdateDecisionPending
-    || !isScheduleRuleConfigured
-    || !isDataUpdateRangeReady
-    || !isOneOffRangeReady;
 
   useEffect(() => {
     setRangeMessage("");
+    setPreviewRecords([]);
+    setPreviewTotalCount(0);
     setSelectedPreviewBusinessDate("");
     setSelectedPreviewYear("");
   }, [selectedWtId]);
@@ -2209,7 +2379,7 @@ function ScopeAndGroupSection({
   const handleBusinessDateRangeChange = (
     patch: Partial<WideTable["businessDateRange"]>,
   ) => {
-    setRangeMessage("范围已修改，请重新确认生成预览数据。");
+    setRangeMessage("时间范围已修改，如需查看请点击预览数据。");
     updateSelectedWideTable((wideTable) => {
       const merged = {
         ...wideTable.businessDateRange,
@@ -2223,13 +2393,6 @@ function ScopeAndGroupSection({
         if (merged.end !== "never") {
           merged.end = snapToPeriodEnd(merged.end, freq);
         }
-      }
-
-      // 频率切换时，如果是 Demo 需求，重置为最近一期
-      if (patch.frequency && isDemoRequirement) {
-        const defaults = buildDemoDefaultDateRange(patch.frequency);
-        merged.start = defaults.start;
-        merged.end = defaults.end;
       }
 
       return {
@@ -2288,7 +2451,7 @@ function ScopeAndGroupSection({
       ...prev,
       [dimensionName]: "",
     }));
-    setRangeMessage("维度枚举范围已修改，请重新确认生成预览数据。");
+    setRangeMessage("维度取值已修改，如需查看请点击预览数据。");
 
     // Step status: invalidate downstream of C (i.e., D)
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
@@ -2323,7 +2486,7 @@ function ScopeAndGroupSection({
         updatedAt: new Date().toISOString(),
       };
     });
-    setRangeMessage("维度枚举范围已修改，请重新确认生成预览数据。");
+    setRangeMessage("维度取值已修改，如需查看请点击预览数据。");
 
     // Step status: invalidate downstream of C (i.e., D)
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
@@ -2360,7 +2523,7 @@ function ScopeAndGroupSection({
         updatedAt: new Date().toISOString(),
       };
     });
-    setRangeMessage("维度枚举范围已更新，请重新确认并生成预览。");
+    setRangeMessage("维度取值已更新，如需查看请点击预览数据。");
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
     if (onTaskGroupsChange && selectedWt) {
       const prevPlanVersion = selectedWideTablePlanVersion;
@@ -2414,8 +2577,8 @@ function ScopeAndGroupSection({
     setSqlImportText("");
   };
 
-  const handleConfirmScope = async () => {
-    if (!selectedWt || !onReplaceWideTableRecords) {
+  const handleOpenPreview = () => {
+    if (!selectedWt) {
       return;
     }
 
@@ -2427,7 +2590,7 @@ function ScopeAndGroupSection({
       .map((column) => column.chineseName || column.name);
 
     if (missingDimensions.length > 0) {
-      setRangeMessage(`请先为以下维度配置枚举值：${missingDimensions.join("、")}`);
+      setRangeMessage(`请先为以下维度配置取值：${missingDimensions.join("、")}`);
       return;
     }
 
@@ -2435,100 +2598,23 @@ function ScopeAndGroupSection({
     if (totalCount === 0) {
       setRangeMessage(
         usesBusinessDateAxis
-          ? "当前业务日期范围或维度枚举值不足，无法生成预览数据。"
-          : "当前维度枚举值不足，无法生成快照预览数据。",
+          ? "当前业务日期范围或维度取值不足，无法生成预览数据。"
+          : "当前维度取值不足，无法生成快照预览数据。",
       );
       return;
     }
 
-    const reconciliation = reconcileTaskPlanChange({
-      requirement,
-      wideTable: selectedWt,
-      previousRecords: selectedWideTableRecords,
-      nextRecords: records,
-      taskGroups: taskGroups ?? [],
-      fetchTasks: fetchTasks ?? [],
-    });
-    const nextPlanVersion = reconciliation.nextPlanVersion || Math.max(
-      1,
-      resolveCurrentPlanVersion(selectedWt, selectedWideTableRecords, taskGroups ?? []),
+    setPreviewRecords(records);
+    setPreviewTotalCount(totalCount);
+    setIsPreviewModalOpen(true);
+    setRangeMessage(
+      [
+        usesBusinessDateAxis
+          ? `已生成预览数据（不保存），预计 ${totalCount} 行，当前展示 ${records.length} 行。`
+          : `已生成快照预览（不保存），预计 ${totalCount} 行，当前展示 ${records.length} 行。`,
+        isOpenEnded ? `open-ended 范围仅预览截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期。` : "",
+      ].filter(Boolean).join(" "),
     );
-    const nextPlanFingerprint = reconciliation.nextPlanFingerprint || buildTaskPlanFingerprint(selectedWt, records);
-    const recordsToPersist = records.map((record) => ({
-      ...record,
-      _metadata: {
-        ...record._metadata,
-        planVersion: nextPlanVersion,
-        snapshotKind: "baseline" as const,
-      },
-    }));
-    const nextWideTable: WideTable = {
-      ...selectedWt,
-      currentPlanVersion: nextPlanVersion,
-      currentPlanFingerprint: nextPlanFingerprint,
-      recordCount: totalCount,
-      status: selectedWt.status === "active" ? "active" : "initialized",
-      updatedAt: new Date().toISOString(),
-    };
-
-    try {
-      setIsPersistingPlan(true);
-      await persistWideTablePreview(
-        requirement.id,
-        nextWideTable,
-        recordsToPersist,
-      );
-
-      updateSelectedWideTable(() => nextWideTable);
-      onReplaceWideTableRecords(selectedWt.id, recordsToPersist);
-      if (requirement.requirementType === "production" && requirement.status === "aligning") {
-        onRequirementChange?.({
-          ...requirement,
-          status: "ready",
-          updatedAt: new Date().toISOString(),
-        });
-      }
-      setRangeMessage(
-        [
-          usesBusinessDateAxis
-            ? `已按业务日期与维度枚举生成预览数据，预计 ${totalCount} 行，当前生成 ${records.length} 行。`
-            : `已按当前快照范围生成预览数据，预计 ${totalCount} 行，当前生成 ${records.length} 行。`,
-          "任务组尚未生成，请到【执行】Tab 配置指标分组后再生成任务组。",
-          isOpenEnded ? `open-ended 范围仅预览截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期。` : "",
-        ].filter(Boolean).join(" "),
-      );
-      onStepStatusesChange(completeStep(stepStatuses, "D"));
-      await onRefreshData?.();
-    } catch (error) {
-      setRangeMessage(`保存失败：${formatPersistError(error)}`);
-    } finally {
-      setIsPersistingPlan(false);
-    }
-  };
-
-  const handlePreviewAttributeChange = (
-    anchorRecord: WideTableRecord,
-    column: ColumnDefinition,
-    nextRawValue: string,
-  ) => {
-    if (!selectedWt || !onReplaceWideTableRecords) {
-      return;
-    }
-
-    const bindingKey = getWideTableDimensionBindingKey(selectedWt, anchorRecord);
-    const nextValue = parsePreviewAttributeValue(column, nextRawValue);
-    const nextRecords = selectedWideTableRecords.map((record) =>
-      getWideTableDimensionBindingKey(selectedWt, record) === bindingKey
-        ? { ...record, [column.name]: nextValue }
-        : record,
-    );
-
-    handleReplacePreviewRecords(selectedWt.id, nextRecords);
-    setRangeMessage(`${column.chineseName ?? column.name} 已绑定到当前维度枚举，同组合的预览行已同步更新。`);
-  };
-
-  const handleReplacePreviewRecords = (wideTableId: string, nextRecords: WideTableRecord[]) => {
-    onReplaceWideTableRecords?.(wideTableId, nextRecords);
   };
 
   return (
@@ -2587,15 +2673,13 @@ function ScopeAndGroupSection({
                   <p className="text-xs text-muted-foreground">
                     {businessDateColumn ? `${businessDateColumn.name}${businessDateColumn.chineseName ? `（${businessDateColumn.chineseName}）` : ""}` : "未识别到业务日期维度"}
                     。月频、季频、年频会自动对齐到周期末尾。
-                    {!isDemoRequirement
-                      ? !hasConfirmedDataUpdateEnabled
-                        ? " 请先在下方确认是否定期更新，再决定结束方式。"
-                        : dataUpdateEnabled
-                          ? " 若需要持续增量更新，请把结束方式设为“永不”。"
-                          : " 当前按一次性交付处理，需要给出固定结束日期。"
-                      : " Demo 默认选择最近一期。"}
+                    {!hasConfirmedDataUpdateEnabled
+                      ? " 请先在下方确认是否定期更新，再决定结束方式。"
+                      : dataUpdateEnabled
+                        ? " 若需要持续增量更新，请把结束方式设为“永不”。"
+                        : " 当前按一次性交付处理，需要给出固定结束日期。"}
                   </p>
-                  <div className={cn("grid gap-3 text-xs", isDemoRequirement ? "md:grid-cols-3" : "md:grid-cols-4")}>
+                  <div className={cn("grid gap-3 text-xs", "md:grid-cols-4")}>
                     {isRangeEditable && isCEditable ? (
                       <>
                         <EditableField
@@ -2628,25 +2712,23 @@ function ScopeAndGroupSection({
                             />
                           )}
                         />
-                        {!isDemoRequirement ? (
-                          <EditableField
-                            label="结束方式"
-                            control={(
-                              <select
-                                value={isOpenEnded ? "never" : "fixed"}
-                                onChange={(event) =>
-                                  handleBusinessDateRangeChange({
-                                    end: event.target.value === "never" ? "never" : fallbackBusinessDateEnd(selectedWt.businessDateRange.start),
-                                  })
-                                }
-                                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                              >
-                                <option value="fixed">具体日期</option>
-                                <option value="never">永不</option>
-                              </select>
-                            )}
-                          />
-                        ) : null}
+                        <EditableField
+                          label="结束方式"
+                          control={(
+                            <select
+                              value={isOpenEnded ? "never" : "fixed"}
+                              onChange={(event) =>
+                                handleBusinessDateRangeChange({
+                                  end: event.target.value === "never" ? "never" : fallbackBusinessDateEnd(selectedWt.businessDateRange.start),
+                                })
+                              }
+                              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            >
+                              <option value="fixed">具体日期</option>
+                              <option value="never">永不</option>
+                            </select>
+                          )}
+                        />
                         <EditableField
                           label="结束日期"
                           control={isOpenEnded ? (
@@ -2732,15 +2814,15 @@ function ScopeAndGroupSection({
                 </div>
               )}
 
-              {!isDemoRequirement && usesBusinessDateAxis && !hasConfirmedDataUpdateEnabled ? (
+              {usesBusinessDateAxis && !hasConfirmedDataUpdateEnabled ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前尚未确认是否定期更新。请先到下方“数据更新”里完成选择，再确认范围并生成预览。
+                  当前尚未确认是否定期更新。提交前需要在下方“数据更新”里完成选择。
                 </div>
               ) : null}
 
-              {!isDemoRequirement && usesBusinessDateAxis && hasConfirmedDataUpdateEnabled && !dataUpdateEnabled && isOpenEnded ? (
+              {usesBusinessDateAxis && hasConfirmedDataUpdateEnabled && !dataUpdateEnabled && isOpenEnded ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前已标记为一次性交付，但业务日期结束方式仍为“永不”。请将结束方式改为“具体日期”后，再确认范围并生成预览。
+                  当前已标记为一次性交付，但业务日期结束方式仍为“永不”。提交前请将结束方式改为“具体日期”。
                 </div>
               ) : null}
 
@@ -2748,9 +2830,9 @@ function ScopeAndGroupSection({
               <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
                 <h4 className="text-sm font-semibold">维度取值</h4>
                 <p className="text-xs text-muted-foreground">
-                  {isDemoRequirement
-                    ? "这里只管理非业务日期维度。每个维度都要明确可枚举的取值。"
-                    : "正式需求只允许调整维度取值；Schema 保持只读。"}
+                  {requirement.schemaLocked
+                    ? "Schema 已锁定。维度取值的调整会触发计划重建，并以新版本运行。"
+                    : "这里只管理非业务日期维度。每个维度都要明确可枚举的取值。"}
                 </p>
                 {dimensionColumns.length === 0 ? (
                   <div className="text-xs text-muted-foreground">当前宽表没有可配置的普通维度列。</div>
@@ -2868,7 +2950,7 @@ function ScopeAndGroupSection({
                 <div className="space-y-1">
                   <h4 className="text-sm font-semibold">预览与生成</h4>
                   <p className="text-xs text-muted-foreground">
-                    预览已调整为弹窗展示，请使用右下角按钮操作。
+                    预览以弹窗形式展示，点击右侧按钮即可查看。
                   </p>
                 </div>
 
@@ -2879,49 +2961,13 @@ function ScopeAndGroupSection({
                 ) : null}
 
                 <div className="flex flex-wrap items-center justify-end gap-3">
-                  {isRangeEditable ? (
-                    <>
-                      {!isScheduleRuleConfigured ? (
-                        <span className="text-xs text-amber-700">请先完成数据更新中的调度规则配置</span>
-                      ) : null}
-                      {!isDataUpdateRangeReady ? (
-                        <span className="text-xs text-amber-700">持续增量更新需要把结束方式设为“永不”</span>
-                      ) : null}
-                      {!isOneOffRangeReady ? (
-                        <span className="text-xs text-amber-700">一次性交付需要给出固定结束日期</span>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={handleConfirmScope}
-                        disabled={isConfirmButtonDisabled}
-                        className={cn(
-                          "rounded-md px-3 py-2 text-xs font-medium",
-                          isConfirmButtonDisabled
-                            ? "cursor-not-allowed bg-muted text-muted-foreground"
-                            : "bg-primary text-primary-foreground hover:opacity-90",
-                        )}
-                      >
-                        {isPersistingPlan ? "保存中..." : "确认范围并生成预览"}
-                      </button>
-                    </>
-                  ) : null}
                   <button
                     type="button"
-                    onClick={() => setIsPreviewModalOpen(true)}
+                    onClick={handleOpenPreview}
                     className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
                   >
-                    查看预览
+                    预览数据
                   </button>
-                  {isStepDCompleted && (selectedWt?.status === "initialized" || selectedWt?.status === "active") ? (
-                    <span className="text-xs text-muted-foreground">
-                      {isProductionScopeReconfirmable ? "正式配置已更新，可重新确认" : "当前版本已确认"}
-                    </span>
-                  ) : null}
-                  {isStepDInvalidated ? (
-                    <span className="text-xs text-orange-600">
-                      {isProductionScopeReconfirmable ? "正式配置已更新，请重新确认" : "配置已变更，请重新确认"}
-                    </span>
-                  ) : null}
                 </div>
 
                 {isPreviewModalOpen ? (
@@ -2937,15 +2983,15 @@ function ScopeAndGroupSection({
                           关闭
                         </button>
                       </div>
-                      {selectedWideTableRecords.length === 0 ? (
+                      {previewRecords.length === 0 ? (
                         <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                          {usesBusinessDateAxis ? "还没有预览数据，先确认业务日期和维度取值。" : "还没有预览数据，先确认维度取值并生成预览。"}
+                          {usesBusinessDateAxis ? "还没有可展示的预览数据，请先补齐业务日期和维度取值。" : "还没有可展示的预览数据，请先补齐维度取值。"}
                           {isOpenEnded ? ` open-ended 范围仅会生成截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期的预览。` : ""}
                         </div>
                       ) : (
                         <div className="space-y-3">
                           <div className="text-xs text-muted-foreground">
-                            预计生成 {selectedWt.recordCount} 行，当前展示 {selectedWideTableRecords.length} 行预览。
+                            预计生成 {previewTotalCount} 行，当前展示 {previewRecords.length} 行预览。
                           </div>
                           {previewBusinessDates.length > 0 ? (
                             <div className="space-y-2">
@@ -3011,27 +3057,7 @@ function ScopeAndGroupSection({
                                   <tr key={`${record.wideTableId}-${record.id}`}>
                                     {previewColumns.map((column) => (
                                       <td key={column.id} className="px-2 py-1.5 text-muted-foreground">
-                                        {column.category === "attribute" && isPreviewAttributeEditable ? (
-                                          column.type === "BOOLEAN" ? (
-                                            <select
-                                              value={record[column.name] === true ? "true" : record[column.name] === false ? "false" : ""}
-                                              onChange={(event) => handlePreviewAttributeChange(record, column, event.target.value)}
-                                              className="w-full rounded-md border bg-background px-2 py-1 text-xs"
-                                            >
-                                              <option value="">未设置</option>
-                                              <option value="true">是</option>
-                                              <option value="false">否</option>
-                                            </select>
-                                          ) : (
-                                            <input
-                                              type={previewAttributeInputType(column)}
-                                              value={stringifyPreviewAttributeValue(column, record[column.name])}
-                                              onChange={(event) => handlePreviewAttributeChange(record, column, event.target.value)}
-                                              className="w-full min-w-28 rounded-md border bg-background px-2 py-1 text-xs"
-                                              placeholder={`编辑 ${column.name}`}
-                                            />
-                                          )
-                                        ) : record[column.name] != null && record[column.name] !== "" ? (
+                                        {record[column.name] != null && record[column.name] !== "" ? (
                                           String(record[column.name])
                                         ) : (
                                           "-"
@@ -3219,57 +3245,6 @@ function EditableField({ label, control }: { label: string; control: ReactNode }
       {control}
     </div>
   );
-}
-
-function previewAttributeInputType(column: ColumnDefinition): "text" | "number" | "date" {
-  if (column.type === "NUMBER" || column.type === "INTEGER") {
-    return "number";
-  }
-
-  if (column.type === "DATE") {
-    return "date";
-  }
-
-  return "text";
-}
-
-function stringifyPreviewAttributeValue(column: ColumnDefinition, value: unknown): string {
-  if (value == null) {
-    return "";
-  }
-
-  if (column.type === "DATE" && typeof value === "string") {
-    return value;
-  }
-
-  return String(value);
-}
-
-function parsePreviewAttributeValue(column: ColumnDefinition, rawValue: string): string | number | boolean | null {
-  if (column.type === "BOOLEAN") {
-    if (rawValue === "true") {
-      return true;
-    }
-    if (rawValue === "false") {
-      return false;
-    }
-    return null;
-  }
-
-  if (column.type === "NUMBER" || column.type === "INTEGER") {
-    if (rawValue.trim() === "") {
-      return null;
-    }
-
-    const parsed = Number(rawValue);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-
-    return column.type === "INTEGER" ? Math.trunc(parsed) : parsed;
-  }
-
-  return rawValue;
 }
 
 function buildDefaultScheduleRule(

@@ -449,10 +449,10 @@ export function buildSelectableBusinessDates(
 }
 
 /**
- * Demo 模式下的默认"最近一期"日期范围。
+ * 默认“最近一期”日期范围。
  * 返回 { start, end } 都是同一个 period-end date。
  */
-export function buildDemoDefaultDateRange(
+export function buildDefaultDateRange(
   frequency: BusinessDateFrequency,
   referenceDate?: Date,
 ): { start: string; end: string } {
@@ -491,3 +491,6 @@ export function buildDemoDefaultDateRange(
   const prev = formatBusinessDate(getPeriodEnd(prevStart, frequency));
   return { start: prev, end: prev };
 }
+
+// Backward compatibility (historical naming).
+export const buildDemoDefaultDateRange = buildDefaultDateRange;

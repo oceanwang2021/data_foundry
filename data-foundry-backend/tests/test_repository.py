@@ -165,19 +165,19 @@ class DataFoundryRepositoryTestCase(unittest.TestCase):
             ["REQ-2026-001", "REQ-2026-004"],
         )
 
-        demo_requirement = project_requirements[0]
-        self.assertEqual(demo_requirement.phase, "demo")
-        self.assertFalse(demo_requirement.schema_locked)
-        self.assertIsNotNone(demo_requirement.wide_table)
-        assert demo_requirement.wide_table is not None
-        self.assertEqual(demo_requirement.wide_table.id, "WT-AD-OPS")
+        ops_requirement = project_requirements[0]
+        self.assertEqual(ops_requirement.phase, "production")
+        self.assertFalse(ops_requirement.schema_locked)
+        self.assertIsNotNone(ops_requirement.wide_table)
+        assert ops_requirement.wide_table is not None
+        self.assertEqual(ops_requirement.wide_table.id, "WT-AD-OPS")
         self.assertEqual(
-            [column.key for column in demo_requirement.wide_table.table_schema.dimension_columns],
+            [column.key for column in ops_requirement.wide_table.table_schema.dimension_columns],
             ["company"],
         )
-        self.assertEqual(demo_requirement.wide_table.semantic_time_axis, "none")
-        self.assertEqual(demo_requirement.wide_table.collection_coverage_mode, "full_snapshot")
-        self.assertEqual(demo_requirement.wide_table.record_count, 5)
+        self.assertEqual(ops_requirement.wide_table.semantic_time_axis, "none")
+        self.assertEqual(ops_requirement.wide_table.collection_coverage_mode, "full_snapshot")
+        self.assertEqual(ops_requirement.wide_table.record_count, 5)
 
         safety_requirement = project_requirements[1]
         self.assertEqual(safety_requirement.phase, "production")

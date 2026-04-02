@@ -265,9 +265,10 @@ function mapRequirement(raw: any): Requirement {
   return {
     id: raw.id,
     projectId: raw.project_id,
-    requirementType: raw.phase ?? "demo",
+    requirementType: "production",
     title: raw.title,
     status: mapRequirementStatus(raw.status),
+    schemaLocked: raw.schema_locked ?? undefined,
     owner: raw.owner ?? "",
     assignee: raw.assignee ?? "",
     businessGoal: raw.business_goal ?? "",
@@ -900,7 +901,7 @@ export async function createRequirement(
   const runtimeSettings = loadRuntimeSettings();
   const raw = await apiPost<any>(`/api/projects/${projectId}/requirements`, {
     title: data.title,
-    phase: "demo",
+    phase: "production",
     owner: data.owner,
     assignee: data.assignee,
     business_goal: data.businessGoal ?? data.backgroundKnowledge ?? "",
@@ -951,16 +952,6 @@ export async function updateRequirement(
   return mapRequirement(raw);
 }
 
-export async function convertRequirement(
-  projectId: string,
-  requirementId: string,
-): Promise<Requirement> {
-  const raw = await apiPost<any>(
-    `/api/projects/${projectId}/requirements/${requirementId}/convert`,
-  );
-  return mapRequirement(raw);
-}
-
 // ---- Wide Table Rows ----
 
 export async function fetchWideTableRows(
@@ -1007,6 +998,158 @@ export async function updateWideTableRow(
     row_status: data.rowStatus,
     system_values: data.systemValues,
   });
+}
+
+type BackendIndicatorGroup = {
+  id: string;
+  name: string;
+  indicator_keys: string[];
+  execution_mode: "agent" | "human";
+  default_agent?: string;
+  prompt_template?: string;
+  prompt_config?: {
+    core_query_requirement?: string;
+    business_knowledge?: string;
+    output_constraints?: string;
+    last_edited_at?: string;
+  };
+  description?: string;
+  priority?: number;
+  timeout_seconds?: number;
+  source_preference?: string[];
+};
+
+type BackendScheduleRule = {
+  id: string;
+  frequency: "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+  trigger_time: string;
+  auto_retry_limit?: number;
+  enabled?: boolean;
+};
+
+function isValidBackendFrequency(value: unknown): value is BackendScheduleRule["frequency"] {
+  return value === "daily"
+    || value === "weekly"
+    || value === "monthly"
+    || value === "quarterly"
+    || value === "yearly";
+}
+
+function resolveBackendFrequency(wideTable: WideTable, scheduleRule?: ScheduleRule): BackendScheduleRule["frequency"] {
+  const candidate = scheduleRule?.periodLabel ?? wideTable.businessDateRange.frequency;
+  return isValidBackendFrequency(candidate) ? candidate : "monthly";
+}
+
+function resolveBackendTriggerTime(scheduleRule?: ScheduleRule): string {
+  const candidate = scheduleRule?.cronExpression;
+  if (!candidate) {
+    return "09:00";
+  }
+  // Backend compares lexicographically (HH:MM), keep a strict default when invalid.
+  return /^\d{2}:\d{2}$/.test(candidate) ? candidate : "09:00";
+}
+
+function toBackendScheduleRules(wideTable: WideTable): BackendScheduleRule[] | undefined {
+  if (!wideTable.scheduleRule) {
+    return undefined;
+  }
+  return [
+    {
+      id: wideTable.scheduleRule.id || `sr_${wideTable.id}`,
+      frequency: resolveBackendFrequency(wideTable, wideTable.scheduleRule),
+      trigger_time: resolveBackendTriggerTime(wideTable.scheduleRule),
+      auto_retry_limit: 0,
+      enabled: true,
+    },
+  ];
+}
+
+function buildFallbackIndicatorGroup(wideTable: WideTable): BackendIndicatorGroup {
+  const indicatorColumns = wideTable.schema.columns.filter((col) => col.category === "indicator").map((col) => col.name);
+  const fallback = wideTable.indicatorGroups[0];
+  return {
+    id: fallback?.id ?? `ig_${wideTable.id}_all`,
+    name: fallback?.name ?? "默认分组",
+    indicator_keys: indicatorColumns,
+    execution_mode: "agent",
+    default_agent: fallback?.agent ?? undefined,
+    prompt_template: fallback?.promptTemplate ?? undefined,
+    prompt_config: fallback?.promptConfig
+      ? {
+          core_query_requirement: fallback.promptConfig.coreQueryRequirement ?? undefined,
+          business_knowledge: fallback.promptConfig.businessKnowledge ?? undefined,
+          output_constraints: fallback.promptConfig.outputConstraints ?? undefined,
+          last_edited_at: fallback.promptConfig.lastEditedAt ?? undefined,
+        }
+      : undefined,
+    description: fallback?.description ?? "",
+    priority: fallback?.priority ?? 100,
+    source_preference: [],
+  };
+}
+
+function toBackendIndicatorGroupsForUpdate(wideTable: WideTable): BackendIndicatorGroup[] {
+  const indicatorColumns = wideTable.schema.columns.filter((col) => col.category === "indicator").map((col) => col.name);
+  const expected = new Set(indicatorColumns);
+  const flattened: string[] = [];
+  let allGroupsNonEmpty = true;
+  for (const group of wideTable.indicatorGroups) {
+    if (group.indicatorColumns.length === 0) {
+      allGroupsNonEmpty = false;
+    }
+    flattened.push(...group.indicatorColumns);
+  }
+  const hasDuplicates = flattened.length !== new Set(flattened).size;
+  const coversAll = flattened.length > 0 && flattened.every((key) => expected.has(key)) && expected.size === new Set(flattened).size;
+  const isValidGrouping = expected.size > 0 && allGroupsNonEmpty && !hasDuplicates && coversAll;
+
+  if (!isValidGrouping) {
+    return [buildFallbackIndicatorGroup(wideTable)];
+  }
+
+  return wideTable.indicatorGroups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    indicator_keys: group.indicatorColumns,
+    execution_mode: "agent",
+    default_agent: group.agent ?? undefined,
+    prompt_template: group.promptTemplate ?? undefined,
+    prompt_config: group.promptConfig
+      ? {
+          core_query_requirement: group.promptConfig.coreQueryRequirement ?? undefined,
+          business_knowledge: group.promptConfig.businessKnowledge ?? undefined,
+          output_constraints: group.promptConfig.outputConstraints ?? undefined,
+          last_edited_at: group.promptConfig.lastEditedAt ?? undefined,
+        }
+      : undefined,
+    description: group.description ?? "",
+    priority: group.priority ?? 100,
+    source_preference: [],
+  }));
+}
+
+export async function updateRequirementWideTable(
+  requirementId: string,
+  wideTable: WideTable,
+): Promise<WideTable> {
+  const normalizedWideTable = normalizeWideTableMode(wideTable);
+  const scheduleRules = toBackendScheduleRules(normalizedWideTable);
+
+  const raw = await apiPut<any>(
+    `/api/requirements/${requirementId}/wide-tables/${normalizedWideTable.id}`,
+    {
+      title: normalizedWideTable.name,
+      description: normalizedWideTable.description,
+      schema: toBackendWideTableSchema(normalizedWideTable),
+      scope: toBackendWideTableScope(normalizedWideTable),
+      indicator_groups: toBackendIndicatorGroupsForUpdate(normalizedWideTable),
+      schedule_rules: scheduleRules,
+      semantic_time_axis: resolveWideTableSemanticTimeAxis(normalizedWideTable),
+      collection_coverage_mode: resolveWideTableCollectionCoverageMode(normalizedWideTable),
+    },
+  );
+
+  return mapWideTable(raw, requirementId);
 }
 
 export async function persistWideTablePlan(

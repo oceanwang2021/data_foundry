@@ -158,7 +158,7 @@ def build_collection_batches(
                 status="pending",
                 is_current=True,
                 plan_version=1,
-                triggered_by="manual" if requirement.phase == "demo" else "cron",
+                triggered_by="cron",
                 created_at=timestamp,
                 updated_at=timestamp,
             )
@@ -524,7 +524,7 @@ def build_execution_records(
             if task.status in {"completed", "failed"}
             else None
         )
-        trigger_type = "manual" if requirement.phase == "demo" else "cron"
+        trigger_type = "cron"
         records.append(
             ExecutionRecord(
                 id=f"RUN-{task.id}",
@@ -533,13 +533,13 @@ def build_execution_records(
                 status="running" if task.status == "running" else task.status,
                 started_at=started_at.strftime("%Y-%m-%d %H:%M"),
                 ended_at=ended_at.strftime("%Y-%m-%d %H:%M") if ended_at else None,
-                operator="系统" if trigger_type == "cron" else requirement.assignee,
+                operator="系统",
                 output_ref=(
                     f"artifact://tasks/{task.id}/long-table.csv"
                     if task.status in {"running", "completed"}
                     else None
                 ),
-                log_ref=f"log://{requirement.phase}/{task.id}/{started_at.strftime('%Y%m%d-%H%M')}",
+                log_ref=f"log://requirements/{task.id}/{started_at.strftime('%Y%m%d-%H%M')}",
             )
         )
     return records

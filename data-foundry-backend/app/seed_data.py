@@ -423,7 +423,7 @@ SEED_REQUIREMENTS: list[Requirement] = [
         id="REQ-2026-001",
         project_id="PROJ-001",
         title="自动驾驶运营快照采集",
-        phase="demo",
+        phase="production",
         schema_locked=False,
         status="scoping",
         owner="业务-张宁",
@@ -482,12 +482,12 @@ SEED_REQUIREMENTS: list[Requirement] = [
         id="REQ-2026-002",
         project_id="PROJ-002",
         title="ADC 三期疗效采集",
-        phase="demo",
-        schema_locked=False,
+        phase="production",
+        schema_locked=True,
         status="stabilized",
         owner="业务-李珂",
         assignee="算法-许越",
-        business_goal="先在 Demo 阶段把临床疗效与安全性的宽表 Schema、指标组和业务日期范围稳定下来。",
+        business_goal="先把临床疗效与安全性的宽表 Schema、指标组和业务日期范围稳定下来。",
         background_knowledge="需要按药物和适应症固定主维度，避免跨队列比较。",
         data_update_enabled=False,
         wide_table=ADC_DEMO_TABLE,
@@ -1111,8 +1111,7 @@ def _select_seed_task_group_batches(
 ) -> list["CollectionBatch"]:
     business_date_scope = wide_table.scope.business_date
     if (
-        requirement.phase != "production"
-        or wide_table.collection_coverage_mode != "incremental_by_business_date"
+        wide_table.collection_coverage_mode != "incremental_by_business_date"
         or business_date_scope is None
     ):
         return collection_batches

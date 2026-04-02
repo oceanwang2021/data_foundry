@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { convertRequirement, fetchPreprocessRules } from "@/lib/api-client";
+import { fetchPreprocessRules } from "@/lib/api-client";
 import type {
   ColumnDefinition,
   FetchTask,
@@ -214,7 +214,6 @@ export default function RequirementDataProcessingPanel({
   onRefreshData,
 }: Props) {
   const [rules, setRules] = useState<PreprocessRule[]>(() => buildRequirementPreprocessRules(requirement));
-  const isDemoRequirement = requirement.requirementType === "demo";
 
   useEffect(() => {
     if (rules.length === 0) {
@@ -227,8 +226,6 @@ export default function RequirementDataProcessingPanel({
   }, [rules.length]);
   const [selectedTaskModal, setSelectedTaskModal] = useState<SelectedTaskModalState | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<DataSubTab>("narrow");
-  const [conversionMessage, setConversionMessage] = useState("");
-  const [isConverting, setIsConverting] = useState(false);
 
   const enabledCategories = useMemo(
     () => new Set(rules.filter((item) => item.enabled).map((item) => item.category)),
@@ -283,29 +280,7 @@ export default function RequirementDataProcessingPanel({
     [currentWideTableRecords, enabledCategories, requirement, wideTables],
   );
 
-  const handleConvertToProduction = async () => {
-    if (!isDemoRequirement || isConverting) return;
-    setIsConverting(true);
-    setConversionMessage("");
-    try {
-      const nextRequirement = await convertRequirement(requirement.projectId, requirement.id);
-      onRequirementChange?.(nextRequirement);
-      await onRefreshData?.();
-      const containsFullSnapshotTable = requirementWideTables.some((wideTable) => !hasWideTableBusinessDateDimension(wideTable));
-      setConversionMessage(
-        containsFullSnapshotTable
-          ? "正式需求已经创建成功。请先在“定义 > 数据范围”里确认正式范围，再到“数据更新”里确认是否持续全量更新，并重新生成预览与任务输入。"
-          : "正式需求已经创建成功。请先在“定义 > 数据范围”里确认正式范围；如需持续增量更新，请将结束方式改为“永不”，再到“数据更新”里确认更新方式并重新生成预览与任务输入。",
-      );
-    } catch (error: any) {
-      const reason = error?.message === "Failed to fetch"
-        ? "无法连接后端接口，请确认服务可访问。"
-        : error?.message ?? "未知错误";
-      setConversionMessage(`转换失败：${reason}`);
-    } finally {
-      setIsConverting(false);
-    }
-  };
+  // Demo → 正式转换流程已取消：需求创建后即可直接进入任务与数据产出。
 
   return (
     <div className="space-y-6">
@@ -375,11 +350,6 @@ export default function RequirementDataProcessingPanel({
                 按需求定义的结构查看当前结果；点亮的指标单元格可直接回溯到对应任务。
               </p>
             </div>
-            {conversionMessage ? (
-              <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
-                {conversionMessage}
-              </div>
-            ) : null}
             {wideTableViews.length === 0 ? <EmptyWideTableState /> : null}
             {wideTableViews.map((view) => {
               const wideTable = wideTables.find((item) => item.id === view.wideTableId);
@@ -403,15 +373,6 @@ export default function RequirementDataProcessingPanel({
                 />
               );
             })}
-            {isDemoRequirement ? (
-              <div className="flex items-center justify-end gap-3">
-                <button type="button" onClick={() => void handleConvertToProduction()}
-                  disabled={isConverting}
-                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90">
-                  {isConverting ? "转换中..." : "转为正式需求"}
-                </button>
-              </div>
-            ) : null}
           </section>
         </div>
       ) : null}
@@ -1610,13 +1571,13 @@ function resolveIndicatorCellBinding(
   const taskGroup = context.taskGroupByBindingKey.get(bindingKey)
     ?? context.taskGroupByRowIdKey.get(buildTaskGroupRowIdKey(businessDate, rowId))
     ?? (businessDate > buildTodayBusinessDate()
-      ? buildPlannedTaskGroup(context.wideTable.id, context.requirement.requirementType, businessDate, context.currentPlanVersion, buildTodayBusinessDate())
+      ? buildPlannedTaskGroup(context.wideTable.id, businessDate, context.currentPlanVersion, buildTodayBusinessDate())
       : undefined);
   return { ...headerBinding, taskGroup };
 }
 
-function buildPlannedTaskGroup(wideTableId: string, requirementType: Requirement["requirementType"], businessDate: string, planVersion: number, today: string): TaskGroup {
-  const triggeredBy = requirementType === "demo" ? "manual" : businessDate <= today ? "backfill" : "schedule";
+function buildPlannedTaskGroup(wideTableId: string, businessDate: string, planVersion: number, today: string): TaskGroup {
+  const triggeredBy = businessDate <= today ? "backfill" : "schedule";
   return { id: `tg_planned_${businessDate}`, wideTableId, businessDate, businessDateLabel: businessDate, planVersion, status: "pending", totalTasks: 0, completedTasks: 0, failedTasks: 0, triggeredBy, createdAt: "", updatedAt: "" };
 }
 

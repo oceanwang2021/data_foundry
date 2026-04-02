@@ -20,3 +20,9 @@ tmp/
 .uv-cache/
 *.log
 *.err.log
+
+# local artifacts
+*.zip
+_sqlite_test.sqlite3
+_sqlite_test.sqlite3-journal
+data-foundry-frontend/tmp-*.js

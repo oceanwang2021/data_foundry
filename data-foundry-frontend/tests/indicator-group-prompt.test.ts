@@ -9,7 +9,7 @@ import {
 const requirement: Requirement = {
   id: "REQ-1",
   projectId: "PRJ-1",
-  requirementType: "demo",
+  requirementType: "production",
   title: "自动驾驶运营快照采集",
   status: "running",
   owner: "业务",

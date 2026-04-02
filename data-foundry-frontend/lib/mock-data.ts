@@ -61,7 +61,7 @@ export const MOCK_REQUIREMENTS: Requirement[] = [
   {
     id: "REQ-2026-001",
     projectId: "PROJ-001",
-    requirementType: "demo",
+    requirementType: "production",
     title: "自动驾驶运营快照采集",
     status: "ready",
     owner: "业务-张宁",
@@ -75,7 +75,7 @@ export const MOCK_REQUIREMENTS: Requirement[] = [
   {
     id: "REQ-2026-004",
     projectId: "PROJ-001",
-    requirementType: "demo",
+    requirementType: "production",
     title: "自动驾驶安全月度采集",
     status: "ready",
     owner: "业务-张宁",
@@ -89,12 +89,12 @@ export const MOCK_REQUIREMENTS: Requirement[] = [
   {
     id: "REQ-2026-002",
     projectId: "PROJ-002",
-    requirementType: "demo",
+    requirementType: "production",
     title: "ADC 三期疗效采集",
     status: "ready",
     owner: "业务-李珂",
     assignee: "算法-许越",
-    businessGoal: "先在 Demo 阶段把临床疗效与安全性的宽表 Schema、指标组和业务日期范围稳定下来。",
+    businessGoal: "先把临床疗效与安全性的宽表 Schema、指标组和业务日期范围稳定下来。",
     businessBoundary: "需要按药物和适应症固定主维度，避免跨队列比较",
     deliveryScope: "DS-8201，HER2阳性乳腺癌，2024",
     createdAt: "2026-01-28T08:00:00Z",
