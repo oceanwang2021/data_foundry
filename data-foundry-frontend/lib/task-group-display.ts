@@ -54,7 +54,9 @@ export function buildFullSnapshotTaskGroupPages(
       taskGroupId: taskGroup.id,
       scheduleJobId: latestJob?.id,
       startedAt,
-      pageLabel: formatTaskGroupStartedAtLabel(startedAt),
+      pageLabel: taskGroup.triggeredBy === "trial"
+        ? `试运行 ${formatTaskGroupStartedAtLabel(startedAt)}`
+        : formatTaskGroupStartedAtLabel(startedAt),
       pageHint: taskGroup.partitionLabel ?? taskGroup.businessDateLabel ?? "全量快照",
     };
   }).sort((left, right) => {

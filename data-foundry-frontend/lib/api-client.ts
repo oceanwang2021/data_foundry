@@ -519,6 +519,7 @@ function mapBackfillRequest(raw: any): BackfillRequest {
 function mapAcceptanceTicket(raw: any): AcceptanceTicket {
   return {
     id: raw.id,
+    taskGroupId: raw.task_group_id ?? "",
     dataset: raw.dataset,
     requirementId: raw.requirement_id,
     status: raw.status,
@@ -1259,6 +1260,41 @@ export async function generateTaskGroups(requirementId: string): Promise<TaskGro
   return raw.map(mapTaskGroup);
 }
 
+export async function createTrialRun(
+  requirementId: string,
+  data: {
+    wideTableId: string;
+    businessDates?: string[];
+    dimensionValues?: Record<string, string[]>;
+    maxRows?: number;
+    operator?: string;
+  },
+): Promise<{
+  batch: CollectionBatch;
+  taskGroups: TaskGroup[];
+  fetchTasks: FetchTask[];
+  rowCount: number;
+  taskCount: number;
+}> {
+  const raw = await apiPost<any>(
+    `/api/requirements/${requirementId}/trial-run`,
+    {
+      wideTableId: data.wideTableId,
+      businessDates: data.businessDates ?? [],
+      dimensionValues: data.dimensionValues ?? {},
+      maxRows: data.maxRows ?? 20,
+      operator: data.operator ?? "system",
+    },
+  );
+  return {
+    batch: mapCollectionBatch(raw.batch),
+    taskGroups: (raw.task_groups ?? []).map(mapTaskGroup),
+    fetchTasks: (raw.fetch_tasks ?? []).map(mapFetchTask),
+    rowCount: raw.row_count ?? 0,
+    taskCount: raw.task_count ?? 0,
+  };
+}
+
 // ---- Fetch Tasks ----
 
 export async function fetchFetchTasks(
@@ -1280,8 +1316,19 @@ export async function retryTask(taskId: string): Promise<void> {
   await apiPost(`/api/tasks/${taskId}/retry`);
 }
 
-export async function executeTaskGroup(taskGroupId: string): Promise<void> {
-  await apiPost(`/api/task-groups/${taskGroupId}/execute`);
+export async function executeTaskGroup(
+  taskGroupId: string,
+  options?: { triggerType?: "manual" | "trial"; operator?: string },
+): Promise<void> {
+  await apiPost(
+    `/api/task-groups/${taskGroupId}/execute`,
+    options
+      ? {
+          trigger_type: options.triggerType ?? "manual",
+          operator: options.operator ?? "manual",
+        }
+      : undefined,
+  );
 }
 
 // ---- Backfill ----
@@ -1339,14 +1386,18 @@ export async function fetchAcceptanceTickets(): Promise<AcceptanceTicket[]> {
 export async function createAcceptanceTicket(data: {
   dataset: string;
   requirementId: string;
+  taskGroupId: string;
   owner: string;
   feedback?: string;
+  status?: "approved" | "rejected";
 }): Promise<AcceptanceTicket> {
   const raw = await apiPost<any>("/api/acceptance-tickets", {
     dataset: data.dataset,
     requirement_id: data.requirementId,
+    task_group_id: data.taskGroupId,
     owner: data.owner,
     feedback: data.feedback,
+    status: data.status,
   });
   return mapAcceptanceTicket(raw);
 }

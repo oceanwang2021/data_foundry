@@ -15,6 +15,7 @@ export default function ProjectRequirementDetailPage() {
   const requestedTab = searchParams?.get("tab") ?? undefined;
   const requestedGuide = searchParams?.get("guide") ?? undefined;
   const viewMode = searchParams?.get("view") ?? undefined;
+  const navSource = searchParams?.get("nav") ?? undefined;
 
   const [project, setProject] = useState<Project | null>(null);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -72,9 +73,22 @@ export default function ProjectRequirementDetailPage() {
       requirementId={reqId}
       requestedTab={requestedTab}
       requestedGuide={requestedGuide}
+      navSource={
+        navSource === "projects"
+          ? "projects"
+          : navSource === "requirements"
+          ? "requirements"
+          : navSource === "tasks"
+          ? "tasks"
+          : navSource === "acceptance"
+          ? "acceptance"
+          : undefined
+      }
       viewMode={
         viewMode === "requirement"
           ? "requirement"
+          : viewMode === "acceptance"
+          ? "acceptance"
           : viewMode === "tasks"
           ? "tasks"
           : undefined

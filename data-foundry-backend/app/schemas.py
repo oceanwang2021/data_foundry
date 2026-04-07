@@ -760,6 +760,24 @@ class BackfillRequestCreateInput(BaseModel):
     requested_by: str = "system"
 
 
+class TrialRunCreateInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    wide_table_id: str = Field(alias="wideTableId")
+    business_dates: list[str] = Field(default_factory=list, alias="businessDates")
+    dimension_values: dict[str, list[str]] = Field(default_factory=dict, alias="dimensionValues")
+    max_rows: int = Field(default=20, ge=1, le=200, alias="maxRows")
+    operator: str = "system"
+
+
+class TrialRunResult(BaseModel):
+    batch: CollectionBatch
+    task_groups: list[TaskGroup]
+    fetch_tasks: list[FetchTask]
+    row_count: int
+    task_count: int
+
+
 class TaskExecuteInput(BaseModel):
     trigger_type: TriggerType = "manual"
     operator: str = "system"
@@ -768,18 +786,20 @@ class TaskExecuteInput(BaseModel):
 class AcceptanceTicketCreateInput(BaseModel):
     dataset: str
     requirement_id: str
+    task_group_id: str
     owner: str
     feedback: str | None = None
+    status: AcceptanceStatus | None = None
 
 
 class AcceptanceTicketUpdateInput(BaseModel):
-    status: Literal["approved", "rejected", "fixing", "deleted"] | None = None
+    status: AcceptanceStatus | None = None
     feedback: str | None = None
 
 
 # ==================== 新增表的数据模型 ====================
 
-AcceptanceStatus = Literal["approved", "rejected", "fixing", "deleted"]
+AcceptanceStatus = Literal["pending", "approved", "rejected", "fixing", "deleted"]
 PreprocessRuleSource = Literal["platform", "business"]
 PreprocessRuleCategory = Literal["format_fix", "null_fix", "unit_convert", "derived"]
 AuditRuleMode = Literal["non_blocking", "blocking"]
@@ -811,6 +831,7 @@ class AuditRule(BaseModel):
 
 class AcceptanceTicket(BaseModel):
     id: str
+    task_group_id: str
     dataset: str
     requirement_id: str
     status: AcceptanceStatus

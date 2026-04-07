@@ -14,6 +14,7 @@ import type {
 import type { ScheduleJob } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import {
+  createTrialRun,
   executeTask,
   executeTaskGroup,
   persistWideTablePlan,
@@ -87,6 +88,7 @@ type Props = {
   onTaskGroupsChange: (nextTaskGroups: TaskGroup[]) => void;
   onFetchTasksChange: (nextFetchTasks: FetchTask[]) => void;
   onTaskGroupRunsChange: (nextTaskGroupRuns: ScheduleJob[]) => void;
+  navSource?: "projects" | "requirements" | "tasks" | "acceptance";
 };
 
 const triggerLabel: Record<string, string> = {
@@ -94,7 +96,16 @@ const triggerLabel: Record<string, string> = {
   backfill: "初始补数",
   manual: "手动执行",
   manual_retry: "手动重试",
+  trial: "试运行",
 };
+
+type TaskSubTabKey = "prompts" | "trial" | "tasks";
+
+const taskSubTabs: Array<{ key: TaskSubTabKey; label: string }> = [
+  { key: "prompts", label: "采集提示词管理" },
+  { key: "trial", label: "试运行" },
+  { key: "tasks", label: "采集任务" },
+];
 
 const DEFAULT_INDICATOR_GROUP_PREFIX = "ig_default_";
 
@@ -128,6 +139,7 @@ export default function RequirementTasksPanel({
   onTaskGroupsChange,
   onFetchTasksChange,
   onTaskGroupRunsChange,
+  navSource,
 }: Props) {
   const searchParams = useSearchParams();
   const [selectedWtId, setSelectedWtId] = useState<string>(wideTables[0]?.id ?? "");
@@ -141,11 +153,18 @@ export default function RequirementTasksPanel({
   const [isPersistingPrompts, setIsPersistingPrompts] = useState(false);
   const [promptEditorModes, setPromptEditorModes] = useState<Record<string, "sections" | "markdown">>({});
   const [promptMarkdownDrafts, setPromptMarkdownDrafts] = useState<Record<string, string>>({});
+  const [trialBusinessDates, setTrialBusinessDates] = useState<string[]>([]);
+  const [trialDimensionValues, setTrialDimensionValues] = useState<Record<string, string[]>>({});
+  const [trialMaxRows, setTrialMaxRows] = useState(20);
+  const [trialRunMessage, setTrialRunMessage] = useState("");
+  const [isStartingTrialRun, setIsStartingTrialRun] = useState(false);
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
   const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
+  const [activeTaskSubTab, setActiveTaskSubTab] = useState<TaskSubTabKey>("prompts");
   const requestedWtId = searchParams?.get("wt");
   const requestedTaskGroupId = searchParams?.get("tg");
   const requestedTaskId = searchParams?.get("task");
+  const navQuery = navSource ? `nav=${navSource}&` : "";
 
   useEffect(() => {
     if (requestedWtId && wideTables.some((wideTable) => wideTable.id === requestedWtId)) {
@@ -158,6 +177,12 @@ export default function RequirementTasksPanel({
       setSelectedTaskId(requestedTaskId);
     }
   }, [requestedTaskGroupId, requestedTaskId, requestedWtId, wideTables]);
+
+  useEffect(() => {
+    if (requestedTaskGroupId || requestedTaskId) {
+      setActiveTaskSubTab("tasks");
+    }
+  }, [requestedTaskGroupId, requestedTaskId]);
 
   const selectedWt = useMemo(
     () => wideTables.find((wt) => wt.id === selectedWtId),
@@ -218,6 +243,56 @@ export default function RequirementTasksPanel({
     () => selectedWt?.schema.columns.filter((column) => column.category === "indicator") ?? [],
     [selectedWt],
   );
+  const trialDimensionColumns = useMemo(
+    () => selectedWt?.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate) ?? [],
+    [selectedWt],
+  );
+  const trialAvailableBusinessDates = useMemo(
+    () => Array.from(
+      new Set(
+        currentWideTableRecords
+          .map((record) => (selectedWt ? resolveTaskRecordBusinessDate(selectedWt, record) : ""))
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => b.localeCompare(a)),
+    [currentWideTableRecords, selectedWt],
+  );
+  const trialAvailableDimensionValues = useMemo(() => {
+    const values: Record<string, string[]> = {};
+    for (const column of trialDimensionColumns) {
+      values[column.name] = Array.from(
+        new Set(
+          currentWideTableRecords
+            .map((record) => record[column.name])
+            .filter((value): value is string | number => value !== undefined && value !== null && String(value).trim() !== "")
+            .map(String),
+        ),
+      ).sort((a, b) => a.localeCompare(b, "zh-CN"));
+    }
+    return values;
+  }, [currentWideTableRecords, trialDimensionColumns]);
+  const trialFilteredRecords = useMemo(() => {
+    if (!selectedWt) {
+      return [] as WideTableRecord[];
+    }
+    return currentWideTableRecords.filter((record) => {
+      const businessDate = resolveTaskRecordBusinessDate(selectedWt, record);
+      if (usesBusinessDateAxis && trialBusinessDates.length > 0 && !trialBusinessDates.includes(businessDate)) {
+        return false;
+      }
+      return trialDimensionColumns.every((column) => {
+        const selectedValues = trialDimensionValues[column.name] ?? [];
+        return selectedValues.length === 0 || selectedValues.includes(String(record[column.name] ?? ""));
+      });
+    });
+  }, [
+    currentWideTableRecords,
+    selectedWt,
+    trialBusinessDates,
+    trialDimensionColumns,
+    trialDimensionValues,
+    usesBusinessDateAxis,
+  ]);
   const defaultIndicatorGroupId = selectedWt ? buildDefaultIndicatorGroupId(selectedWt.id) : "";
   const userDefinedIndicatorGroups = useMemo(
     () => (
@@ -319,6 +394,25 @@ export default function RequirementTasksPanel({
         : hasUserDefinedGrouping && !isIndicatorGroupingComplete
           ? "请先完成指标分组并覆盖全部指标列，任务组才会按“宽表行 × 指标组”正确拆分。"
           : "";
+  const trialEstimatedRows = Math.min(trialFilteredRecords.length, trialMaxRows);
+  const trialEstimatedTaskCount = trialEstimatedRows * Math.max(effectiveIndicatorGroups.length, 1);
+  const latestTrialTaskGroup = useMemo(
+    () => selectedWt
+      ? taskGroups
+          .filter((taskGroup) => taskGroup.wideTableId === selectedWt.id && taskGroup.triggeredBy === "trial")
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      : undefined,
+    [selectedWt, taskGroups],
+  );
+  const canStartTrialRun = Boolean(
+    selectedWt
+    && isDefinitionSubmitted
+    && !needsScopeRefresh
+    && hasPreviewRecords
+    && effectiveIndicatorGroups.length > 0
+    && trialEstimatedRows > 0
+    && (!usesBusinessDateAxis || trialBusinessDates.length > 0),
+  );
   const promptEditorGroups = useMemo(() => {
     if (!selectedWt) {
       return [] as WideTable["indicatorGroups"];
@@ -474,7 +568,23 @@ export default function RequirementTasksPanel({
     setPromptSaveMessage("");
     setPromptEditorModes({});
     setPromptMarkdownDrafts({});
+    setTrialRunMessage("");
+    setTrialDimensionValues({});
   }, [selectedWtId]);
+
+  useEffect(() => {
+    if (!usesBusinessDateAxis) {
+      setTrialBusinessDates([]);
+      return;
+    }
+    setTrialBusinessDates((current) => {
+      const retained = current.filter((item) => trialAvailableBusinessDates.includes(item));
+      if (retained.length > 0) {
+        return retained;
+      }
+      return trialAvailableBusinessDates[0] ? [trialAvailableBusinessDates[0]] : [];
+    });
+  }, [trialAvailableBusinessDates, usesBusinessDateAxis]);
 
   useEffect(() => {
     if (!selectedWt) {
@@ -895,6 +1005,95 @@ export default function RequirementTasksPanel({
     }
   };
 
+  const handleToggleTrialBusinessDate = (businessDate: string) => {
+    setTrialBusinessDates((current) => (
+      current.includes(businessDate)
+        ? current.filter((item) => item !== businessDate)
+        : [...current, businessDate]
+    ));
+  };
+
+  const handleToggleTrialDimensionValue = (columnName: string, value: string) => {
+    setTrialDimensionValues((current) => {
+      const existing = current[columnName] ?? [];
+      return {
+        ...current,
+        [columnName]: existing.includes(value)
+          ? existing.filter((item) => item !== value)
+          : [...existing, value],
+      };
+    });
+  };
+
+  const handleStartTrialRun = async () => {
+    if (!selectedWt || !canStartTrialRun) {
+      setTrialRunMessage(
+        taskPlanBlockerMessage || "请先选择试运行范围，并确保当前范围内存在可采集的预览行。",
+      );
+      return;
+    }
+
+    const scopedDimensions = Object.fromEntries(
+      Object.entries(trialDimensionValues).filter(([, values]) => values.length > 0),
+    );
+    setIsStartingTrialRun(true);
+    setTrialRunMessage("正在创建试运行任务，并发起小范围采集。");
+    try {
+      const result = await createTrialRun(requirement.id, {
+        wideTableId: selectedWt.id,
+        businessDates: usesBusinessDateAxis ? trialBusinessDates : [],
+        dimensionValues: scopedDimensions,
+        maxRows: trialMaxRows,
+        operator: "当前用户",
+      });
+      const createdTaskGroupIds = new Set(result.taskGroups.map((taskGroup) => taskGroup.id));
+      const createdTaskIds = new Set(result.fetchTasks.map((task) => task.id));
+      onTaskGroupsChange([
+        ...taskGroups.filter((taskGroup) => !createdTaskGroupIds.has(taskGroup.id)),
+        ...result.taskGroups,
+      ]);
+      onFetchTasksChange([
+        ...fetchTasks.filter((task) => !createdTaskIds.has(task.id)),
+        ...result.fetchTasks,
+      ]);
+      onTaskGroupRunsChange([
+        ...scheduleJobs,
+        ...result.taskGroups.map((taskGroup, index) => ({
+          id: `TRIAL-RUN-${Date.now()}-${index + 1}`,
+          taskGroupId: taskGroup.id,
+          wideTableId: taskGroup.wideTableId,
+          triggerType: "trial" as const,
+          status: "running" as const,
+          startedAt: formatRunTimestamp(new Date()),
+          operator: "当前用户",
+          logRef: `log://${taskGroup.id}/trial`,
+        })),
+      ]);
+      setRunningTaskGroupIds((current) => Array.from(new Set([
+        ...current,
+        ...result.taskGroups.map((taskGroup) => taskGroup.id),
+      ])));
+
+      await Promise.all(
+        result.taskGroups.map((taskGroup) =>
+          executeTaskGroup(taskGroup.id, { triggerType: "trial", operator: "当前用户" }),
+        ),
+      );
+      setExpandedTgId(result.taskGroups[0]?.id ?? null);
+      setTrialRunMessage(
+        `已发起试运行：${result.rowCount} 行、${result.taskCount} 个采集任务。试运行数据会流转到数据产出和验收页面。`,
+      );
+      await refreshAfterExecution();
+    } catch (error) {
+      setTrialRunMessage(`试运行失败：${formatTaskActionError(error)}`);
+    } finally {
+      setIsStartingTrialRun(false);
+      setRunningTaskGroupIds((current) =>
+        current.filter((id) => !id.startsWith("TG-TRIAL-")),
+      );
+    }
+  };
+
   const handleRequestTaskGroupRerun = async (taskGroupView: HistoricalTaskGroupView) => {
     if (isLocalTaskGroupId(taskGroupView.id)) {
       applyLocalTaskGroupExecution(taskGroupView);
@@ -1025,7 +1224,7 @@ export default function RequirementTasksPanel({
           </div>
           <div>
             <Link
-              href={`/projects/${requirement.projectId}/requirements/${requirement.id}?view=requirement&tab=requirement`}
+              href={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navQuery}view=requirement&tab=requirement`}
               className="text-amber-900 underline underline-offset-4 hover:opacity-80"
             >
               去提交需求
@@ -1072,6 +1271,31 @@ export default function RequirementTasksPanel({
       ) : null}
 
       {selectedWt ? (
+        <section className="rounded-xl border bg-card p-3">
+          <div className="grid auto-rows-fr gap-2 md:grid-cols-3">
+            {taskSubTabs.map((tab) => {
+              const active = activeTaskSubTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTaskSubTab(tab.key)}
+                  className={cn(
+                    "rounded-lg px-4 py-2.5 text-sm transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                  )}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {selectedWt && activeTaskSubTab === "prompts" ? (
         <section className="rounded-xl border bg-card p-6 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1221,7 +1445,153 @@ export default function RequirementTasksPanel({
         </section>
       ) : null}
 
-      {selectedWt && hasIndicatorColumns && isIndicatorGroupModalOpen ? (
+      {selectedWt && activeTaskSubTab === "trial" ? (
+        <section className="rounded-xl border bg-card p-6 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">试运行</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                勾选少量日期与维度值后，对所有指标发起小范围采集。提示词沿用下方采集提示词管理中的配置。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleStartTrialRun()}
+              disabled={!canStartTrialRun || isStartingTrialRun}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs font-medium",
+                !canStartTrialRun || isStartingTrialRun
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-primary text-primary-foreground hover:opacity-90",
+              )}
+            >
+              {isStartingTrialRun ? "试运行中..." : "开始试运行"}
+            </button>
+          </div>
+
+          {taskPlanBlockerMessage ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {taskPlanBlockerMessage}
+            </div>
+          ) : null}
+
+          {usesBusinessDateAxis ? (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">选择日期</div>
+              <div className="flex flex-wrap gap-2">
+                {trialAvailableBusinessDates.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">当前范围暂无可选业务日期。</span>
+                ) : trialAvailableBusinessDates.slice(0, 18).map((businessDate) => (
+                  <button
+                    key={businessDate}
+                    type="button"
+                    onClick={() => handleToggleTrialBusinessDate(businessDate)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-[11px]",
+                      trialBusinessDates.includes(businessDate)
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                    )}
+                  >
+                    {businessDate}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            <div className="text-xs font-medium text-muted-foreground">选择维度值</div>
+            {trialDimensionColumns.length === 0 ? (
+              <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
+                当前宽表没有可筛选维度，将按单次快照范围抽样试运行。
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {trialDimensionColumns.map((column) => {
+                  const values = trialAvailableDimensionValues[column.name] ?? [];
+                  const selectedValues = trialDimensionValues[column.name] ?? [];
+                  return (
+                    <div key={column.id} className="rounded-lg border bg-background px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium">{column.chineseName ?? column.name}</div>
+                          <div className="text-[11px] text-muted-foreground">{column.name}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setTrialDimensionValues((current) => ({ ...current, [column.name]: [] }))}
+                          className="text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                          全部
+                        </button>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {values.length === 0 ? (
+                          <span className="text-[11px] text-muted-foreground">暂无可选值。</span>
+                        ) : values.slice(0, 12).map((value) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => handleToggleTrialDimensionValue(column.name, value)}
+                            className={cn(
+                              "rounded-full border px-2.5 py-1 text-[11px]",
+                              selectedValues.includes(value)
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                            )}
+                          >
+                            {value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 px-4 py-3">
+            <div className="text-xs text-muted-foreground">
+              预计试运行 <span className="font-medium text-foreground">{trialEstimatedRows}</span> 行，
+              生成 <span className="font-medium text-foreground">{trialEstimatedTaskCount}</span> 个采集任务。
+              {trialFilteredRecords.length > trialMaxRows ? ` 当前筛选命中 ${trialFilteredRecords.length} 行，将按上限抽样。` : ""}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              最大采样行数
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={trialMaxRows}
+                onChange={(event) => setTrialMaxRows(Math.min(200, Math.max(1, Number(event.target.value) || 1)))}
+                className="w-20 rounded-md border bg-background px-2 py-1 text-xs text-foreground"
+              />
+            </label>
+          </div>
+
+          {latestTrialTaskGroup ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              <span>最近一次试运行：{latestTrialTaskGroup.partitionLabel || latestTrialTaskGroup.businessDateLabel || latestTrialTaskGroup.id}</span>
+              <Link
+                href={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navQuery}view=acceptance&tab=acceptance&tg=${latestTrialTaskGroup.id}`}
+                className="font-medium text-primary hover:underline"
+              >
+                查看试运行数据
+              </Link>
+            </div>
+          ) : null}
+
+          {trialRunMessage ? (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              {trialRunMessage}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeTaskSubTab === "prompts" && selectedWt && hasIndicatorColumns && isIndicatorGroupModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-6xl rounded-xl border bg-card shadow-xl">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
@@ -1384,7 +1754,7 @@ export default function RequirementTasksPanel({
         </div>
       ) : null}
 
-      {selectedWt ? (
+      {selectedWt && activeTaskSubTab === "prompts" ? (
         <section className="rounded-xl border bg-card p-6 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -1567,7 +1937,7 @@ export default function RequirementTasksPanel({
         </section>
       ) : null}
 
-      {selectedWt ? (
+      {selectedWt && activeTaskSubTab === "tasks" ? (
         <section className="rounded-xl border bg-card p-6 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -1612,7 +1982,8 @@ export default function RequirementTasksPanel({
         </section>
       ) : null}
 
-      <section className="rounded-xl border bg-card p-6 space-y-4">
+      {selectedWt && activeTaskSubTab === "tasks" ? (
+        <section className="rounded-xl border bg-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="font-semibold">{`任务组运行记录 – ${selectedWt?.name ?? "-"}`}</h3>
@@ -1864,8 +2235,9 @@ export default function RequirementTasksPanel({
           </div>
         )}
       </section>
+      ) : null}
 
-      {archivedTaskGroups.length > 0 ? (
+      {selectedWt && activeTaskSubTab === "tasks" && archivedTaskGroups.length > 0 ? (
         <section className="rounded-xl border bg-card p-6 space-y-4">
           <button
             type="button"
@@ -1904,7 +2276,7 @@ export default function RequirementTasksPanel({
         </section>
       ) : null}
 
-      {wtScheduleJobs.length > 0 ? (
+      {selectedWt && activeTaskSubTab === "tasks" && wtScheduleJobs.length > 0 ? (
         <section className="rounded-xl border bg-card p-6 space-y-4">
           <h3 className="font-semibold">任务组触发记录</h3>
           <div className="overflow-x-auto">
@@ -2255,6 +2627,16 @@ function taskGroupKindBadgeClass(groupKind: TaskGroup["groupKind"] | undefined):
   return (groupKind ?? "baseline") === "delta"
     ? "border-amber-200 bg-amber-50 text-amber-700"
     : "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function resolveTaskRecordBusinessDate(wideTable: WideTable, record: WideTableRecord): string {
+  const businessDateColumn = wideTable.schema.columns.find((column) => column.isBusinessDate);
+  return String(
+    (businessDateColumn ? record[businessDateColumn.name] : undefined)
+    ?? record.business_date
+    ?? record.BIZ_DATE
+    ?? "",
+  );
 }
 
 function buildTaskStatusLegend(tasks: Array<{ status: string }>): Array<{

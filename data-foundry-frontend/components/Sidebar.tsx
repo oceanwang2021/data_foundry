@@ -25,6 +25,7 @@ type NavChildType = {
 type MatchContext = {
   pathname: string;
   tab: string | null;
+  nav: string | null;
 };
 
 type NavItemType = {
@@ -49,41 +50,49 @@ const mainNav: NavItemType[] = [
     name: "项目",
     href: "/projects",
     icon: FolderKanban,
-    match: ({ pathname }) => isProjectOverviewPath(pathname),
+    match: ({ pathname, nav }) => nav === "projects" || (!nav && isProjectOverviewPath(pathname)),
   },
   {
     name: "需求管理",
     href: "/requirements",
     icon: ClipboardList,
-    match: ({ pathname, tab }) =>
-      pathname === "/requirements"
+    match: ({ pathname, tab, nav }) =>
+      nav === "requirements"
+      || (!nav && (
+        pathname === "/requirements"
       || (
         isRequirementDetailPath(pathname)
         && !isRequirementTaskPath(pathname)
         && tab !== "tasks"
         && tab !== "acceptance"
         && tab !== "audit"
-      ),
+      ))),
   },
   {
     name: "采集任务管理",
     href: "/collection-tasks",
     icon: Workflow,
-    match: ({ pathname, tab }) =>
-      pathname === "/collection-tasks"
+    match: ({ pathname, tab, nav }) =>
+      nav === "tasks"
+      || (!nav && (
+        pathname === "/collection-tasks"
       || isRequirementTaskPath(pathname)
-      || (isRequirementDetailPath(pathname) && tab === "tasks"),
+      || (isRequirementDetailPath(pathname) && tab === "tasks")
+      )),
   },
   {
     name: "数据验收",
     href: "/acceptance",
     icon: ShieldCheck,
-    match: ({ pathname, tab }) =>
-      pathname === "/acceptance"
+    match: ({ pathname, tab, nav }) =>
+      nav === "acceptance"
+      || (!nav && (
+        pathname === "/acceptance"
       || pathname.startsWith("/acceptance/")
       || pathname === "/quality-audit"
       || pathname.startsWith("/quality-audit/")
-      || (isRequirementDetailPath(pathname) && (tab === "acceptance" || tab === "audit")),
+      || (isRequirementDetailPath(pathname) && (tab === "acceptance" || tab === "audit"))
+      )),
   },
   { name: "知识库", href: "/knowledge-base", icon: BookOpen },
   {
@@ -103,7 +112,8 @@ export default function Sidebar() {
   const searchParams = useSearchParams();
   const safePathname = pathname ?? "";
   const tab = searchParams?.get("tab") ?? null;
-  const context: MatchContext = { pathname: safePathname, tab };
+  const nav = searchParams?.get("nav") ?? null;
+  const context: MatchContext = { pathname: safePathname, tab, nav };
 
   const isChildActive = (child: NavChildType) => {
     return safePathname === child.href || safePathname.startsWith(`${child.href}/`);

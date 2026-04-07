@@ -552,6 +552,27 @@ class DataFoundryRepository:
             snapshot.row_binding_key: snapshot
             for snapshot in self.list_wide_table_row_snapshots(batch_id)
         }
+        batch = self.get_collection_batch(batch_id)
+        if batch and batch.triggered_by == "trial":
+            anchors_by_binding_key = {anchor.row_binding_key: anchor for anchor in anchors}
+            snapshot_rows: list[WideTableRow] = []
+            for snapshot in snapshots.values():
+                anchor = anchors_by_binding_key.get(snapshot.row_binding_key)
+                if anchor is None:
+                    continue
+                snapshot_rows.append(
+                    anchor.model_copy(
+                        update={
+                            "business_date": snapshot.business_date,
+                            "row_status": snapshot.row_status,
+                            "dimension_values": snapshot.dimension_values,
+                            "indicator_values": snapshot.indicator_values,
+                            "system_values": snapshot.system_values,
+                        }
+                    )
+                )
+            return sorted(snapshot_rows, key=lambda row: row.row_id)
+
         resolved_rows: list[WideTableRow] = []
         for anchor in anchors:
             snapshot = snapshots.get(anchor.row_binding_key)
@@ -1249,26 +1270,64 @@ class DataFoundryRepository:
         from app.schemas import AcceptanceTicket
         rows = self._fetchall("SELECT * FROM acceptance_tickets ORDER BY latest_action_at DESC")
         return [AcceptanceTicket(
-            id=r["id"], dataset=r["dataset"], requirement_id=r["requirement_id"],
+            id=r["id"], task_group_id=r["task_group_id"], dataset=r["dataset"], requirement_id=r["requirement_id"],
             status=r["status"], owner=r["owner"], feedback=r["feedback"],
             latest_action_at=r["latest_action_at"],
         ) for r in rows]
 
-    def create_acceptance_ticket(self, ticket: "AcceptanceTicket") -> None:
+    def upsert_acceptance_ticket(self, ticket: "AcceptanceTicket") -> "AcceptanceTicket":
+        from app.schemas import AcceptanceTicket
         with connect_database(self.db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO acceptance_tickets (id, dataset, requirement_id, status, owner, feedback, latest_action_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO acceptance_tickets (
+                    id, task_group_id, dataset, requirement_id, status, owner, feedback, latest_action_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_group_id) DO UPDATE SET
+                    dataset = excluded.dataset,
+                    requirement_id = excluded.requirement_id,
+                    status = excluded.status,
+                    owner = excluded.owner,
+                    feedback = excluded.feedback,
+                    latest_action_at = excluded.latest_action_at
                 """,
-                (ticket.id, ticket.dataset, ticket.requirement_id, ticket.status,
-                 ticket.owner, ticket.feedback, ticket.latest_action_at),
+                (
+                    ticket.id,
+                    ticket.task_group_id,
+                    ticket.dataset,
+                    ticket.requirement_id,
+                    ticket.status,
+                    ticket.owner,
+                    ticket.feedback,
+                    ticket.latest_action_at,
+                ),
             )
             conn.commit()
+            row = conn.execute(
+                "SELECT * FROM acceptance_tickets WHERE task_group_id = ?",
+                (ticket.task_group_id,),
+            ).fetchone()
+            if row is None:
+                return ticket
+            return AcceptanceTicket(
+                id=row["id"],
+                task_group_id=row["task_group_id"],
+                dataset=row["dataset"],
+                requirement_id=row["requirement_id"],
+                status=row["status"],
+                owner=row["owner"],
+                feedback=row["feedback"],
+                latest_action_at=row["latest_action_at"],
+            )
 
     def update_acceptance_ticket(self, ticket_id: str, **kwargs: object) -> bool:
         sets, params = _build_update_clause(kwargs, {
-            "status": "status", "feedback": "feedback", "latest_action_at": "latest_action_at",
+            "status": "status",
+            "feedback": "feedback",
+            "latest_action_at": "latest_action_at",
+            "owner": "owner",
+            "dataset": "dataset",
         })
         if not sets:
             return False

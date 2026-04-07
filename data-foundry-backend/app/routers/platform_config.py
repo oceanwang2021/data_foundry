@@ -66,17 +66,18 @@ def list_acceptance_tickets(request: Request):
 
 @router.post("/api/acceptance-tickets", response_model=AcceptanceTicket, status_code=201)
 def create_acceptance_ticket(body: AcceptanceTicketCreateInput, request: Request):
+    now_iso = datetime.now().isoformat(timespec="seconds")
     ticket = AcceptanceTicket(
         id=f"AC-{uuid.uuid4().hex[:6]}",
+        task_group_id=body.task_group_id,
         dataset=body.dataset,
         requirement_id=body.requirement_id,
-        status="rejected",
+        status=body.status or "rejected",
         owner=body.owner,
         feedback=body.feedback,
-        latest_action_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        latest_action_at=now_iso,
     )
-    _repo(request).create_acceptance_ticket(ticket)
-    return ticket
+    return _repo(request).upsert_acceptance_ticket(ticket)
 
 
 @router.put("/api/acceptance-tickets/{ticket_id}", response_model=dict)
@@ -85,7 +86,7 @@ def update_acceptance_ticket(
 ):
     updates = body.model_dump(exclude_unset=True)
     if updates:
-        updates["latest_action_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        updates["latest_action_at"] = datetime.now().isoformat(timespec="seconds")
         _repo(request).update_acceptance_ticket(ticket_id, **updates)
     return {"ok": True}
 

@@ -4,15 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Layers3,
-  MessageSquarePlus,
   Pencil,
-  RotateCcw,
   Save,
   SkipForward,
   X,
   XCircle,
 } from "lucide-react";
-import { executeTask, retryTask, updateWideTableRow } from "@/lib/api-client";
+import {
+  createAcceptanceTicket,
+  updateAcceptanceTicket,
+  updateWideTableRow,
+} from "@/lib/api-client";
 import {
   extractBusinessDateMonth,
   extractBusinessDateYear,
@@ -36,7 +38,7 @@ import type {
   WideTable,
   WideTableRecord,
 } from "@/lib/types";
-import type { ScheduleJob } from "@/lib/domain";
+import type { AcceptanceTicket, ScheduleJob } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
 import {
@@ -54,7 +56,7 @@ type TaskGroupReviewState = {
   reviewedAt?: string;
 };
 
-type IndicatorAction = "skip" | "fix_value" | "feedback_recollect";
+type IndicatorAction = "skip" | "fix_value";
 
 type Props = {
   requirement: Requirement;
@@ -63,10 +65,12 @@ type Props = {
   taskGroups: TaskGroup[];
   fetchTasks: FetchTask[];
   scheduleJobs: ScheduleJob[];
+  acceptanceTickets: AcceptanceTicket[];
   onRefreshData?: () => Promise<void>;
   onWideTableRecordsChange: (nextWideTableRecords: WideTableRecord[]) => void;
   onTaskGroupsChange: (nextTaskGroups: TaskGroup[]) => void;
   onFetchTasksChange: (nextFetchTasks: FetchTask[]) => void;
+  navSource?: "projects" | "requirements" | "tasks" | "acceptance";
 };
 
 type AcceptanceCellBinding = {
@@ -115,23 +119,51 @@ export default function RequirementAcceptancePanel({
   taskGroups,
   fetchTasks,
   scheduleJobs,
+  acceptanceTickets,
   onRefreshData,
   onWideTableRecordsChange,
   onTaskGroupsChange,
   onFetchTasksChange,
+  navSource,
 }: Props) {
   const [message, setMessage] = useState("");
   const [selectedCell, setSelectedCell] = useState<SelectedCellState | null>(null);
   const [modalDraftValue, setModalDraftValue] = useState("");
-  const [modalFeedback, setModalFeedback] = useState("");
   const [modalAction, setModalAction] = useState<IndicatorAction>("skip");
-  const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
   const [savingCellKeys, setSavingCellKeys] = useState<string[]>([]);
-  const [recollectingCellKeys, setRecollectingCellKeys] = useState<string[]>([]);
   const [reviewStates, setReviewStates] = useState<Map<string, TaskGroupReviewState>>(new Map());
   const [rejectFeedback, setRejectFeedback] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+
+  const ticketByTaskGroupId = useMemo(() => {
+    const map = new Map<string, AcceptanceTicket>();
+    for (const ticket of acceptanceTickets) {
+      if (!ticket.taskGroupId) continue;
+      map.set(ticket.taskGroupId, ticket);
+    }
+    return map;
+  }, [acceptanceTickets]);
+
+  useEffect(() => {
+    // Sync persisted acceptance statuses into local UI state.
+    const next = new Map<string, TaskGroupReviewState>();
+    ticketByTaskGroupId.forEach((ticket, taskGroupId) => {
+      const normalized: TaskGroupReviewStatus =
+        ticket.status === "approved"
+          ? "approved"
+          : ticket.status === "rejected" || ticket.status === "fixing"
+          ? "rejected"
+          : "pending";
+      if (normalized === "pending") return;
+      next.set(taskGroupId, {
+        status: normalized,
+        feedback: ticket.feedback || undefined,
+        reviewedAt: ticket.latestActionAt || undefined,
+      });
+    });
+    setReviewStates(next);
+  }, [ticketByTaskGroupId]);
 
   const views = useMemo(
     () =>
@@ -173,15 +205,6 @@ export default function RequirementAcceptancePanel({
       )
     : null;
   const isSavingActiveCell = activeCellKey ? savingCellKeys.includes(activeCellKey) : false;
-  const isRecollectingActiveCell = activeCellKey ? recollectingCellKeys.includes(activeCellKey) : false;
-
-  const refreshAfterExecution = async () => {
-    if (!onRefreshData) return;
-    for (const waitMs of [0, 800, 800, 1200]) {
-      if (waitMs > 0) await delay(waitMs);
-      try { await onRefreshData(); } catch { break; }
-    }
-  };
 
   const openCellModal = (target: ActiveCellTarget) => {
     setSelectedCell({
@@ -191,14 +214,12 @@ export default function RequirementAcceptancePanel({
       columnName: target.column.name,
     });
     setModalDraftValue(formatInputValue(target.row.record[target.column.name]));
-    setModalFeedback("");
     setModalAction("skip");
   };
 
   const closeCellModal = () => {
     setSelectedCell(null);
     setModalDraftValue("");
-    setModalFeedback("");
     setModalAction("skip");
   };
 
@@ -243,81 +264,45 @@ export default function RequirementAcceptancePanel({
     }
   };
 
-  const handleFeedbackRecollect = async () => {
-    if (!activeCellTarget || !activeCellKey) return;
-    const task = activeCellTarget.binding?.task;
-    const taskGroup = activeCellTarget.binding?.taskGroup;
-    if (!task || !taskGroup) {
-      setMessage("当前指标未关联采集任务，无法发起反馈重采。");
-      return;
-    }
-    setRecollectingCellKeys((prev) => (prev.includes(activeCellKey) ? prev : [...prev, activeCellKey]));
-    if (isLocalTaskId(task.id)) {
-      applyLocalTaskExecution(activeCellTarget);
-      setRecollectingCellKeys((prev) => prev.filter((k) => k !== activeCellKey));
-      return;
-    }
-    const now = new Date().toISOString();
-    const nextAttempt = task.executionRecords.length + 1;
-    onFetchTasksChange(
-      fetchTasks.map((item) =>
-        item.id === task.id
-          ? { ...item, status: "running" as const, updatedAt: now, executionRecords: [...item.executionRecords, { id: `${item.id}-feedback-${nextAttempt}`, fetchTaskId: item.id, attempt: nextAttempt, status: "running" as const, triggeredBy: "manual_retry" as const, startedAt: now }] }
-          : item,
-      ),
-    );
-    onTaskGroupsChange(taskGroups.map((item) => item.id === taskGroup.id ? { ...item, status: "running" as const, updatedAt: now } : item));
-    setRunningTaskIds((prev) => (prev.includes(task.id) ? prev : [...prev, task.id]));
-    setMessage(`已提交反馈并发起 ${activeCellTarget.column.chineseName ?? activeCellTarget.column.name} 的重新采集。`);
-    try {
-      if (task.status === "failed") await retryTask(task.id); else await executeTask(task.id);
-      await refreshAfterExecution();
-      closeCellModal();
-    } catch (error) {
-      setMessage(`反馈重采失败：${formatActionError(error)}`);
-    } finally {
-      setRunningTaskIds((prev) => prev.filter((id) => id !== task.id));
-      setRecollectingCellKeys((prev) => prev.filter((k) => k !== activeCellKey));
-    }
+  const resolveDatasetLabel = (): string => {
+    const wideTable = wideTables[0] ?? requirement.wideTable;
+    if (!wideTable) return requirement.id;
+    const name = wideTable.name?.trim();
+    return name ? `${name}(${wideTable.id})` : wideTable.id;
   };
 
-  const applyLocalTaskExecution = (target: ActiveCellTarget) => {
-    const task = target.binding?.task;
-    const taskGroup = target.binding?.taskGroup;
-    const binding = target.binding;
-    if (!task || !taskGroup || !binding) return;
-    const endedAt = new Date().toISOString();
-    const indicatorUpdates = Object.fromEntries(
-      binding.indicatorColumns.map((col) => [col, buildRecollectedIndicatorValue(target.row.record[col], target.row.rowId, col)]),
-    );
-    onWideTableRecordsChange(
-      wideTableRecords.map((record) =>
-        record.wideTableId === target.view.wideTable.id && getRecordRowId(record) === target.row.rowId
-          ? { ...record, ...indicatorUpdates, updated_at: endedAt, _metadata: { ...record._metadata, confidence: 0.88 } }
-          : record,
-      ),
-    );
-    const nextFetchTasks: FetchTask[] = fetchTasks.map((item): FetchTask =>
-      item.id === task.id
-        ? { ...item, status: "completed", updatedAt: endedAt, executionRecords: [...item.executionRecords, { id: `${item.id}-local-${item.executionRecords.length + 1}`, fetchTaskId: item.id, attempt: item.executionRecords.length + 1, status: "success", triggeredBy: "manual_retry", startedAt: endedAt, endedAt }] }
-        : item,
-    );
-    const groupTasks = nextFetchTasks.filter((ft) => ft.taskGroupId === taskGroup.id);
-    onFetchTasksChange(nextFetchTasks);
-    onTaskGroupsChange(
-      taskGroups.map((item) =>
-        item.id === taskGroup.id
-          ? { ...item, status: groupTasks.some((ft) => ft.status === "failed") ? "partial" : "completed", completedTasks: groupTasks.filter((ft) => ft.status === "completed").length, failedTasks: groupTasks.filter((ft) => ft.status === "failed").length, updatedAt: endedAt }
-          : item,
-      ),
-    );
-    setMessage(`已重采本地任务 ${task.id}，宽表数据已更新。`);
-    closeCellModal();
+  const persistTaskGroupReview = async (
+    taskGroupId: string,
+    data: { status: "approved" | "rejected"; feedback?: string },
+  ) => {
+    const existing = ticketByTaskGroupId.get(taskGroupId);
+    try {
+      if (existing?.id) {
+        await updateAcceptanceTicket(existing.id, {
+          status: data.status,
+          feedback: data.feedback,
+        });
+      } else {
+        await createAcceptanceTicket({
+          dataset: resolveDatasetLabel(),
+          requirementId: requirement.id,
+          taskGroupId,
+          owner: requirement.owner,
+          feedback: data.feedback,
+          status: data.status,
+        });
+      }
+      await onRefreshData?.();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setMessage(`验收状态保存失败：${msg}`);
+    }
   };
 
   const handleApproveTaskGroup = (taskGroupId: string) => {
     setReviewStates((prev) => new Map(prev).set(taskGroupId, { status: "approved", reviewedAt: new Date().toISOString() }));
     setMessage("已通过该任务组的验收。");
+    void persistTaskGroupReview(taskGroupId, { status: "approved" });
   };
 
   const handleRejectTaskGroup = (taskGroupId: string) => {
@@ -329,6 +314,7 @@ export default function RequirementAcceptancePanel({
     if (!showRejectDialog) return;
     setReviewStates((prev) => new Map(prev).set(showRejectDialog, { status: "rejected", feedback: rejectFeedback || undefined, reviewedAt: new Date().toISOString() }));
     setMessage("已驳回该任务组，请在指标级别标注问题后通知执行人处理。");
+    void persistTaskGroupReview(showRejectDialog, { status: "rejected", feedback: rejectFeedback || undefined });
     setShowRejectDialog(null);
     setRejectFeedback("");
   };
@@ -364,9 +350,11 @@ export default function RequirementAcceptancePanel({
       {views.map((view) => (
         <AcceptanceWideTableSection
           key={view.wideTable.id}
+          requirement={requirement}
           view={view}
           reviewStates={reviewStates}
           showDiff={showDiff}
+          navSource={navSource}
           onOpenCellModal={openCellModal}
           onApprove={handleApproveTaskGroup}
           onReject={handleRejectTaskGroup}
@@ -377,17 +365,12 @@ export default function RequirementAcceptancePanel({
         <IndicatorActionModal
           target={activeCellTarget}
           draftValue={modalDraftValue}
-          feedback={modalFeedback}
           action={modalAction}
-          runningTaskIds={runningTaskIds}
           saving={isSavingActiveCell}
-          recollecting={isRecollectingActiveCell}
           onDraftValueChange={setModalDraftValue}
-          onFeedbackChange={setModalFeedback}
           onActionChange={setModalAction}
           onClose={closeCellModal}
           onSave={() => void handleSaveActiveCell()}
-          onFeedbackRecollect={() => void handleFeedbackRecollect()}
         />
       ) : null}
 
@@ -407,15 +390,19 @@ export default function RequirementAcceptancePanel({
 
 function AcceptanceWideTableSection({
   view,
+  requirement,
   reviewStates,
   showDiff,
+  navSource,
   onOpenCellModal,
   onApprove,
   onReject,
 }: {
   view: AcceptanceWideTableView;
+  requirement: Requirement;
   reviewStates: Map<string, TaskGroupReviewState>;
   showDiff: boolean;
+  navSource?: "projects" | "requirements" | "tasks" | "acceptance";
   onOpenCellModal: (target: ActiveCellTarget) => void;
   onApprove: (taskGroupId: string) => void;
   onReject: (taskGroupId: string) => void;
@@ -429,6 +416,10 @@ function AcceptanceWideTableSection({
         ? Array.from(new Set(view.rows.map((row) => row.businessDate))).sort((a, b) => b.localeCompare(a))
         : [],
     [usesBusinessDateAxis, view.rows],
+  );
+  const trialTaskGroups = useMemo(
+    () => view.taskGroups.filter((taskGroup) => taskGroup.triggeredBy === "trial"),
+    [view.taskGroups],
   );
   const visibleAllBusinessDates = useMemo(
     () => limitFutureBusinessDates(businessDates, { now: new Date(), maxFuturePeriods: 1 }),
@@ -459,15 +450,32 @@ function AcceptanceWideTableSection({
 
   const visibleBusinessDates = useMemo(() => {
     if (!isMonthlyFrequency || !effectiveSelectedYear) return visibleAllBusinessDates;
-    return visibleAllBusinessDates.filter((d) => d.slice(0, 4) === effectiveSelectedYear);
+    return visibleAllBusinessDates.filter((d) => !d.startsWith("TG-TRIAL-") && d.slice(0, 4) === effectiveSelectedYear);
   }, [effectiveSelectedYear, isMonthlyFrequency, visibleAllBusinessDates]);
+  const visibleBusinessDateOptions = useMemo(
+    () => [
+      ...trialTaskGroups.map((taskGroup) => ({
+        key: taskGroup.id,
+        label: `试运行 ${taskGroup.businessDateLabel || taskGroup.businessDate || ""}`.trim(),
+        isTrial: true,
+      })),
+      ...visibleBusinessDates
+        .filter((businessDate) => !businessDate.startsWith("TG-TRIAL-"))
+        .map((businessDate) => ({
+          key: businessDate,
+          label: isMonthlyFrequency ? `${extractBusinessDateMonth(businessDate) ?? businessDate.slice(5, 7)}月` : businessDate,
+          isTrial: false,
+        })),
+    ],
+    [isMonthlyFrequency, trialTaskGroups, visibleBusinessDates],
+  );
 
   const [selectedBusinessDate, setSelectedBusinessDate] = useState<string>(visibleAllBusinessDates[0] ?? "");
   useEffect(() => {
-    if (visibleBusinessDates.length > 0 && !visibleBusinessDates.includes(selectedBusinessDate)) {
-      setSelectedBusinessDate(visibleBusinessDates[0] ?? "");
+    if (visibleBusinessDateOptions.length > 0 && !visibleBusinessDateOptions.some((item) => item.key === selectedBusinessDate)) {
+      setSelectedBusinessDate(visibleBusinessDateOptions[0]?.key ?? "");
     }
-  }, [selectedBusinessDate, visibleBusinessDates]);
+  }, [selectedBusinessDate, visibleBusinessDateOptions]);
 
   // ---- 全量快照分页 ----
   const fullSnapshotPages = useMemo(
@@ -490,7 +498,9 @@ function AcceptanceWideTableSection({
   // ---- 当前选中的任务组 ----
   const currentTaskGroup = useMemo(() => {
     if (usesBusinessDateAxis) {
-      return view.taskGroups.find((tg) => tg.businessDate === selectedBusinessDate) ?? null;
+      return view.taskGroups.find((tg) => tg.id === selectedBusinessDate)
+        ?? view.taskGroups.find((tg) => tg.businessDate === selectedBusinessDate && tg.triggeredBy !== "trial")
+        ?? null;
     }
     const page = fullSnapshotPages.find((p) => (p.scheduleJobId ?? p.taskGroupId) === selectedAcceptPageKey);
     return page ? (view.taskGroups.find((tg) => tg.id === page.taskGroupId) ?? null) : null;
@@ -536,11 +546,12 @@ function AcceptanceWideTableSection({
             <div className="shrink-0 px-3 py-1.5 text-xs font-medium text-muted-foreground">{businessYears[0]}年</div>
           ) : null}
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {visibleBusinessDates.map((bd) => (
-              <button key={bd} type="button" onClick={() => setSelectedBusinessDate(bd)}
+            {visibleBusinessDateOptions.map((item) => (
+              <button key={item.key} type="button" onClick={() => setSelectedBusinessDate(item.key)}
                 className={cn("shrink-0 rounded-md border px-3 py-1.5 text-xs",
-                  selectedBusinessDate === bd ? "border-primary bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground")}>
-                {isMonthlyFrequency ? `${extractBusinessDateMonth(bd) ?? bd.slice(5, 7)}月` : bd}
+                  selectedBusinessDate === item.key ? "border-primary bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  item.isTrial && "border-sky-300 bg-sky-50 text-sky-700")}>
+                {item.label}
               </button>
             ))}
           </div>
@@ -569,6 +580,7 @@ function AcceptanceWideTableSection({
           taskGroup={currentTaskGroup}
           reviewState={currentReviewState}
           fetchTasks={view.fetchTasks.filter((ft) => ft.taskGroupId === currentTaskGroup.id)}
+          returnToTasksHref={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navSource ? `nav=${navSource}&` : ""}view=tasks&tab=tasks&tg=${currentTaskGroup.id}`}
           onApprove={() => onApprove(currentTaskGroup.id)}
           onReject={() => onReject(currentTaskGroup.id)}
         />
@@ -656,12 +668,14 @@ function TaskGroupReviewBar({
   taskGroup,
   reviewState,
   fetchTasks,
+  returnToTasksHref,
   onApprove,
   onReject,
 }: {
   taskGroup: TaskGroup;
   reviewState?: TaskGroupReviewState;
   fetchTasks: FetchTask[];
+  returnToTasksHref: string;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -685,6 +699,11 @@ function TaskGroupReviewBar({
           任务组 {taskGroup.id} · 共 {fetchTasks.length} 个任务 · 已完成 {completedTasks}
           {failedTasks > 0 ? ` · 失败 ${failedTasks}` : ""}
         </span>
+        {taskGroup.triggeredBy === "trial" ? (
+          <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
+            试运行数据
+          </span>
+        ) : null}
         {reviewState?.feedback ? (
           <span className="text-red-600">驳回原因：{reviewState.feedback}</span>
         ) : null}
@@ -704,10 +723,17 @@ function TaskGroupReviewBar({
             </button>
           </>
         ) : status === "approved" ? (
-          <span className="inline-flex items-center gap-1 text-xs text-green-600">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已通过"}
-          </span>
+          <>
+            <span className="inline-flex items-center gap-1 text-xs text-green-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已通过"}
+            </span>
+            {taskGroup.triggeredBy === "trial" ? (
+              <a href={returnToTasksHref} className="rounded-md border px-3 py-1.5 text-xs text-primary hover:bg-primary/5">
+                返回采集任务
+              </a>
+            ) : null}
+          </>
         ) : (
           <span className="inline-flex items-center gap-1 text-xs text-red-600">
             <XCircle className="h-3.5 w-3.5" />
@@ -722,13 +748,13 @@ function TaskGroupReviewBar({
 // ==================== 指标操作弹窗 ====================
 
 function IndicatorActionModal({
-  target, draftValue, feedback, action, runningTaskIds, saving, recollecting,
-  onDraftValueChange, onFeedbackChange, onActionChange, onClose, onSave, onFeedbackRecollect,
+  target, draftValue, action, saving,
+  onDraftValueChange, onActionChange, onClose, onSave,
 }: {
-  target: ActiveCellTarget; draftValue: string; feedback: string; action: IndicatorAction;
-  runningTaskIds: string[]; saving: boolean; recollecting: boolean;
-  onDraftValueChange: (v: string) => void; onFeedbackChange: (v: string) => void;
-  onActionChange: (a: IndicatorAction) => void; onClose: () => void; onSave: () => void; onFeedbackRecollect: () => void;
+  target: ActiveCellTarget; draftValue: string; action: IndicatorAction;
+  saving: boolean;
+  onDraftValueChange: (v: string) => void;
+  onActionChange: (a: IndicatorAction) => void; onClose: () => void; onSave: () => void;
 }) {
   const currentValue = formatDisplayValue(target.row.record[target.column.name]);
   const task = target.binding?.task;
@@ -802,14 +828,11 @@ function IndicatorActionModal({
 
           <div className="space-y-2">
             <div className="text-xs font-medium text-muted-foreground">选择操作</div>
-            <div className="grid gap-2 md:grid-cols-3">
+            <div className="grid gap-2 md:grid-cols-2">
               <ActionOption icon={<SkipForward className="h-4 w-4" />} label="跳过" description="当前指标无需处理"
                 selected={action === "skip"} onClick={() => onActionChange("skip")} />
               <ActionOption icon={<Pencil className="h-4 w-4" />} label="直接修正" description="手动填入正确值"
                 selected={action === "fix_value"} onClick={() => onActionChange("fix_value")} />
-              <ActionOption icon={<MessageSquarePlus className="h-4 w-4" />} label="反馈重采" description="提供反馈后重新采集"
-                selected={action === "feedback_recollect"} onClick={() => onActionChange("feedback_recollect")}
-                disabled={!task} disabledReason="未关联采集任务" />
             </div>
           </div>
 
@@ -821,14 +844,6 @@ function IndicatorActionModal({
             </label>
           ) : null}
 
-          {action === "feedback_recollect" ? (
-            <label className="block space-y-1">
-              <div className="text-xs font-medium text-muted-foreground">反馈说明</div>
-              <textarea value={feedback} onChange={(e) => onFeedbackChange(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[80px] resize-y"
-                placeholder="描述当前值的问题或期望的采集方向，例如：来源不准确、数值口径不一致、需要补充最新数据..." />
-            </label>
-          ) : null}
         </div>
 
         <div className="flex flex-wrap justify-end gap-2 border-t px-6 py-4">
@@ -842,12 +857,6 @@ function IndicatorActionModal({
             <button type="button" onClick={onSave} disabled={saving}
               className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
               <Save className="h-3.5 w-3.5" />{saving ? "保存中..." : "保存修正"}
-            </button>
-          ) : null}
-          {action === "feedback_recollect" ? (
-            <button type="button" onClick={onFeedbackRecollect} disabled={recollecting || runningTaskIds.includes(task?.id ?? "")}
-              className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
-              <RotateCcw className="h-3.5 w-3.5" />{recollecting || runningTaskIds.includes(task?.id ?? "") ? "重采中..." : "提交反馈并重采"}
             </button>
           ) : null}
         </div>
@@ -953,12 +962,29 @@ function buildAcceptanceWideTableViews(params: {
       (job) => job.wideTableId === wideTable.id || tgs.some((tg) => tg.id === job.taskGroupId),
     );
     const fullSnapshotPages = usesBusinessDateAxis ? [] : buildDisplayableFullSnapshotTaskGroupPages(tgs, scopedJobs);
+    const trialTaskGroups = tgs.filter((tg) => tg.triggeredBy === "trial");
     const orderedTaskGroups = usesBusinessDateAxis
-      ? [...tgs].sort((a, b) => b.businessDate.localeCompare(a.businessDate))
+      ? [...tgs].sort((a, b) => {
+          if (a.triggeredBy === "trial" && b.triggeredBy !== "trial") return -1;
+          if (a.triggeredBy !== "trial" && b.triggeredBy === "trial") return 1;
+          return b.businessDate.localeCompare(a.businessDate);
+        })
       : fullSnapshotPages.map((p) => tgs.find((tg) => tg.id === p.taskGroupId)).filter((tg): tg is TaskGroup => Boolean(tg));
     const tgMap = new Map(tgs.map((tg) => [tg.id, tg]));
     const rows = usesBusinessDateAxis
-      ? buildAcceptanceRowsFromRecords(wideTable, scopedRecords)
+      ? [
+          ...trialTaskGroups.flatMap((tg) =>
+            buildAcceptanceRowsFromRecords(
+              wideTable,
+              tg.rowSnapshots ?? [],
+              {
+                scopeKey: tg.id,
+                scopeLabel: `试运行 ${tg.businessDateLabel || tg.businessDate || ""}`.trim(),
+              },
+            ),
+          ),
+          ...buildAcceptanceRowsFromRecords(wideTable, scopedRecords),
+        ]
       : fullSnapshotPages.length > 0
         ? fullSnapshotPages.flatMap((page) => {
             const tg = tgMap.get(page.taskGroupId);
@@ -974,7 +1000,7 @@ function buildAcceptanceWideTableViews(params: {
       const cols = resolveIndicatorColumnNames(wideTable, task.indicatorGroupId);
       const groupName = wideTable.indicatorGroups.find((g) => g.id === task.indicatorGroupId)?.name ?? task.indicatorGroupName;
       for (const col of cols) {
-        const scopeKey = usesBusinessDateAxis ? tg.businessDate : tg.id;
+        const scopeKey = usesBusinessDateAxis && tg.triggeredBy !== "trial" ? tg.businessDate : tg.id;
         const key = buildScopedCellKey(task.rowId, scopeKey, col);
         if (!cellBindingMap.has(key)) cellBindingMap.set(key, { task, taskGroup: tg, indicatorColumns: cols, indicatorGroupName: groupName });
       }
@@ -1087,22 +1113,14 @@ function hasIndicatorDiff(currentValue: unknown, rawValue: unknown): boolean {
   return true;
 }
 function normalizePersistedValue(v: string): string | null { return v.trim() === "" ? null : v.trim(); }
-function isLocalTaskId(id: string): boolean { return id.startsWith("ft_"); }
-function delay(ms: number): Promise<void> { return new Promise((r) => { window.setTimeout(r, ms); }); }
 function formatActionError(error: unknown): string {
   if (error instanceof Error && error.message === "Failed to fetch") return "无法连接后端接口，请确认服务可访问。";
   if (error instanceof Error && error.message.trim() !== "") return error.message;
   return "未知错误";
 }
-function formatReviewTime(iso: string): string {
-  try { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
-  catch { return iso; }
-}
-function buildRecollectedIndicatorValue(cur: unknown, rowId: number, col: string): string {
-  const text = cur == null ? "" : String(cur).trim();
-  const num = Number(text.replaceAll(",", ""));
-  let hash = rowId * 131 + Date.now();
-  for (const ch of col) hash = (hash * 33 + ch.charCodeAt(0)) % 1000003;
-  if (Number.isFinite(num)) { const d = ((hash % 31) - 15) / 10; const n = Math.max(num + d, 0); return Number.isInteger(num) ? String(Math.round(n)) : n.toFixed(1); }
-  return String(((hash % 9000) / 10 + 10).toFixed(1));
+function formatReviewTime(value: string): string {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

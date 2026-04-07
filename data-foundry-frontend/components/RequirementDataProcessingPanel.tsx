@@ -500,6 +500,10 @@ function NarrowTableViewSection({
     );
     return values.sort((left, right) => right.localeCompare(left));
   }, [businessDateColumnName, usesBusinessDateAxis, wideTableRecords]);
+  const trialTaskGroups = useMemo(
+    () => taskGroups.filter((taskGroup) => taskGroup.triggeredBy === "trial" && taskGroup.rowSnapshots?.length),
+    [taskGroups],
+  );
 
   const visibleAllBusinessDates = useMemo(
     () => limitFutureBusinessDates(businessDates, { now: new Date(), maxFuturePeriods: 1 }),
@@ -543,12 +547,27 @@ function NarrowTableViewSection({
     if (!isMonthlyFrequency || !effectiveSelectedYear) return scopedDates;
     return scopedDates.filter((d) => String(d).slice(0, 4) === effectiveSelectedYear);
   }, [effectiveSelectedYear, isMonthlyFrequency, visibleAllBusinessDates]);
+  const visibleBusinessDateOptions = useMemo(
+    () => [
+      ...trialTaskGroups.map((taskGroup) => ({
+        key: taskGroup.id,
+        label: `试运行 ${taskGroup.businessDateLabel || taskGroup.businessDate || ""}`.trim(),
+        isTrial: true,
+      })),
+      ...visibleBusinessDates.map((businessDate) => ({
+        key: businessDate,
+        label: isMonthlyFrequency ? `${extractBusinessDateMonth(businessDate) ?? String(businessDate).slice(5, 7)}月` : businessDate,
+        isTrial: false,
+      })),
+    ],
+    [isMonthlyFrequency, trialTaskGroups, visibleBusinessDates],
+  );
 
   useEffect(() => {
-    if (visibleBusinessDates.length > 0 && !visibleBusinessDates.includes(selectedBusinessDate)) {
-      setSelectedBusinessDate(visibleBusinessDates[0] ?? "");
+    if (visibleBusinessDateOptions.length > 0 && !visibleBusinessDateOptions.some((item) => item.key === selectedBusinessDate)) {
+      setSelectedBusinessDate(visibleBusinessDateOptions[0]?.key ?? "");
     }
-  }, [visibleBusinessDates, selectedBusinessDate]);
+  }, [visibleBusinessDateOptions, selectedBusinessDate]);
 
   useEffect(() => {
     if (usesBusinessDateAxis) return;
@@ -569,6 +588,10 @@ function NarrowTableViewSection({
   const filteredRecords = useMemo(
     () => {
       if (usesBusinessDateAxis) {
+        const trialTaskGroup = trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate);
+        if (trialTaskGroup) {
+          return trialTaskGroup.rowSnapshots ?? [];
+        }
         return selectedBusinessDate
           ? wideTableRecords.filter((r) => String(r[businessDateColumnName] ?? "") === selectedBusinessDate)
           : wideTableRecords;
@@ -585,13 +608,17 @@ function NarrowTableViewSection({
 
       return snapshotTaskGroup.rowSnapshots?.length ? snapshotTaskGroup.rowSnapshots : wideTableRecords;
     },
-    [activeSnapshotPage, businessDateColumnName, selectedBusinessDate, taskGroups, usesBusinessDateAxis, wideTableRecords],
+    [activeSnapshotPage, businessDateColumnName, selectedBusinessDate, taskGroups, trialTaskGroups, usesBusinessDateAxis, wideTableRecords],
   );
 
   const dateScopedTaskGroups = useMemo(
     () => {
       if (usesBusinessDateAxis) {
-        return [...taskGroups.filter((taskGroup) => taskGroup.businessDate === selectedBusinessDate)]
+        const trialTaskGroup = trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate);
+        if (trialTaskGroup) {
+          return [trialTaskGroup];
+        }
+        return [...taskGroups.filter((taskGroup) => taskGroup.businessDate === selectedBusinessDate && taskGroup.triggeredBy !== "trial")]
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       }
 
@@ -601,7 +628,7 @@ function NarrowTableViewSection({
 
       return taskGroups.filter((taskGroup) => taskGroup.id === activeSnapshotPage.taskGroupId);
     },
-    [activeSnapshotPage, selectedBusinessDate, taskGroups, usesBusinessDateAxis],
+    [activeSnapshotPage, selectedBusinessDate, taskGroups, trialTaskGroups, usesBusinessDateAxis],
   );
 
   const activeTaskGroup = useMemo(
@@ -670,7 +697,7 @@ function NarrowTableViewSection({
         </div>
       </div>
 
-      {usesBusinessDateAxis && businessDates.length > 0 ? (
+      {usesBusinessDateAxis && visibleBusinessDateOptions.length > 0 ? (
         <div className="space-y-2">
           {isMonthlyFrequency && businessYears.length > 0 ? (
             <div className={cn("flex gap-2 overflow-x-auto pb-1", businessYears.length > 1 ? "border-b" : "")}>
@@ -689,12 +716,13 @@ function NarrowTableViewSection({
             </div>
           ) : null}
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {visibleBusinessDates.map((businessDate) => (
-              <button key={businessDate} type="button" onClick={() => setSelectedBusinessDate(businessDate)}
+            {visibleBusinessDateOptions.map((item) => (
+              <button key={item.key} type="button" onClick={() => setSelectedBusinessDate(item.key)}
                 className={cn("shrink-0 rounded-md border px-3 py-1.5 text-xs",
-                  selectedBusinessDate === businessDate ? "border-primary bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  selectedBusinessDate === item.key ? "border-primary bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  item.isTrial && "border-sky-300 bg-sky-50 text-sky-700",
                 )}>
-                {isMonthlyFrequency ? `${extractBusinessDateMonth(businessDate) ?? String(businessDate).slice(5, 7)}月` : businessDate}
+                {item.label}
               </button>
             ))}
           </div>
@@ -737,6 +765,11 @@ function NarrowTableViewSection({
               <span>
                 任务组 <span className="font-medium text-foreground">{activeTaskGroup.id}</span>
               </span>
+              {activeTaskGroup.triggeredBy === "trial" ? (
+                <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
+                  试运行数据
+                </span>
+              ) : null}
               <span>
                 明细行数 <span className="font-medium text-foreground">{displayRows.length}</span>
               </span>
@@ -1069,6 +1102,10 @@ function WideTableViewSection({
     );
     return values.sort((left, right) => right.localeCompare(left));
   }, [businessDateColumnName, rawRows, usesBusinessDateAxis]);
+  const trialTaskGroups = useMemo(
+    () => taskGroups.filter((taskGroup) => taskGroup.triggeredBy === "trial" && taskGroup.rowSnapshots?.length),
+    [taskGroups],
+  );
   const visibleAllBusinessDates = useMemo(
     () => limitFutureBusinessDates(businessDates, { now: new Date(), maxFuturePeriods: 1 }),
     [businessDates],
@@ -1111,12 +1148,27 @@ function WideTableViewSection({
     if (!isMonthlyFrequency || !effectiveSelectedYear) return scopedDates;
     return scopedDates.filter((d) => String(d).slice(0, 4) === effectiveSelectedYear);
   }, [effectiveSelectedYear, isMonthlyFrequency, visibleAllBusinessDates]);
+  const visibleBusinessDateOptions = useMemo(
+    () => [
+      ...trialTaskGroups.map((taskGroup) => ({
+        key: taskGroup.id,
+        label: `试运行 ${taskGroup.businessDateLabel || taskGroup.businessDate || ""}`.trim(),
+        isTrial: true,
+      })),
+      ...visibleBusinessDates.map((businessDate) => ({
+        key: businessDate,
+        label: isMonthlyFrequency ? `${extractBusinessDateMonth(businessDate) ?? String(businessDate).slice(5, 7)}月` : businessDate,
+        isTrial: false,
+      })),
+    ],
+    [isMonthlyFrequency, trialTaskGroups, visibleBusinessDates],
+  );
 
   useEffect(() => {
-    if (visibleBusinessDates.length > 0 && !visibleBusinessDates.includes(selectedBusinessDate)) {
-      setSelectedBusinessDate(visibleBusinessDates[0] ?? "");
+    if (visibleBusinessDateOptions.length > 0 && !visibleBusinessDateOptions.some((item) => item.key === selectedBusinessDate)) {
+      setSelectedBusinessDate(visibleBusinessDateOptions[0]?.key ?? "");
     }
-  }, [visibleBusinessDates, selectedBusinessDate]);
+  }, [visibleBusinessDateOptions, selectedBusinessDate]);
 
   useEffect(() => {
     if (usesBusinessDateAxis) return;
@@ -1173,22 +1225,40 @@ function WideTableViewSection({
       if (!usesBusinessDateAxis) {
         return activeSnapshotRows?.rawRows ?? rawRows;
       }
+      const trialTaskGroup = trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate);
+      if (trialTaskGroup) {
+        return buildWideTableProcessingRows(wideTable, trialTaskGroup.rowSnapshots ?? [], enabledCategories).rawRows;
+      }
       return selectedBusinessDate
         ? rawRows.filter((row) => row.values[businessDateColumnName] === selectedBusinessDate)
         : rawRows;
     },
-    [activeSnapshotRows, businessDateColumnName, rawRows, selectedBusinessDate, usesBusinessDateAxis],
+    [activeSnapshotRows, businessDateColumnName, enabledCategories, rawRows, selectedBusinessDate, trialTaskGroups, usesBusinessDateAxis, wideTable],
   );
   const visibleProcessedRows = useMemo(
     () => {
       if (!usesBusinessDateAxis) {
         return activeSnapshotRows?.processedRows ?? processedRows;
       }
+      const trialTaskGroup = trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate);
+      if (trialTaskGroup) {
+        return buildWideTableProcessingRows(wideTable, trialTaskGroup.rowSnapshots ?? [], enabledCategories).processedRows;
+      }
       return selectedBusinessDate
         ? processedRows.filter((row) => row.values[businessDateColumnName] === selectedBusinessDate)
         : processedRows;
     },
-    [activeSnapshotRows, businessDateColumnName, processedRows, selectedBusinessDate, usesBusinessDateAxis],
+    [activeSnapshotRows, businessDateColumnName, enabledCategories, processedRows, selectedBusinessDate, trialTaskGroups, usesBusinessDateAxis, wideTable],
+  );
+  const activeBusinessDateTaskGroup = useMemo(
+    () => (
+      usesBusinessDateAxis
+        ? taskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate)
+          ?? taskGroups.find((taskGroup) => taskGroup.businessDate === selectedBusinessDate && taskGroup.triggeredBy !== "trial")
+          ?? null
+        : null
+    ),
+    [selectedBusinessDate, taskGroups, usesBusinessDateAxis],
   );
 
   return (
@@ -1203,7 +1273,7 @@ function WideTableViewSection({
         </div>
       </div>
 
-      {usesBusinessDateAxis && businessDates.length > 0 ? (
+      {usesBusinessDateAxis && visibleBusinessDateOptions.length > 0 ? (
         <div className="space-y-2">
           {isMonthlyFrequency && businessYears.length > 0 ? (
             <div className={cn("flex gap-2 overflow-x-auto pb-1", businessYears.length > 1 ? "border-b" : "")}>
@@ -1222,12 +1292,13 @@ function WideTableViewSection({
             </div>
           ) : null}
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {visibleBusinessDates.map((businessDate) => (
-              <button key={businessDate} type="button" onClick={() => setSelectedBusinessDate(businessDate)}
+            {visibleBusinessDateOptions.map((item) => (
+              <button key={item.key} type="button" onClick={() => setSelectedBusinessDate(item.key)}
                 className={cn("shrink-0 rounded-md border px-3 py-1.5 text-xs",
-                  selectedBusinessDate === businessDate ? "border-primary bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  selectedBusinessDate === item.key ? "border-primary bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  item.isTrial && "border-sky-300 bg-sky-50 text-sky-700",
                 )}>
-                {isMonthlyFrequency ? `${extractBusinessDateMonth(businessDate) ?? String(businessDate).slice(5, 7)}月` : businessDate}
+                {item.label}
               </button>
             ))}
           </div>
@@ -1269,16 +1340,16 @@ function WideTableViewSection({
       {showProcessed ? (
         <WideTableCard title="结果预览" requirement={requirement} wideTable={wideTable}
           rows={visibleProcessedRows} rawRows={visibleRawRows} wideTableRecords={usesBusinessDateAxis ? wideTableRecords : activeSnapshotRecords}
-          taskGroups={usesBusinessDateAxis ? taskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
-          fetchTasks={usesBusinessDateAxis ? fetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
+          taskGroups={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? [activeBusinessDateTaskGroup] : taskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
+          fetchTasks={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeBusinessDateTaskGroup.id) : fetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
           onOpenTaskModal={onOpenTaskModal} annotateRawDifference compact
           diffMode={showDiff && !usesBusinessDateAxis ? previousSnapshotRowMap ?? undefined : undefined}
           emptyMessage={usesBusinessDateAxis ? "当前业务日期下还没有可展示的结果预览。" : "当前任务组下还没有可展示的结果预览。"} />
       ) : (
         <WideTableCard title="结果预览" requirement={requirement} wideTable={wideTable}
           rows={visibleRawRows} rawRows={visibleRawRows} wideTableRecords={usesBusinessDateAxis ? wideTableRecords : activeSnapshotRecords}
-          taskGroups={usesBusinessDateAxis ? taskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
-          fetchTasks={usesBusinessDateAxis ? fetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
+          taskGroups={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? [activeBusinessDateTaskGroup] : taskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
+          fetchTasks={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeBusinessDateTaskGroup.id) : fetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
           onOpenTaskModal={onOpenTaskModal}
           diffMode={showDiff && !usesBusinessDateAxis ? previousSnapshotRowMap ?? undefined : undefined}
           emptyMessage={usesBusinessDateAxis ? "当前业务日期下还没有可展示的结果预览。" : "当前任务组下还没有可展示的结果预览。"} />

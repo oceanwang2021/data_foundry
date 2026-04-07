@@ -216,7 +216,7 @@ export type TaskGroup = {
   totalTasks: number;
   completedTasks: number;
   failedTasks: number;
-  triggeredBy: "schedule" | "backfill" | "manual";
+  triggeredBy: "schedule" | "backfill" | "manual" | "trial";
   createdAt: string;
   updatedAt: string;
 };
@@ -287,7 +287,7 @@ export type ExecutionRecord = {
   fetchTaskId: string;
   attempt: number;
   status: "running" | "success" | "failure" | "timeout";
-  triggeredBy: "schedule" | "backfill" | "manual" | "manual_retry";
+  triggeredBy: "schedule" | "backfill" | "manual" | "manual_retry" | "trial";
   taskGroupRunId?: string;
   errorMessage?: string;
   startedAt: string;

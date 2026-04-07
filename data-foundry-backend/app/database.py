@@ -20,7 +20,7 @@ from app.seed_data import (
 )
 
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 
 def resolve_database_path(db_path: str | Path | None = None) -> str:
@@ -599,13 +599,15 @@ def _create_schema(connection: sqlite3.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS acceptance_tickets (
             id TEXT PRIMARY KEY,
+            task_group_id TEXT NOT NULL UNIQUE,
             dataset TEXT NOT NULL,
             requirement_id TEXT NOT NULL,
             status TEXT NOT NULL,
             owner TEXT NOT NULL,
             feedback TEXT,
             latest_action_at TEXT NOT NULL,
-            FOREIGN KEY(requirement_id) REFERENCES requirements(id)
+            FOREIGN KEY(requirement_id) REFERENCES requirements(id),
+            FOREIGN KEY(task_group_id) REFERENCES task_groups(id)
         );
 
         CREATE TABLE IF NOT EXISTS schedule_jobs (
@@ -683,6 +685,8 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             ON execution_records(task_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_acceptance_tickets_requirement_id
             ON acceptance_tickets(requirement_id);
+        CREATE INDEX IF NOT EXISTS idx_acceptance_tickets_task_group_id
+            ON acceptance_tickets(task_group_id);
         """
     )
 

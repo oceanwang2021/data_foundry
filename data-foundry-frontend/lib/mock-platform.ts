@@ -139,7 +139,7 @@ export const AUDIT_RULES: AuditRule[] = [
 // ==================== 验收工单 ====================
 
 export const ACCEPTANCE_TICKETS: AcceptanceTicket[] = [
-  { id: "AC-003", dataset: "ads_adc_phase3_clinical(WT-ADC-PROD)", requirementId: "REQ-2026-003", status: "rejected", owner: "李珂", feedback: "OS 指标来源不足，要求重采并附会议摘要截图。", latestActionAt: "2026-03-01 21:40" },
+  { id: "AC-003", taskGroupId: "", dataset: "ads_adc_phase3_clinical(WT-ADC-PROD)", requirementId: "REQ-2026-003", status: "rejected", owner: "李珂", feedback: "OS 指标来源不足，要求重采并附会议摘要截图。", latestActionAt: "2026-03-01 21:40" },
 ];
 
 // ==================== 权限配置 ====================

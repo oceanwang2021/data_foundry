@@ -307,11 +307,14 @@ class CollectionAgentService:
         response: AgentExecutionResponse,
         context: TaskExecutionContext,
     ) -> None:
-        row = self.repo.get_wide_table_row(task.wide_table_id, task.row_id)
+        is_trial_run = record.trigger_type == "trial" or context.task_group.triggered_by == "trial"
+        row = self._load_trial_snapshot_row(task, context) if is_trial_run else None
         if row is None:
-            row = context.row.model_copy(deep=True)
-        else:
-            row = row.model_copy(deep=True)
+            row = self.repo.get_wide_table_row(task.wide_table_id, task.row_id)
+            if row is None:
+                row = context.row.model_copy(deep=True)
+            else:
+                row = row.model_copy(deep=True)
         retrieval_map = {
             item.indicator_key: item
             for item in response.retrieval_tasks
@@ -342,7 +345,10 @@ class CollectionAgentService:
             "last_task_id": task.id,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
-        self.repo.save_wide_table_row(row)
+        if is_trial_run and task.batch_id:
+            row = self._merge_latest_trial_snapshot(row, task)
+        if not is_trial_run:
+            self.repo.save_wide_table_row(row)
         if task.batch_id:
             self.repo.save_wide_table_row_snapshots(
                 [
@@ -401,6 +407,62 @@ class CollectionAgentService:
                 }
             )
         )
+
+    def _load_trial_snapshot_row(
+        self,
+        task: FetchTask,
+        context: TaskExecutionContext,
+    ) -> WideTableRow | None:
+        if not task.batch_id:
+            return None
+        for snapshot in self.repo.list_wide_table_row_snapshots(task.batch_id):
+            if snapshot.row_binding_key != context.row.row_binding_key:
+                continue
+            return context.row.model_copy(
+                deep=True,
+                update={
+                    "business_date": snapshot.business_date,
+                    "dimension_values": snapshot.dimension_values,
+                    "row_status": snapshot.row_status,
+                    "indicator_values": snapshot.indicator_values,
+                    "system_values": snapshot.system_values,
+                },
+            )
+        return None
+
+    def _merge_latest_trial_snapshot(
+        self,
+        row: WideTableRow,
+        task: FetchTask,
+    ) -> WideTableRow:
+        if not task.batch_id:
+            return row
+        latest_snapshot = next(
+            (
+                snapshot
+                for snapshot in self.repo.list_wide_table_row_snapshots(task.batch_id)
+                if snapshot.row_binding_key == row.row_binding_key
+            ),
+            None,
+        )
+        if latest_snapshot is None:
+            return row
+        next_indicator_values = dict(latest_snapshot.indicator_values)
+        for indicator_key in task.indicator_keys:
+            if indicator_key in row.indicator_values:
+                next_indicator_values[indicator_key] = row.indicator_values[indicator_key]
+        next_row = row.model_copy(
+            deep=True,
+            update={"indicator_values": next_indicator_values},
+        )
+        next_row.row_status = self._derive_row_status(next_row)
+        next_row.system_values = {
+            **next_row.system_values,
+            "row_status": next_row.row_status,
+            "last_task_id": task.id,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        return next_row
 
     @staticmethod
     def _derive_row_status(row: WideTableRow) -> str:

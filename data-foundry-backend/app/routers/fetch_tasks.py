@@ -108,7 +108,10 @@ async def retry_task_endpoint(task_id: str, request: Request, background_tasks: 
 
 @router.post("/api/task-groups/{task_group_id}/execute", response_model=dict)
 async def execute_task_group_endpoint(
-    task_group_id: str, request: Request, background_tasks: BackgroundTasks,
+    task_group_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: TaskExecuteInput | None = None,
 ):
     """Batch execute all pending tasks in a task group via SchedulerService."""
     repo = _repo(request)
@@ -116,5 +119,7 @@ async def execute_task_group_endpoint(
     if not tg:
         raise HTTPException(status_code=404, detail="Task group not found")
     scheduler = _scheduler(request)
-    background_tasks.add_task(scheduler.trigger_manual_task_group, task_group_id, "manual")
+    trigger_type = body.trigger_type if body else "manual"
+    operator = body.operator if body else "manual"
+    background_tasks.add_task(scheduler.trigger_task_group, task_group_id, trigger_type, operator)
     return {"ok": True, "task_group_id": task_group_id, "message": "Task group execution started"}

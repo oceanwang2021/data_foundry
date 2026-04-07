@@ -165,7 +165,7 @@ function RequirementRow({
       </td>
       <td className="px-3 py-2 align-top">
         <Link
-          href={`/projects/${projectId}/requirements/${requirement.id}`}
+          href={`/projects/${projectId}/requirements/${requirement.id}?nav=projects`}
           className="text-xs text-primary hover:underline"
         >
           进入需求

@@ -376,6 +376,18 @@ class SchedulerService:
             raise ValueError(f"TaskGroup {task_group_id!r} not found")
         return await self._execute_task_group(task_group, "manual", operator)
 
+    async def trigger_task_group(
+        self,
+        task_group_id: str,
+        trigger_type: str,
+        operator: str = "manual",
+    ) -> ScheduleJob:
+        """Execute a task group with an explicit trigger type."""
+        task_group = self.repo.get_task_group(task_group_id)
+        if not task_group:
+            raise ValueError(f"TaskGroup {task_group_id!r} not found")
+        return await self._execute_task_group(task_group, trigger_type, operator)
+
     async def trigger_backfill_task_group(self, task_group_id: str, operator: str = "system") -> ScheduleJob:
         """Execute a historical backfill task group."""
         task_group = self.repo.get_task_group(task_group_id)

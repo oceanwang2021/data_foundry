@@ -85,9 +85,10 @@ export type AuditRule = {
 
 export type AcceptanceTicket = {
   id: string;
+  taskGroupId: string;
   dataset: string;
   requirementId: string;
-  status: "approved" | "rejected" | "fixing" | "deleted";
+  status: "pending" | "approved" | "rejected" | "fixing" | "deleted";
   owner: string;
   feedback: string;
   latestActionAt: string;
@@ -115,7 +116,7 @@ export type TaskGroupRun = {
   id: string;
   taskGroupId: string;
   wideTableId?: string;
-  triggerType: "manual" | "cron" | "backfill" | "resample";
+  triggerType: "manual" | "cron" | "backfill" | "resample" | "trial";
   status: "queued" | "running" | "completed" | "failed";
   startedAt: string;
   endedAt?: string;
