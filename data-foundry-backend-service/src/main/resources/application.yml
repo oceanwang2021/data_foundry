@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: data-foundry-backend-service
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    serialization:
+      write-dates-as-timestamps: false
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/data_foundry_backend?useSSL=false&characterEncoding=utf8&serverTimezone=Asia/Shanghai
@@ -17,4 +21,3 @@ mybatis:
 data-foundry:
   scheduler:
     base-url: http://127.0.0.1:8200
-

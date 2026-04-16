@@ -219,7 +219,7 @@ export default function RequirementDefinitionForm({
   const [isSubmittingDefinition, setIsSubmittingDefinition] = useState(false);
   const usesBusinessDateAxis = Boolean(selectedWt && hasWideTableBusinessDateDimension(selectedWt));
   const isOpenEndedRange = Boolean(selectedWt && usesBusinessDateAxis && isOpenEndedBusinessDateRange(selectedWt.businessDateRange));
-  const canSubmit = requirement.status === "draft";
+  const canSubmit = !requirement.schemaLocked && (requirement.status === "draft" || requirement.status === "aligning");
   const submitBlockerMessage = useMemo(() => {
     if (!selectedWt) {
       return "请先关联 Schema 并完成宽表配置。";
@@ -268,6 +268,10 @@ export default function RequirementDefinitionForm({
 
   const handleSaveDefinition = async () => {
     setSubmitMessage("");
+    if (requirement.schemaLocked) {
+      setSubmitMessage("当前需求已提交并锁定，无法再保存修改。");
+      return;
+    }
     setIsSavingDefinition(true);
     try {
       await persistDefinition();
@@ -298,6 +302,7 @@ export default function RequirementDefinitionForm({
       onRequirementChange?.({
         ...requirement,
         status: "ready",
+        schemaLocked: true,
         updatedAt: new Date().toISOString(),
       });
       setSubmitMessage("已提交需求。现在可以进入【任务】配置指标分组并生成任务组。");
@@ -358,7 +363,7 @@ export default function RequirementDefinitionForm({
   useEffect(() => {
     const wt = wideTables.find((w) => w.id === selectedWtId);
     setStepStatuses(wt ? deriveStepStatus(wt) : initStepStatus());
-  }, [selectedWtId]);
+  }, [selectedWtId, wideTables]);
 
   useEffect(() => {
     if (
@@ -373,6 +378,22 @@ export default function RequirementDefinitionForm({
       current.D === "completed" ? invalidateDownstream(current, "C") : current
     ));
   }, [requirement.status, selectedWt?.businessDateRange.end, selectedWt?.id]);
+
+  const submitDisabledReason = useMemo(() => {
+    if (isSavingDefinition) return "正在保存中，请稍后再提交。";
+    if (isSubmittingDefinition) return "正在提交中，请稍后。";
+    if (!canSubmit) {
+      return requirement.schemaLocked ? "需求已提交并锁定，无法再次提交。" : "当前需求状态不支持提交。";
+    }
+    if (submitBlockerMessage) return submitBlockerMessage;
+    return "";
+  }, [
+    canSubmit,
+    isSavingDefinition,
+    isSubmittingDefinition,
+    requirement.schemaLocked,
+    submitBlockerMessage,
+  ]);
 
   useEffect(() => {
     const clearPendingNavigation = () => {
@@ -613,7 +634,9 @@ export default function RequirementDefinitionForm({
             description="配置范围，预览可选。"
             isActive={activeSection === "scope-generation"}
             onNavigate={handleSectionNavigation("scope-generation")}
-            trailing={<StepGroupBadge steps={["C", "D"]} statuses={stepStatuses} />}
+            // Step D (预览) 已改为弹窗辅助能力，不再作为保存/提交的强校验条件；
+            // “数据范围”阶段的完成状态仅依赖 Step C（时间范围 + 维度取值）。
+            trailing={<SectionStatusBadge label="数据范围" status={stepStatuses.C} />}
           />
           <StageSummaryCard
             href="#data-update"
@@ -705,10 +728,10 @@ export default function RequirementDefinitionForm({
             <button
               type="button"
               onClick={handleSaveDefinition}
-              disabled={isSavingDefinition || isSubmittingDefinition || stepStatuses.A !== "completed"}
+              disabled={requirement.schemaLocked || isSavingDefinition || isSubmittingDefinition || stepStatuses.A !== "completed"}
               className={cn(
                 "rounded-md border px-3 py-2 text-xs font-medium",
-                isSavingDefinition || isSubmittingDefinition || stepStatuses.A !== "completed"
+                requirement.schemaLocked || isSavingDefinition || isSubmittingDefinition || stepStatuses.A !== "completed"
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
                   : "bg-background hover:bg-muted/30",
               )}
@@ -731,9 +754,9 @@ export default function RequirementDefinitionForm({
           </div>
         </div>
 
-        {submitBlockerMessage && canSubmit ? (
+        {submitDisabledReason ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            {submitBlockerMessage}
+            {submitDisabledReason}
           </div>
         ) : null}
 
@@ -2316,12 +2339,13 @@ function ScopeAndGroupSection({
   // Re-evaluate step C completion when dimension ranges or business date range change
   useEffect(() => {
     if (!selectedWt) return;
-    if (stepStatuses.B !== "completed") return;
+    // Step C only requires schema (Step A) to be completed.
+    if (stepStatuses.A !== "completed") return;
     const cComplete = isStepCComplete(selectedWt);
     if (cComplete && stepStatuses.C !== "completed") {
       onStepStatusesChange(completeStep(stepStatuses, "C"));
     }
-  }, [selectedWt?.dimensionRanges, selectedWt?.businessDateRange]);
+  }, [selectedWt?.dimensionRanges, selectedWt?.businessDateRange, stepStatuses.A, stepStatuses.C]);
 
   const updateSelectedWideTable = (updater: (wideTable: WideTable) => WideTable) => {
     if (!selectedWt || !onUpdateWideTable) {
@@ -2583,7 +2607,7 @@ function ScopeAndGroupSection({
         <div className="flex items-center gap-2">
           <h3 className="font-semibold">4. 数据范围</h3>
           <span className="inline-flex items-center gap-1">
-            <StepGroupBadge steps={["C", "D"]} statuses={stepStatuses} />
+            <SectionStatusBadge label="数据范围" status={stepStatuses.C} />
           </span>
         </div>
         <p className="text-xs text-muted-foreground">在这里配置时间范围与维度取值，并在需要时查看预览。</p>
@@ -3073,29 +3097,7 @@ function ScopeAndGroupSection({
 
 // ==================== 步骤状态徽标 ====================
 
-function StepGroupBadge({
-  steps,
-  statuses,
-}: {
-  steps: readonly [StepId, StepId];
-  statuses: StepStatusMap;
-}) {
-  const groupStatuses = steps.map((step) => statuses[step]);
-  const hasInvalidated = groupStatuses.some((status) => status === "invalidated");
-  const allCompleted = groupStatuses.every((status) => status === "completed");
-  const title = steps
-    .map((step) => `${STEP_LABELS[step]}: ${formatStepStatusLabel(statuses[step])}`)
-    .join(" | ");
-  const status: StepStatus = allCompleted
-    ? "completed"
-    : hasInvalidated
-      ? "invalidated"
-      : "pending";
 
-  return (
-    <StatusDot status={status} title={title} />
-  );
-}
 
 function formatStepStatusLabel(status: StepStatus): string {
   if (status === "completed") {

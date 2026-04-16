@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Project, Requirement, WideTable, TaskGroup, FetchTask } from "@/lib/types";
 import {
-  AGENT_NODES,
-} from "@/lib/mock-platform";
-import type { Requirement, WideTable, TaskGroup, FetchTask } from "@/lib/types";
-import { fetchProjects, fetchRequirementWideTables, fetchTaskGroups, fetchFetchTasks } from "@/lib/api-client";
+  ensureTaskGroupTasks,
+  fetchProjects,
+  fetchRequirementWideTables,
+  fetchTaskGroups,
+  fetchFetchTasks,
+} from "@/lib/api-client";
 import Link from "next/link";
-import { Boxes, FileCode2, Workflow } from "lucide-react";
+import { Boxes, ChevronDown, ChevronRight, Loader2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const statusStyle: Record<string, string> = {
@@ -32,15 +35,40 @@ const triggerLabel: Record<string, string> = {
   manual: "手动触发",
 };
 
+const COLLECTION_TASK_DEFAULT_KEY = "__default__";
+const COLLECTION_TASK_DEFAULT_LABEL = "统一提示词";
+
+function resolveCollectionTaskKey(taskGroup: TaskGroup): string {
+  return taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_KEY;
+}
+
+function resolveCollectionTaskLabel(taskGroup: TaskGroup): string {
+  return taskGroup.partitionLabel ?? taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_LABEL;
+}
+
+function resolveAggregateStatus(statuses: Array<TaskGroup["status"]>): keyof typeof statusStyle {
+  if (statuses.some((s) => s === "running")) return "running";
+  if (statuses.some((s) => s === "failed" || s === "partial")) return "failed";
+  if (statuses.some((s) => s === "invalidated")) return "paused";
+  if (statuses.length > 0 && statuses.every((s) => s === "completed")) return "completed";
+  return "pending";
+}
+
 export default function CollectionTasksPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [wideTables, setWideTables] = useState<WideTable[]>([]);
   const [taskGroups, setTaskGroups] = useState<TaskGroup[]>([]);
   const [allFetchTasks, setAllFetchTasks] = useState<FetchTask[]>([]);
+  const [expandedRequirementId, setExpandedRequirementId] = useState<string | null>(null);
+  const [expandedCollectionTaskKey, setExpandedCollectionTaskKey] = useState<string | null>(null);
+  const [expandedTaskGroupId, setExpandedTaskGroupId] = useState<string | null>(null);
+  const [loadingTaskGroupId, setLoadingTaskGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchProjects()
       .then(async (ps) => {
+        setProjects(ps);
         const results = await Promise.all(
           ps.map((p) => fetchRequirementWideTables(p.id).catch(() => ({ requirements: [] as Requirement[], wideTables: [] as WideTable[] }))),
         );
@@ -62,6 +90,116 @@ export default function CollectionTasksPage() {
       .catch(() => {});
   }, []);
 
+  const projectMap = useMemo(
+    () => new Map(projects.map((p) => [p.id, p] as const)),
+    [projects],
+  );
+
+  const wideTableById = useMemo(
+    () => new Map(wideTables.map((wt) => [wt.id, wt] as const)),
+    [wideTables],
+  );
+
+  const taskGroupsByRequirementId = useMemo(() => {
+    const map = new Map<string, TaskGroup[]>();
+    for (const tg of taskGroups) {
+      const wt = wideTableById.get(tg.wideTableId);
+      const requirementId = wt?.requirementId;
+      if (!requirementId) continue;
+      const bucket = map.get(requirementId) ?? [];
+      bucket.push(tg);
+      map.set(requirementId, bucket);
+    }
+    for (const [reqId, list] of map.entries()) {
+      map.set(reqId, [...list].sort((a, b) => (b.businessDate ?? "").localeCompare(a.businessDate ?? "")));
+    }
+    return map;
+  }, [taskGroups, wideTableById]);
+
+  const fetchTasksByTaskGroupId = useMemo(() => {
+    const map = new Map<string, FetchTask[]>();
+    for (const ft of allFetchTasks) {
+      const bucket = map.get(ft.taskGroupId) ?? [];
+      bucket.push(ft);
+      map.set(ft.taskGroupId, bucket);
+    }
+    return map;
+  }, [allFetchTasks]);
+
+  const requirementsSorted = useMemo(
+    () => [...requirements].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? "")),
+    [requirements],
+  );
+
+  const refreshFetchTasksForRequirement = async (requirement: Requirement) => {
+    const latest = await fetchFetchTasks(requirement.projectId, requirement.id).catch(() => [] as FetchTask[]);
+    setAllFetchTasks((prev) => {
+      const keep = prev.filter((ft) => ft.wideTableId && ft.taskGroupId && !latest.some((next) => next.id === ft.id));
+      return [...keep, ...latest];
+    });
+  };
+
+  type CollectionTaskBucket = {
+    requirementId: string;
+    key: string;
+    label: string;
+    taskGroups: TaskGroup[];
+    status: keyof typeof statusStyle;
+  };
+
+  const buildCollectionTaskBuckets = (requirementId: string): CollectionTaskBucket[] => {
+    const tgs = taskGroupsByRequirementId.get(requirementId) ?? [];
+    const map = new Map<string, { requirementId: string; key: string; label: string; taskGroups: TaskGroup[] }>();
+
+    for (const tg of tgs) {
+      const key = resolveCollectionTaskKey(tg);
+      const label = resolveCollectionTaskLabel(tg);
+      const bucket = map.get(key) ?? { requirementId, key, label, taskGroups: [] as TaskGroup[] };
+      bucket.taskGroups.push(tg);
+      map.set(key, bucket);
+    }
+
+    const buckets: CollectionTaskBucket[] = [];
+    for (const b of map.values()) {
+      buckets.push({
+        ...b,
+        taskGroups: [...b.taskGroups].sort((a, b2) => (b2.businessDate ?? "").localeCompare(a.businessDate ?? "")),
+        status: resolveAggregateStatus(b.taskGroups.map((tg) => tg.status)),
+      });
+    }
+
+    buckets.sort((a, b) => a.label.localeCompare(b.label));
+    return buckets;
+  };
+
+  const toggleRequirement = (requirementId: string) => {
+    setExpandedRequirementId((prev) => (prev === requirementId ? null : requirementId));
+    setExpandedCollectionTaskKey(null);
+    setExpandedTaskGroupId(null);
+  };
+
+  const toggleCollectionTask = (requirementId: string, key: string) => {
+    const composite = `${requirementId}:${key}`;
+    setExpandedCollectionTaskKey((prev) => (prev === composite ? null : composite));
+    setExpandedTaskGroupId(null);
+  };
+
+  const toggleTaskGroup = async (requirement: Requirement, taskGroup: TaskGroup) => {
+    if (expandedTaskGroupId === taskGroup.id) {
+      setExpandedTaskGroupId(null);
+      return;
+    }
+
+    setLoadingTaskGroupId(taskGroup.id);
+    try {
+      await ensureTaskGroupTasks(taskGroup.id);
+      await refreshFetchTasksForRequirement(requirement);
+      setExpandedTaskGroupId(taskGroup.id);
+    } finally {
+      setLoadingTaskGroupId(null);
+    }
+  };
+
   return (
     <div className="p-8 space-y-6">
       <header className="space-y-1">
@@ -70,117 +208,189 @@ export default function CollectionTasksPage() {
           采集任务管理
         </h1>
         <p className="text-sm text-muted-foreground">
-          管理需求关联宽表下的任务组与采集任务。
+          展示需求及其下关联的采集任务列表，并支持按层级展开查看任务实例。
         </p>
       </header>
 
       <section className="rounded-xl border bg-card p-6">
-        <h2 className="font-semibold mb-4">任务组列表</h2>
-        <div className="space-y-4">
-          {taskGroups.map((tg) => {
-            const wt = wideTables.find((w) => w.id === tg.wideTableId);
-            const req = wt ? requirements.find((r) => r.id === wt.requirementId) : null;
-            const fetchTasks = allFetchTasks.filter((ft) => ft.taskGroupId === tg.id);
-            const progressPercent = tg.totalTasks > 0
-              ? Math.round((tg.completedTasks / tg.totalTasks) * 100)
-              : 0;
-            return (
-              <div key={tg.id} className="rounded-lg border p-4 bg-muted/10">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs px-2 py-1 rounded border bg-background">{tg.id}</span>
-                  <h3 className="font-semibold">{tg.businessDateLabel}</h3>
-                  <span className={cn("text-xs px-2 py-1 rounded", statusStyle[tg.status])}>{statusLabel[tg.status] ?? tg.status}</span>
-                  <span className="text-xs px-2 py-1 rounded border">{triggerLabel[tg.triggeredBy] ?? tg.triggeredBy}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  宽表：{wt?.name ?? "-"} | 需求：{req?.title ?? "-"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  总任务 {tg.totalTasks} | 完成 {tg.completedTasks} | 失败 {tg.failedTasks} | 进度 {progressPercent}%
-                </p>
-                {req && (
-                  <Link
-                    href={`/projects/${req.projectId}/requirements/${req.id}?nav=tasks&view=tasks&tab=tasks${wt ? `&wt=${encodeURIComponent(wt.id)}` : ""}&tg=${encodeURIComponent(tg.id)}`}
-                    className="mt-2 inline-flex text-xs text-primary hover:underline"
+        <div>
+          <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-muted-foreground bg-muted/30">
+            <div className="col-span-5">需求</div>
+            <div className="col-span-3">项目</div>
+            <div className="col-span-2">宽表</div>
+            <div className="col-span-2 text-right">采集任务</div>
+          </div>
+
+          <div className="divide-y">
+            {requirementsSorted.map((req) => {
+              const project = projectMap.get(req.projectId);
+              const wts = wideTables.filter((wt) => wt.requirementId === req.id);
+              const buckets = buildCollectionTaskBuckets(req.id);
+              const isExpanded = expandedRequirementId === req.id;
+
+              return (
+                <div key={req.id} className="px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleRequirement(req.id)}
+                    className="w-full grid grid-cols-12 gap-4 items-center text-left"
                   >
-                    查看任务详情
-                  </Link>
-                )}
-                <div className="mt-3 rounded-md border bg-background p-3">
-                  <div className="text-xs font-semibold mb-2 flex items-center gap-1">
-                    <Boxes className="h-3 w-3" />
-                    采集任务（FetchTask）
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    {fetchTasks.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">暂无采集任务</div>
-                    ) : (
-                      fetchTasks.slice(0, 4).map((ft) => (
-                        <div key={ft.id} className="rounded border p-2">
-                          <div className="text-xs font-medium">{ft.id} – 行{ft.rowId} × {ft.indicatorGroupName}</div>
-                          <div className="text-[11px] text-muted-foreground mt-1">
-                            状态：{statusLabel[ft.status] ?? ft.status}
-                            {ft.confidence != null ? ` | 置信度：${(ft.confidence * 100).toFixed(0)}%` : ""}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                    {fetchTasks.length > 4 ? (
-                      <div className="text-xs text-muted-foreground p-2">
-                        ... 共 {fetchTasks.length} 个采集任务
+                    <div className="col-span-5 flex items-center gap-2 min-w-0">
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{req.title ?? req.id}</div>
+                        <div className="text-xs text-muted-foreground truncate">{req.id}</div>
                       </div>
-                    ) : null}
-                  </div>
+                    </div>
+                    <div className="col-span-3 text-sm truncate">{project?.name ?? req.projectId}</div>
+                    <div className="col-span-2 text-sm truncate">{wts[0]?.name ?? "-"}</div>
+                    <div className="col-span-2 text-sm text-right">
+                      <span className="text-xs px-2 py-1 rounded border bg-background">{buckets.length}</span>
+                    </div>
+                  </button>
+
+                  {isExpanded ? (
+                    <div className="mt-3 pl-6 space-y-3">
+                      {buckets.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">该需求下暂无采集任务。</div>
+                      ) : (
+                        buckets.map((bucket) => {
+                          const compositeKey = `${req.id}:${bucket.key}`;
+                          const bucketExpanded = expandedCollectionTaskKey === compositeKey;
+
+                          return (
+                            <div key={compositeKey} className="rounded-lg border bg-background">
+                              <button
+                                type="button"
+                                onClick={() => toggleCollectionTask(req.id, bucket.key)}
+                                className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {bucketExpanded ? (
+                                    <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="font-medium truncate">采集任务：{bucket.label}</div>
+                                    <div className="text-xs text-muted-foreground truncate">
+                                      任务实例 {bucket.taskGroups.length}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className={cn("text-xs px-2 py-1 rounded", statusStyle[bucket.status])}>
+                                  {statusLabel[bucket.status] ?? bucket.status}
+                                </span>
+                              </button>
+
+                              {bucketExpanded ? (
+                                <div className="px-4 pb-4 space-y-2">
+                                  {bucket.taskGroups.map((tg) => {
+                                    const wt = wideTableById.get(tg.wideTableId);
+                                    const progressPercent =
+                                      tg.totalTasks > 0 ? Math.round((tg.completedTasks / tg.totalTasks) * 100) : 0;
+                                    const tgExpanded = expandedTaskGroupId === tg.id;
+                                    const isLoading = loadingTaskGroupId === tg.id;
+                                    const fetchTasks = fetchTasksByTaskGroupId.get(tg.id) ?? [];
+
+                                    return (
+                                      <div key={tg.id} className="rounded-md border bg-muted/10">
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleTaskGroup(req, tg)}
+                                          className="w-full px-3 py-3 flex items-center justify-between gap-3 text-left"
+                                        >
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            {tgExpanded ? (
+                                              <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                                            ) : (
+                                              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                                            )}
+                                            <div className="min-w-0">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <div className="font-medium">{tg.businessDateLabel ?? tg.businessDate ?? tg.id}</div>
+                                                <span className={cn("text-xs px-2 py-1 rounded", statusStyle[tg.status])}>
+                                                  {statusLabel[tg.status] ?? tg.status}
+                                                </span>
+                                                <span className="text-xs px-2 py-1 rounded border bg-background">
+                                                  {triggerLabel[tg.triggeredBy] ?? tg.triggeredBy}
+                                                </span>
+                                                {isLoading ? (
+                                                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                    生成中
+                                                  </span>
+                                                ) : null}
+                                              </div>
+                                              <div className="text-xs text-muted-foreground mt-1 truncate">
+                                                总任务 {tg.totalTasks} | 完成 {tg.completedTasks} | 失败 {tg.failedTasks} | 进度 {progressPercent}%
+                                              </div>
+                                            </div>
+                                          </div>
+
+                                          <Link
+                                            href={`/projects/${req.projectId}/requirements/${req.id}?nav=projects&tab=tasks${wt ? `&wt=${encodeURIComponent(wt.id)}` : ""}&tg=${encodeURIComponent(tg.id)}`}
+                                            className="shrink-0 text-xs text-primary hover:underline"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            查看详情
+                                          </Link>
+                                        </button>
+
+                                        {tgExpanded ? (
+                                          <div className="px-3 pb-3">
+                                            <div className="text-xs font-semibold mb-2 flex items-center gap-1">
+                                              <Boxes className="h-3 w-3" />
+                                              采集任务（FetchTask）
+                                            </div>
+                                            {fetchTasks.length === 0 ? (
+                                              <div className="text-xs text-muted-foreground">暂无采集任务。</div>
+                                            ) : (
+                                              <div className="grid gap-2 md:grid-cols-2">
+                                                {fetchTasks.slice(0, 6).map((ft) => (
+                                                  <div key={ft.id} className="rounded border bg-background p-2">
+                                                    <div className="text-xs font-medium truncate">
+                                                      {ft.id} - 行 {ft.rowId} - {ft.indicatorGroupName}
+                                                    </div>
+                                                    <div className="text-[11px] text-muted-foreground mt-1">
+                                                      状态：{statusLabel[ft.status] ?? ft.status}
+                                                      {ft.confidence != null
+                                                        ? ` | 置信度：${(ft.confidence * 100).toFixed(0)}%`
+                                                        : ""}
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                                {fetchTasks.length > 6 ? (
+                                                  <div className="text-xs text-muted-foreground p-2">
+                                                    ... 共 {fetchTasks.length} 个采集任务
+                                                  </div>
+                                                ) : null}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  ) : null}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </section>
 
-      <section className="rounded-xl border bg-card p-6 space-y-4">
-        <h2 className="font-semibold">采集能力</h2>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <FeatureCard title="指标组驱动" desc="采集任务按 '行ID × 指标组' 展开，确保同组指标由同一 Agent 一并处理。" />
-          <FeatureCard title="调度与补采" desc="支持定期调度和按需补采，任务组按业务日期管理。" />
-          <FeatureCard title="窄表与宽表" desc="Agent 先输出窄表（指标+元信息），回填后合并为宽表。" />
-          <FeatureCard title="执行记录" desc="每次 FetchTask 执行产生 ExecutionRecord，记录成功/失败/重试等详情。" />
-        </div>
-      </section>
-
-      <section className="rounded-xl border bg-card p-6">
-        <h2 className="font-semibold mb-4">采集Agent 8节点配置说明</h2>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {AGENT_NODES.map((node) => (
-            <div key={node.id} className="rounded-lg border p-3 bg-muted/10">
-              <div className="text-xs text-muted-foreground">{node.id}</div>
-              <div className="font-medium text-sm mt-1">{node.name}</div>
-              <p className="text-xs text-muted-foreground mt-2">{node.purpose}</p>
-              <p className="text-[11px] mt-2 text-primary">参数：{node.keyParams.join(" / ")}</p>
-              <p className="text-[11px] mt-1 text-muted-foreground">影响：{node.impact}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-xl border bg-card p-6">
-        <h2 className="font-semibold mb-3 flex items-center gap-2">
-          <FileCode2 className="h-4 w-4 text-primary" />
-          自动Query策略
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          平台根据"指标组 + 维度范围 + 背景知识 + Prompt模板"自动生成 Agent 入参；属性列不会参与拆分，只会随任务上下文一路携带。
-        </p>
-      </section>
-    </div>
-  );
-}
-
-function FeatureCard({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div className="rounded-lg border p-4 bg-muted/10">
-      <div className="text-sm font-semibold">{title}</div>
-      <p className="text-xs text-muted-foreground mt-2">{desc}</p>
     </div>
   );
 }

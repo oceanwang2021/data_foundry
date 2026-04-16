@@ -1,5 +1,6 @@
 package com.huatai.datafoundry.backend.web;
 
+import com.huatai.datafoundry.backend.service.DemoDataService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -16,6 +17,12 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 public class PlatformStubController {
+  private final DemoDataService demoDataService;
+
+  public PlatformStubController(DemoDataService demoDataService) {
+    this.demoDataService = demoDataService;
+  }
+
   @GetMapping("/api/knowledge-bases")
   public List<Map<String, Object>> listKnowledgeBases() {
     return new ArrayList<Map<String, Object>>();
@@ -38,9 +45,10 @@ public class PlatformStubController {
 
   @GetMapping("/api/dashboard/metrics")
   public Map<String, Object> dashboardMetrics() {
+    DemoDataService.DemoMetrics metrics = demoDataService.metrics();
     Map<String, Object> out = new HashMap<String, Object>();
-    out.put("projects", 0);
-    out.put("requirements", 0);
+    out.put("projects", metrics.projects);
+    out.put("requirements", metrics.requirements);
     out.put("task_groups", 0);
     out.put("fetch_tasks", 0);
     out.put("running_task_groups", 0);
@@ -66,19 +74,36 @@ public class PlatformStubController {
   @PostMapping("/api/admin/seed")
   public Map<String, Object> seedDemoData() {
     Map<String, Object> out = new HashMap<String, Object>();
-    out.put("ok", true);
-    out.put("message", "seed is not implemented in Java skeleton yet");
-    out.put("at", Instant.now().toString());
-    return out;
+    try {
+      DemoDataService.SeedResult result = demoDataService.seed();
+      out.put("ok", result.ok);
+      out.put("message", result.message);
+      out.put("projects", result.projects);
+      out.put("requirements", result.requirements);
+      out.put("at", Instant.now().toString());
+      return out;
+    } catch (Exception ex) {
+      out.put("ok", false);
+      out.put("message", ex.getMessage());
+      out.put("at", Instant.now().toString());
+      return out;
+    }
   }
 
   @PostMapping("/api/admin/reset")
   public Map<String, Object> resetAllData() {
     Map<String, Object> out = new HashMap<String, Object>();
-    out.put("ok", true);
-    out.put("message", "reset is not implemented in Java skeleton yet");
-    out.put("at", Instant.now().toString());
-    return out;
+    try {
+      demoDataService.reset();
+      out.put("ok", true);
+      out.put("message", "reset ok");
+      out.put("at", Instant.now().toString());
+      return out;
+    } catch (Exception ex) {
+      out.put("ok", false);
+      out.put("message", ex.getMessage());
+      out.put("at", Instant.now().toString());
+      return out;
+    }
   }
 }
-

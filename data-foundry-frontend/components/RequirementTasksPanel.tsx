@@ -17,6 +17,7 @@ import {
   createTrialRun,
   executeTask,
   executeTaskGroup,
+  ensureTaskGroupTasks,
   persistWideTablePlan,
   persistWideTablePreview,
   retryTask,
@@ -506,6 +507,30 @@ export default function RequirementTasksPanel({
 
   const toggleTaskGroupExpand = (tgId: string) => {
     setExpandedTgId((prev) => (prev === tgId ? null : tgId));
+
+    // Lazy-generation hook: if a real task group is opened and it has no explicit tasks yet,
+    // ask backend to materialize sub-task instances for this task group.
+    const opened = expandedTgId !== tgId;
+    if (!opened) {
+      return;
+    }
+    const view = taskGroupRunViews.find((item) => item.id === tgId);
+    if (!view?.isReal) {
+      return;
+    }
+    const hasExplicitTasks = fetchTasks.some((task) => task.taskGroupId === tgId);
+    if (hasExplicitTasks) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await ensureTaskGroupTasks(tgId);
+        await onRefreshData?.();
+      } catch {
+        // Keep UI usable even if backend lazy generation isn't ready yet.
+      }
+    })();
   };
   const returnContextColumns = useMemo(
     () => (selectedWt ? getVisibleNarrowTableContextColumns(selectedWt) : []),
@@ -991,8 +1016,8 @@ export default function RequirementTasksPanel({
         onReplaceWideTableRecords?.(selectedWt.id, annotatedRecords);
         setIndicatorGroupMessage(
           usesBusinessDateAxis
-            ? `已保存指标分组，并生成 ${reconciliation.generatedTaskGroupCount} 个任务组、${reconciliation.generatedTaskCount} 个采集任务。`
-            : `已保存指标分组，并生成当前快照的 ${reconciliation.generatedTaskGroupCount} 个任务组、${reconciliation.generatedTaskCount} 个采集任务。`,
+            ? `已保存指标分组，并生成 ${reconciliation.generatedTaskGroupCount} 个任务实例（子任务将在打开/执行任务实例时按需生成）。`
+            : `已保存指标分组，并生成当前快照的 ${reconciliation.generatedTaskGroupCount} 个任务实例（子任务将在打开/执行任务实例时按需生成）。`,
         );
       } else {
         await persistWideTablePreview(
@@ -2058,7 +2083,7 @@ export default function RequirementTasksPanel({
         <section className="rounded-xl border bg-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="font-semibold">{`任务组运行记录 – ${selectedWt?.name ?? "-"}`}</h3>
+            <h3 className="font-semibold">{`任务运行记录 – ${selectedWt?.name ?? "-"}`}</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               {usesBusinessDateAxis
                 ? "任务会按业务周期拆分任务实例；如启用指标分组，将先按指标组拆分，再按业务周期拆分；任务实例内子任务按维度组合展开。"
@@ -2107,23 +2132,39 @@ export default function RequirementTasksPanel({
                   : "当前宽表暂无全量快照任务组。"}
           </div>
         ) : (
-          <div className="space-y-4">
-            {taskGroupRunSections.map((section) => (
-              <div key={section.id} className="space-y-2">
-                {section.label ? (
-                  <div className="px-1 text-xs font-medium text-muted-foreground">{section.label}</div>
-                ) : null}
-                <div className="space-y-2">
+          <div className="space-y-6">
+            {taskGroupRunSections.map((section, sectionIndex) => {
+              const rawLabel = (section.label ?? "").trim();
+              const groupLabel = rawLabel.endsWith("采集任务")
+                ? rawLabel.slice(0, rawLabel.length - "采集任务".length)
+                : rawLabel;
+              const displayGroupLabel = groupLabel || "统一提示词";
+
+              return (
+                <div key={section.id} className="space-y-3">
+                  <div className="px-1">
+                    <div className="text-base font-semibold text-foreground">{`采集任务${sectionIndex + 1}：${displayGroupLabel}`}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      任务实例按业务周期拆分；子任务实例在展开或执行任务实例时按维度组合按需生成。
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-background divide-y overflow-hidden">
                   {section.taskGroups.map((tg) => {
               const isExpanded = expandedTgId === tg.id;
 
               return (
-                <div key={tg.id} className="rounded-lg border">
+                <div
+                  key={tg.id}
+                  className={cn(
+                    "transition-colors",
+                    isExpanded ? "bg-muted/10" : "hover:bg-muted/20",
+                  )}
+                >
                   <div className="flex items-center gap-3 px-4 py-3">
                     <button
                       type="button"
                       onClick={() => toggleTaskGroupExpand(tg.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left hover:bg-muted/30 rounded-md px-2 py-1.5"
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -2192,7 +2233,7 @@ export default function RequirementTasksPanel({
                   </div>
 
                   {isExpanded ? (
-                    <div className="border-t px-4 py-3">
+                    <div className="border-t bg-background px-4 py-3">
                       {expandedTaskCards.length === 0 ? (
                         <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集任务。</div>
                       ) : (
@@ -2309,10 +2350,11 @@ export default function RequirementTasksPanel({
                   ) : null}
                 </div>
               );
-                  })}
+            })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
@@ -3283,7 +3325,7 @@ function buildTaskGroupRunSections(
   const sections: TaskGroupRunSectionView[] = sortedIndicatorGroups
     .map((group) => ({
       id: group.id,
-      label: group.name,
+      label: `${group.name}采集任务`,
       taskGroups: grouped.get(group.id) ?? [],
     }))
     .filter((section) => section.taskGroups.length > 0);

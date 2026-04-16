@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { createRequirement } from "@/lib/api-client";
 import type { Project, Requirement, WideTable, TaskGroup, FetchTask } from "@/lib/types";
 import { Layers } from "lucide-react";
+import CreateRequirementModal from "@/components/CreateRequirementModal";
 
 type Props = {
   project: Project;
@@ -26,7 +26,7 @@ export default function ProjectRequirementsPanel({
   const [wideTables, setWideTables] = useState<WideTable[]>(initialWideTables);
   const [taskGroups, setTaskGroups] = useState<TaskGroup[]>(initialTaskGroups);
   const [message, setMessage] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const sortedRequirements = useMemo(
     () => [...requirements].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
@@ -36,24 +36,12 @@ export default function ProjectRequirementsPanel({
   const taskGroupCount = taskGroups.length;
   const runningTaskGroups = taskGroups.filter((taskGroup) => taskGroup.status === "running").length;
 
-  const handleCreateRequirement = async () => {
-    setCreating(true);
-    setMessage("");
-    try {
-      const createdRequirement = await createRequirement(projectId, {
-        title: "需求待命名",
-        owner: "业务-待定",
-        assignee: "算法-待定",
-        backgroundKnowledge: "",
-        projectDataSource: project.dataSource,
-      });
-      setRequirements((prev) => [...prev, createdRequirement]);
-      setMessage(`已创建需求：${createdRequirement.id}`);
-    } catch (error: any) {
-      setMessage(`创建失败：${error.message}`);
-    } finally {
-      setCreating(false);
+  const handleSaved = (createdRequirement: Requirement) => {
+    setRequirements((prev) => [...prev, createdRequirement]);
+    if (createdRequirement.wideTable) {
+      setWideTables((prev) => [...prev, createdRequirement.wideTable!]);
     }
+    setMessage(`已创建需求：${createdRequirement.id}`);
   };
 
   return (
@@ -71,15 +59,14 @@ export default function ProjectRequirementsPanel({
             <Layers className="h-4 w-4 text-primary" />
             需求清单
           </h2>
-          <button
-            type="button"
-            onClick={handleCreateRequirement}
-            disabled={creating}
-            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            {creating ? "创建中..." : "创建需求"}
-          </button>
-        </div>
+           <button
+             type="button"
+             onClick={() => setCreateDialogOpen(true)}
+             className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+           >
+             创建需求
+           </button>
+         </div>
 
         <p className="text-xs text-muted-foreground">创建需求后即可直接录入需求、任务、数据产出与验收配置。</p>
         {message ? <div className="text-xs text-primary">{message}</div> : null}
@@ -118,6 +105,14 @@ export default function ProjectRequirementsPanel({
           </div>
         )}
       </section>
+
+      <CreateRequirementModal
+        project={project}
+        projectId={projectId}
+        isOpen={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onSaved={handleSaved}
+      />
     </>
   );
 }

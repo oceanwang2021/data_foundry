@@ -897,9 +897,24 @@ export async function createRequirement(
     dataUpdateEnabled?: boolean;
     dataUpdateMode?: RequirementDataUpdateMode | null;
     projectDataSource?: Project["dataSource"];
+    enabledSearchEngines?: SearchEngineProvider[];
+    wideTable?: {
+      title: string;
+      description?: string;
+      tableName: string;
+      schema: any;
+      scope: any;
+      indicatorGroups?: any;
+      scheduleRules?: any;
+      semanticTimeAxis?: string;
+      collectionCoverageMode?: string;
+      schemaVersion?: number;
+      status?: string;
+    };
   },
 ): Promise<Requirement> {
   const runtimeSettings = loadRuntimeSettings();
+  const engines = data.enabledSearchEngines ?? runtimeSettings.searchConfig.enabledSearchEngines;
   const raw = await apiPost<any>(`/api/projects/${projectId}/requirements`, {
     title: data.title,
     phase: "production",
@@ -912,9 +927,21 @@ export async function createRequirement(
     data_update_mode: data.dataUpdateMode ?? null,
     collection_policy: buildCollectionPolicy(
       data.projectDataSource,
-      runtimeSettings.searchConfig.enabledSearchEngines,
+      engines,
     ),
-    wide_table: null,
+    wide_table: data.wideTable ? {
+      title: data.wideTable.title,
+      description: data.wideTable.description ?? "",
+      table_name: data.wideTable.tableName,
+      schema_version: data.wideTable.schemaVersion ?? 1,
+      schema: data.wideTable.schema ?? null,
+      scope: data.wideTable.scope ?? null,
+      indicator_groups: data.wideTable.indicatorGroups ?? [],
+      schedule_rules: data.wideTable.scheduleRules ?? [],
+      semantic_time_axis: data.wideTable.semanticTimeAxis ?? "business_date",
+      collection_coverage_mode: data.wideTable.collectionCoverageMode ?? "incremental_by_business_date",
+      status: data.wideTable.status ?? "draft",
+    } : null,
   });
   return mapRequirement(raw);
 }
@@ -1329,6 +1356,10 @@ export async function executeTaskGroup(
         }
       : undefined,
   );
+}
+
+export async function ensureTaskGroupTasks(taskGroupId: string): Promise<void> {
+  await apiPost(`/api/task-groups/${taskGroupId}/ensure-tasks`);
 }
 
 // ---- Backfill ----

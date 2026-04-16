@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: data-foundry-scheduler-service
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    serialization:
+      write-dates-as-timestamps: false
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/data_foundry_scheduler?useSSL=false&characterEncoding=utf8&serverTimezone=Asia/Shanghai
@@ -13,4 +17,3 @@ spring:
 mybatis:
   configuration:
     map-underscore-to-camel-case: true
-

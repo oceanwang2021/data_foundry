@@ -110,9 +110,11 @@ export function reconcileTaskPlanChange(params: {
       );
     });
   const nextTaskGroupIds = new Set(nextTaskGroups.map((taskGroup) => taskGroup.id));
-  const nextFetchTasks = nextTaskGroups.flatMap((taskGroup) =>
-    buildExplicitFetchTasks(taskGroup, wideTable, resolveIndicatorGroupsForTaskGroup(taskGroup, nextIndicatorGroups)),
-  );
+  // Lazy task generation:
+  // - Only persist task groups (task instances) when the plan is rebuilt.
+  // - Fetch tasks (sub-task instances) are generated on demand when a task group is opened/executed.
+  const nextFetchTasks: FetchTask[] = [];
+  const generatedTaskCount = nextTaskGroups.reduce((sum, taskGroup) => sum + (taskGroup.totalTasks ?? 0), 0);
 
   return {
     nextPlanVersion,
@@ -129,7 +131,7 @@ export function reconcileTaskPlanChange(params: {
       ...nextFetchTasks,
     ],
     generatedTaskGroupCount: nextTaskGroups.length,
-    generatedTaskCount: nextFetchTasks.length,
+    generatedTaskCount,
     invalidatedTaskGroupCount: currentRevisionTaskGroups.length,
   };
 }
