@@ -10,6 +10,7 @@
   <packaging>pom</packaging>
 
   <modules>
+    <module>data-foundry-common-core</module>
     <module>data-foundry-common-contract</module>
     <module>data-foundry-backend-service</module>
     <module>data-foundry-scheduler-service</module>
@@ -24,6 +25,7 @@
 
     <spring-boot.version>2.7.18</spring-boot.version>
     <mybatis-spring-boot.version>2.3.2</mybatis-spring-boot.version>
+    <archunit.version>1.2.1</archunit.version>
   </properties>
 
   <dependencyManagement>

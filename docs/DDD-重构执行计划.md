@@ -158,6 +158,7 @@ PR-3：静态架构约束检查入口（先 warn）
 
 **验收**
 - Requirement list/get（读接口）不依赖聚合还原即可工作，且不泄漏 Record 给接口层。
+- ✅ 已于 2026-04-20 落地：`RequirementQueryService` + ReadDTO（含 JSON 解析）、Requirement 列表 primary wide table 批量查询、Controller 的 GET 接口改走 query service、命令侧 `RequirementAppService` 移除查询依赖与公开查询方法。
 
 ---
 
@@ -170,10 +171,10 @@ PR-3：静态架构约束检查入口（先 warn）
 
 #### 3.1 结构迁移与端口化（PR-12 ~ PR-13）
 
-**步骤**
-- 新建 `backend.task.*` 分层包。
-- 把 task_group/fetch_task 的 Mapper/Record 归入 infrastructure。
-- 定义 `TaskGroupRepository`、`FetchTaskRepository`（domain 端口）。
+  **步骤**
+  - 新建 `backend.task.*` 分层包。
+  - 通过 repository 隔离 task_group/fetch_task 的 Mapper/Record（暂保留旧 `persistence` 包，包迁移延后到 M5）。
+  - 定义 `TaskGroupRepository`、`FetchTaskRepository`（domain 端口）。
 
 **验收**
 - Controller 不直连 Mapper。
@@ -185,11 +186,17 @@ PR-3：静态架构约束检查入口（先 warn）
 - `TaskPlanAppService.persistPlan(...)`：批量 upsert task_groups（幂等）。
 - `TaskPlanAppService.ensureTasks(taskGroupId)`：批量生成 fetch_tasks（幂等），并回写 totals。
 
-**验收**
-- `persistPlan` 与 `ensureTasks` 用例可重复调用（幂等），不会重复生成/破坏 totals。
-- 批量写通过 repository batch/upsert 完成，不出现循环写库。
-
----
+  **验收**
+  - `persistPlan` 与 `ensureTasks` 用例可重复调用（幂等），不会重复生成/破坏 totals。
+  - 批量写通过 repository batch/upsert 完成，不出现循环写库。
+  - ✅ 已于 2026-04-20 落地：新增 `backend.task` 分层骨架与 repository 端口/实现，落地 `TaskPlanDomainService` + `TaskPlanAppService`，submit/plan/ensure-tasks 链路切换到新服务并引入 task_groups 批量 upsert。
+  - ✅ 已于 2026-04-20 补齐：删除旧 `backend.service.TaskPlanService`，并将 `TaskPlanDomainService` 去 Spring 化（通过 `backend.task.infrastructure.config` 提供 Bean）。
+  - ✅ 已于 2026-04-20 补齐：将 `ensureFetchTasksForTaskGroup` 的“生成算法”下沉为 `TaskPlanDomainService.planFetchTasks`（AppService 仅做 DTO/Record 映射 + batch 落库）。
+  - ✅ 已于 2026-04-20 补齐：`persistPlanTaskGroups` 增加幂等防回退保护（不会把已完成/已运行的 task_group 重新刷回 pending、不会回退 counters/version）。
+  - ✅ 已于 2026-04-21 补齐：`persistWideTablePlan` 支持可选 `invalidate_missing=true`，仅将“本次 plan 未包含”的旧 `pending` task_group 标记为 `invalidated`（不影响 running/completed/failed）。
+  - ✅ 已于 2026-04-21 补齐：`TaskPlanAppService` 全面使用 domain model + repository 端口，不再依赖 MyBatis record（application 层无 `...record` import），`backend-service` 编译通过。
+  
+  ---
 
 ### M3b：Task 执行侧（Execution）重构（3~7 天）
 
@@ -203,6 +210,12 @@ PR-3：静态架构约束检查入口（先 warn）
 
 **验收**
 - execute/retry/ensure 的接口行为与错误语义稳定；跨服务失败不导致本地事务不一致（可重试/补偿）。
+- ✅ 已于 2026-04-20 落地：新增 `TaskAppService`（用例编排）+ `TaskExecutionDomainService`（状态迁移规则），`TaskExecutionController` 变薄（不再直连 Mapper/直接改状态），并增加 after-commit 事件（先日志 stub，M4 接入 gateway）。
+- ✅ 已于 2026-04-21 补齐：`/api/tasks/**`（canonical）与 `/api/tasks/**`（legacy）执行接口支持可选 `X-Idempotency-Key`，用于生成稳定 `requestId`，从而保证 after-commit 创建 scheduler job 幂等（前端/网关重试不重复创建）。
+- ✅ 已于 2026-04-21 补齐：执行/重试的状态迁移由 domain “显式状态机方法”统一决策（`TaskExecutionDomainService.nextStatusOnStart/Complete/Retry`），application 不再硬编码 `"running"/"completed"/"pending"`。
+- ✅ 已于 2026-04-21 补齐：引入占位完成开关 `datafoundry.task.execution.placeholder-complete`（默认 `true` 保持现状“立即 completed”），为后续接入“scheduler/agent 回写驱动完成态”预留无感切换点。
+- ✅ 已于 2026-04-21 补齐：scheduler 在 agent 执行完成后（AFTER_COMMIT best-effort）回调 backend 内部接口 `/internal/scheduler/executions/callback`，由 backend 按单调规则合并并回写 `task_groups/fetch_tasks` 状态，形成“执行结果回写闭环”（为后续关闭 placeholderComplete 做准备）。
+- ✅ 已于 2026-04-21 补齐：提供联调开关与最小 smoke 指南（`SPRING_PROFILES_ACTIVE=integration` / `DATAFOUNDRY_TASK_EXECUTION_PLACEHOLDER_COMPLETE=false`），文档见 `docs/execution-callback-smoke.md`。
 
 ---
 
@@ -212,6 +225,28 @@ PR-3：静态架构约束检查入口（先 warn）
 - 明确写主：`schedule_jobs` 由 scheduler-service 写主。
 - backend/scheduler 通过端口 + infrastructure client 实现对下游的调用，禁止 AppService 直接写 HTTP。
 - **先完成** gateway + after-commit + 幂等 + 错误翻译；outbox 作为后续增强能力，不与 ACL 同优先级绑定。
+
+**已落地（2026-04-20）**
+- backend→scheduler：引入 `ScheduleJobGateway` 端口与 `SchedulerScheduleJobClient`（超时/重试/错误翻译/幂等头），并通过 `@TransactionalEventListener(AFTER_COMMIT)` 在提交后触发创建 job。
+- scheduler→agent：引入 `AgentGateway` 端口与 `AgentClient`（超时/重试/错误翻译/幂等头），并在 `ScheduleJobAppService.create()` 内发布事件，`AFTER_COMMIT` 后触发 agent 执行与回写 job 状态。
+- agent：`/agent/executions` 支持 `X-Idempotency-Key` 去重（内存缓存 + TTL），避免 scheduler 侧重试导致重复执行。
+
+**关键文件**
+- backend
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/domain/gateway/ScheduleJobGateway.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/infrastructure/client/SchedulerScheduleJobClient.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/application/handler/TaskExecutionAfterCommitHandler.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/application/event/TaskExecuteRequestedEvent.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/application/event/TaskGroupExecuteRequestedEvent.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/web/ScheduleJobFacadeController.java`（可选透传 `X-Idempotency-Key`）
+- scheduler
+  - `data-foundry-scheduler-service/src/main/java/com/huatai/datafoundry/scheduler/schedule/domain/gateway/AgentGateway.java`
+  - `data-foundry-scheduler-service/src/main/java/com/huatai/datafoundry/scheduler/schedule/application/service/ScheduleJobAppService.java`（基于幂等键生成稳定 jobId）
+  - `data-foundry-scheduler-service/src/main/java/com/huatai/datafoundry/scheduler/schedule/application/handler/ScheduleJobCreatedHandler.java`
+  - `data-foundry-scheduler-service/src/main/java/com/huatai/datafoundry/scheduler/schedule/infrastructure/client/AgentClient.java`
+  - `data-foundry-scheduler-service/src/main/java/com/huatai/datafoundry/scheduler/web/ScheduleJobController.java`（接收 `X-Idempotency-Key`）
+- agent
+  - `data-foundry-agent-service/src/main/java/com/huatai/datafoundry/agent/web/AgentExecutionController.java`
 
 #### 4.1 backend → scheduler（PR-17）
 
@@ -250,17 +285,41 @@ PR-3：静态架构约束检查入口（先 warn）
 - 将核心 Mapper 迁移到 XML + resultMap。
 - DB schema 版本化（Flyway 或替代 SOP），并明确表 ownership。
 
+**M5a：静态架构约束 Gate（执行保障，建议优先）**
+- Gate-1：`..interfaces.web..` 禁止依赖 `..infrastructure.persistence.mybatis..`（Mapper/Record 只能在 infrastructure）。
+- Gate-2：`..application..` 禁止依赖 `..infrastructure.persistence.mybatis..`（application 只能依赖 domain 端口/网关）。
+
 **建议节奏**
 - 每完成一个 context 的 repository 端口化，就迁移该 context 的 mapper 到 XML。
 - 优先顺序：Requirement → Task → ScheduleJob。
 
+**已落地**
+- ✅ 已于 2026-04-21 落地：将 `backend/scheduler` 的 `persistence`（MyBatis Mapper/Record）按 owner context 归位到各自 `infrastructure.persistence.mybatis` 包，避免跨上下文混杂，为后续 XML 迁移与静态架构约束打基础。
+- ✅ 已于 2026-04-21 落地：新增静态架构约束 gate（backend/scheduler：application 禁止依赖 persistence；agent：web 禁止依赖 persistence），并完成 scheduler 的 `ScheduleJobAppService/ScheduleJobCreatedHandler` 去 persistence 依赖（改为通过 repository 端口）。
+
 **交付物**
-- `docs/表-ownership.md`：至少覆盖已落地表（projects/requirements/wide_tables/task_groups/fetch_tasks/schedule_jobs），含写主/读侧/索引/唯一约束。
+- `docs/表-ownership.md`：至少覆盖已落地表（projects/requirements/wide_tables/task_groups/fetch_tasks/schedule_jobs），并扩展到目标态表（wide_table_rows/execution_records 等）的 owner 归属草案；含写主/读侧/索引/唯一约束。
 - Flyway（或替代 SOP）迁移脚本：支持空库初始化与增量升级；联调环境与开发环境一致性校验说明。
+- Flyway 执行 SOP：`docs/db-migration-sop.md`
 
 **验收**
 - migration 可在空库一键初始化（dev/test），并与联调环境一致。
 - ownership 文档与代码实现一致（写路径只能出现在 owner context 的 repository/application 中）。
+
+**SOP（M5b：Flyway 基线，默认不自动执行）**
+- 默认：`spring.flyway.enabled=false`（backend/scheduler 均如此配置），避免重构过程中启动即变更 schema。
+- 空库初始化（opt-in）：启动服务时显式开启 Flyway：
+  - backend：设置 `SPRING_FLYWAY_ENABLED=true`
+  - scheduler：设置 `SPRING_FLYWAY_ENABLED=true`
+  - 说明：首次启用会执行 `classpath:db/migration/V001__baseline.sql` 创建运行所需表。
+- 已有库接入 Flyway（opt-in）：保持 `spring.flyway.baseline-on-migrate=true`（已配置）后开启 Flyway：
+  - Flyway 会对“非空但无 history 表”的 schema 做 baseline（版本 1），避免重复执行基线脚本。
+
+**M5c：索引补齐（V002 增量迁移）**
+- backend：`V002__add_indexes.sql` 补齐列表/拼装场景需要的复合索引（requirements/wide_tables/task_groups/fetch_tasks）。
+- scheduler：`V002__add_indexes.sql` 补齐 schedule_jobs 的过滤 + 排序索引（status/trigger_type + created_at），以及 task_group_id/task_id 辅助索引。
+  - 注意：本项目幂等用“稳定主键（id）”承载，不引入 `idempotency_key` 列。
+- ✅ 已于 2026-04-21 补齐：新增关键组合索引（`task_groups(requirement_id,wide_table_id,sort_order)`、`schedule_jobs(trigger_type,status,created_at)`），并同步更新 `db/mysql/**/001_schema.sql` 与 `docs/表-ownership.md`。
 
 ---
 
@@ -277,6 +336,52 @@ PR-3：静态架构约束检查入口（先 warn）
   - legacy：保留 `/api/projects/{projectId}/requirements/**` 等旧路径转发
 - scheduler：保持 `/api/schedule-jobs/**`，统一 Response
 - agent：保持 `/agent/executions`，统一 Response
+
+**M6a 已落地（canonical facade，新增不改旧路由）**
+- requirement：`GET/POST/PUT /api/requirements`（通过 `project_id` 作为 query 参数）
+  - 实现：`data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/requirement/interfaces/web/RequirementFacadeController.java`
+- task：`GET /api/tasks`、`GET /api/tasks/task-groups`（通过 `project_id` + `requirement_id` query）
+  - 以及执行动作：`POST /api/tasks/**/actions/*`（避免与 legacy `/api/tasks/{id}/execute|retry` 冲突）
+  - 实现：`data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/interfaces/web/TaskFacadeController.java`
+
+**M6b-1 已落地（Requirement legacy 收敛为适配层，不改路由）**
+- 将 legacy 控制器迁移到 `backend.requirement.interfaces.web.legacy`，并保持原有路径不变：
+  - `/api/projects/{projectId}/requirements/**`
+  - `/api/projects/{projectId}/requirements/{requirementId}/task-groups|tasks`
+  - `/api/requirements/{requirementId}/wide-tables/{wideTableId}/plan|preview`
+  - `/api/requirements/{requirementId}/wide-tables/{wideTableId}`
+- 实现文件：
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/requirement/interfaces/web/legacy/RequirementLegacyController.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/requirement/interfaces/web/legacy/RequirementTaskLegacyController.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/requirement/interfaces/web/legacy/WideTablePlanLegacyController.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/requirement/interfaces/web/legacy/RequirementWideTableLegacyController.java`
+
+**M6b-2 已落地（Task legacy 收敛为适配层，不改路由）**
+- 将 `/api/task-groups/{id}/execute|ensure-tasks`、`/api/tasks/{id}/execute|retry` 迁移到 `backend.task.interfaces.web.legacy`
+- 实现文件：
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/interfaces/web/legacy/TaskExecutionLegacyController.java`
+
+**M6b-3 已落地（路由矩阵 + 最小冒烟回归）**
+- 路由矩阵（legacy ↔ canonical）：`docs/路由矩阵-legacy-canonical.md`
+- 最小冒烟脚本：`scripts/smoke-m6.ps1`（运行说明见 `scripts/README.md`）
+
+**M6c 已落地（自动化最小回归：MockMvc + ArchUnit gate）**
+- WebMvc 冒烟：`data-foundry-backend-service/src/test/java/com/huatai/datafoundry/backend/webmvc/M6RoutingWebMvcTest.java`
+  - 覆盖 canonical/legacy 的核心路由连通性与 snake_case 输出（不依赖 DB）
+- 架构硬约束（最小 gate）：`data-foundry-backend-service/src/test/java/com/huatai/datafoundry/backend/architecture/InterfacesWebNoMapperDependencyTest.java`
+  - `interfaces.web` 禁止依赖 MyBatis `@Mapper` 接口（防止绕层回流；避免误伤 `ObjectMapper` 等非持久化类）
+- 架构硬约束（新增 gate）：`data-foundry-backend-service/src/test/java/com/huatai/datafoundry/backend/architecture/InterfacesWebNoPersistenceDependencyTest.java`
+  - `interfaces.web` 禁止依赖 `infrastructure.persistence.mybatis`（Mapper/Record），Controller 必须通过 Application/QueryService 间接访问持久化
+- 架构硬约束（scheduler gate）：`data-foundry-scheduler-service/src/test/java/com/huatai/datafoundry/scheduler/architecture/WebNoPersistenceDependencyTest.java`
+  - `scheduler.web` 禁止依赖 `infrastructure.persistence.mybatis`（Mapper/Record）
+
+**M6d~M6f 已落地（收尾：残留 controller 归位 + admin 开关 + 联调脚本修正）**
+- backend：将残留的 `backend.web` 控制器按 DDD 包规范归位（不改路由）
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/project/interfaces/web/ProjectFacadeController.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/task/interfaces/web/ScheduleJobFacadeController.java`
+  - `data-foundry-backend-service/src/main/java/com/huatai/datafoundry/backend/ops/interfaces/web/PlatformStubController.java`
+- admin 端点默认禁用：`datafoundry.admin.enabled=false`（需要时用启动参数显式开启）
+- 联调冒烟脚本：`scripts/smoke-m6.ps1`（修正 param block 位置；补齐 backend 不可达/无项目时的提示）
 
 **验收**
 - 前端可通过开关切换 canonical（灰度）；
@@ -306,7 +411,7 @@ PR-3：静态架构约束检查入口（先 warn）
 ### 2.1 backend-service
 
 **backend.project**
-- [ ] 迁移 `ProjectController` → `ProjectFacadeController`（迁包 + Response<T>）
+- [x] 迁移 `ProjectController` → `ProjectFacadeController`（迁包 + QueryService/ReadDTO；保持裸 JSON）
 - [ ] 引入 `ProjectAppService`（读写用例）
 - [ ] `Project` 聚合 + `ProjectRepository` + `MybatisProjectRepository`
 - [ ] 列表/详情 query 投影（可选）
@@ -327,19 +432,19 @@ PR-3：静态架构约束检查入口（先 warn）
 - [ ] `TaskPlanDomainService`（替代/拆分 `TaskPlanService` 规则）
 - [ ] `TaskGroup`/`FetchTask` 聚合建模与端口
 - [ ] batch upsert 与索引补齐
-- [ ] `ScheduleJobGateway`（端口）+ scheduler client（ACL）
+- [x] `ScheduleJobGateway`（端口）+ scheduler client（ACL）
 
 **backend.ops**
 - [ ] `OpsFacadeController`（按前缀分组或拆分）
-- [ ] 权限拦截（seed/reset/execute 等敏感接口）
+- [x] admin 开关（seed/reset 等敏感接口）：默认禁用 `datafoundry.admin.enabled=false`
 
 ### 2.2 scheduler-service
 
 **scheduler.schedule**
 - [ ] `ScheduleJobFacadeController` + `ScheduleJobAppService`
 - [ ] `ScheduleJob` 聚合 + repository 端口 + mybatis impl
-- [ ] `AgentGateway` + agent client（ACL）
-- [ ] 幂等创建 job（幂等键 + upsert/唯一约束）
+- [x] `AgentGateway` + agent client（ACL）
+- [x] 幂等创建 job（幂等键 + upsert/唯一约束）
 
 **scheduler.ops**
 - [ ] admin seed/reset 权限与统一 Response
@@ -438,6 +543,12 @@ PR-3：静态架构约束检查入口（先 warn）
 ---
 
 ## 6. 实施后“下线清理清单”（最后 1~2 个 PR）
+
+- 建议节奏（示例，可按项目调整）：
+  - T0：前端接入 canonical 开关（页面维度），默认仍走 legacy。
+  - T0 + 1 周：核心页面灰度到 canonical（10% → 50% → 100%）。
+  - T0 + 2 周：冻结 legacy 的新增需求，仅做 bugfix；标记 legacy 访问日志与监控。
+  - T0 + 4~6 周：移除 legacy 路由与 controller 代码（或先返回 410 / 增加 deprecation header）。
 
 - [ ] 删除 legacy controller（在前端全部切换后）
 - [ ] 删除旧 `backend.web` 下已空置的 controller/service/persistence 旧包（分批删）

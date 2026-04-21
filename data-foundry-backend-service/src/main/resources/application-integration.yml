@@ -1,0 +1,6 @@
+datafoundry:
+  task:
+    execution:
+      # Integration mode: rely on scheduler/agent callback to drive completion.
+      placeholder-complete: false
+

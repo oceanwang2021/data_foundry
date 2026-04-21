@@ -16,6 +16,12 @@
   <dependencies>
     <dependency>
       <groupId>com.huatai.datafoundry</groupId>
+      <artifactId>data-foundry-common-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.huatai.datafoundry</groupId>
       <artifactId>data-foundry-common-contract</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -34,6 +40,13 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <version>${archunit.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -45,4 +58,3 @@
     </plugins>
   </build>
 </project>
-

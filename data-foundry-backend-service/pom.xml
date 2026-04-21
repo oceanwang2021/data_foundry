@@ -16,6 +16,12 @@
   <dependencies>
     <dependency>
       <groupId>com.huatai.datafoundry</groupId>
+      <artifactId>data-foundry-common-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.huatai.datafoundry</groupId>
       <artifactId>data-foundry-common-contract</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -45,8 +51,20 @@
     </dependency>
 
     <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <version>${archunit.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

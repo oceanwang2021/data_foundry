@@ -193,7 +193,7 @@ Controller：`.../web/PlatformStubController.java`
   - Controller：`data-foundry-scheduler-service/.../web/ScheduleJobController.java`
   - Mapper：`.../persistence/ScheduleJobMapper.java`
   - 表：`schedule_jobs`（读/写）
-  - 说明：`POST` 当前为 skeleton：创建后立即标记 completed（不会触发真实执行）
+  - 说明：`POST` 创建 job（status=running）后，**after-commit** 触发调用 agent（`POST /agent/executions`），并回写 `completed/failed` 与 `ended_at`
 
 - `POST /api/admin/seed` / `POST /api/admin/reset`
   - Controller：`.../web/AdminController.java`
@@ -223,8 +223,11 @@ Controller：`.../web/PlatformStubController.java`
 
 - `projects`：项目主数据（项目列表/详情、dashboard metrics 计数、demo seed/reset）
 - `requirements`：需求主数据（需求列表/详情、demo seed/reset、需求状态更新）
+- `wide_tables`：宽表定义（创建需求时同步创建主宽表、宽表更新）
+- `task_groups`：任务组（status=ready 默认生成、/plan upsert、列表查询、execute 占位）
+- `fetch_tasks`：采集任务（lazy 生成、列表查询、execute/retry 占位）
 
-> 注意：当前 Java 代码已读写 `wide_tables/task_groups/fetch_tasks`；若只执行 001_schema，将导致创建需求/计划落地/任务执行等链路在数据库层失败（缺表）。
+> 说明：`backend/001_schema.sql` 已升级为 MVP runtime schema，用于保证当前联调链路不缺表/缺字段。
 
 #### scheduler DB：`data_foundry_scheduler`
 
@@ -275,7 +278,7 @@ Controller：`.../web/PlatformStubController.java`
 
 - backend：`POST /api/task-groups/{id}/execute`、`POST /api/tasks/{id}/execute`、`POST /api/tasks/{id}/retry`（主要改状态）
 - backend：`POST .../preview`（接受 payload，不落宽表行）
-- scheduler：`POST /api/schedule-jobs`（创建后立即 completed）
+- scheduler：`POST /api/schedule-jobs`（创建后触发 agent 执行并回写状态；backend 也会在 task execute/retry 后 after-commit 触发创建）
 
 ---
 
@@ -295,7 +298,6 @@ Controller：`.../web/PlatformStubController.java`
 | `POST /api/tasks/{id}/execute` | `fetch_tasks`(W) | - | 占位：running->completed |
 | `POST /api/tasks/{id}/retry` | `fetch_tasks`(W) | - | 占位：pending |
 | `GET /api/schedule-jobs` | - | `schedule_jobs`(R) | backend 转发 scheduler |
-| `POST /api/schedule-jobs` | - | `schedule_jobs`(W) | scheduler 为 skeleton（立刻 completed） |
+| `POST /api/schedule-jobs` | - | `schedule_jobs`(W) | scheduler 创建 job 后 after-commit 调 agent，回写 completed/failed |
 | `POST /api/admin/seed` | `projects/requirements`(W) | - | demo seed |
 | `POST /api/admin/reset` | `projects/requirements`(W) | - | demo reset |
-
