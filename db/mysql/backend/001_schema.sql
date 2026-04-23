@@ -18,6 +18,7 @@
 CREATE TABLE IF NOT EXISTS projects (
   id            VARCHAR(64)  NOT NULL PRIMARY KEY,
   name          VARCHAR(255) NOT NULL,
+  created_by    VARCHAR(255) NOT NULL DEFAULT '',
   business_background TEXT   NULL,
   description   TEXT         NULL,
   status        VARCHAR(32)  NOT NULL DEFAULT 'active',

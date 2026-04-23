@@ -2,13 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Project, Requirement } from "@/lib/types";
 import { fetchProjects, fetchRequirements } from "@/lib/api-client";
-import { FolderKanban, ArrowRight } from "lucide-react";
+import { FolderKanban, ArrowRight, Plus } from "lucide-react";
+import CreateProjectModal from "@/components/CreateProjectModal";
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   useEffect(() => {
     fetchProjects()
@@ -25,7 +29,8 @@ export default function ProjectsPage() {
 
   return (
     <div className="p-8 space-y-6">
-      <header className="space-y-1">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <FolderKanban className="h-5 w-5 text-primary" />
           项目概览
@@ -33,6 +38,16 @@ export default function ProjectsPage() {
         <p className="text-sm text-muted-foreground">
           从项目维度查看需求规模、当前状态和最近交付进展。
         </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsCreateOpen(true)}
+          className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" />
+          新建项目
+        </button>
       </header>
 
       <div className="grid gap-5 md:grid-cols-2">
@@ -61,6 +76,15 @@ export default function ProjectsPage() {
           );
         })}
       </div>
+
+      <CreateProjectModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onSaved={(project) => {
+          setIsCreateOpen(false);
+          router.push(`/projects/${project.id}`);
+        }}
+      />
     </div>
   );
 }

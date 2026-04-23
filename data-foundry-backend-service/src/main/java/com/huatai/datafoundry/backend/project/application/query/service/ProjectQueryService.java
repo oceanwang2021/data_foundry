@@ -43,6 +43,7 @@ public class ProjectQueryService {
     ProjectReadDto out = new ProjectReadDto();
     out.setId(record.getId());
     out.setName(record.getName());
+    out.setCreatedBy(record.getCreatedBy());
     out.setBusinessBackground(record.getBusinessBackground());
     out.setDescription(record.getDescription());
     out.setStatus(record.getStatus());

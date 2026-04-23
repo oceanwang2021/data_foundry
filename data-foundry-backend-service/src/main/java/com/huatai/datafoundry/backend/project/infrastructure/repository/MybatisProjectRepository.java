@@ -34,10 +34,16 @@ public class MybatisProjectRepository implements ProjectRepository {
     return record != null ? toDomain(record) : null;
   }
 
+  @Override
+  public int insertProject(Project project) {
+    return projectMapper.insert(toRecord(project));
+  }
+
   private static Project toDomain(ProjectRecord record) {
     Project p = new Project();
     p.setId(record.getId());
     p.setName(record.getName());
+    p.setCreatedBy(record.getCreatedBy());
     p.setBusinessBackground(record.getBusinessBackground());
     p.setDescription(record.getDescription());
     p.setStatus(record.getStatus());
@@ -47,5 +53,18 @@ public class MybatisProjectRepository implements ProjectRepository {
     p.setUpdatedAt(record.getUpdatedAt());
     return p;
   }
-}
 
+  private static ProjectRecord toRecord(Project project) {
+    if (project == null) return null;
+    ProjectRecord record = new ProjectRecord();
+    record.setId(project.getId());
+    record.setName(project.getName());
+    record.setCreatedBy(project.getCreatedBy());
+    record.setBusinessBackground(project.getBusinessBackground());
+    record.setDescription(project.getDescription());
+    record.setStatus(project.getStatus());
+    record.setOwnerTeam(project.getOwnerTeam());
+    record.setDataSource(project.getDataSourceJson());
+    return record;
+  }
+}

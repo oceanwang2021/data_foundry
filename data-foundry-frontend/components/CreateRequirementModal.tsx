@@ -2,11 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Plus, X } from "lucide-react";
-import type { ColumnDefinition, Project, Requirement, SearchEngineProvider, WideTableSchema } from "@/lib/types";
-import { createRequirement } from "@/lib/api-client";
+import type {
+  BusinessDateFrequency,
+  ColumnDefinition,
+  Project,
+  Requirement,
+  SearchEngineProvider,
+  TargetTableColumn,
+  TargetTableSummary,
+  WideTableSchema,
+} from "@/lib/types";
+import { createRequirement, listTargetTableColumns } from "@/lib/api-client";
+import { buildSelectableBusinessDates, formatBusinessDateLabel } from "@/lib/business-date";
 import { DEFAULT_RUNTIME_SETTINGS, loadRuntimeSettings } from "@/lib/runtime-settings";
 import { cn } from "@/lib/utils";
-import SchemaEditorModal from "@/components/SchemaEditorModal";
+import SchemaSelectorModal from "@/components/SchemaSelectorModal";
 
 type DimensionDraft = {
   name: string;
@@ -33,6 +43,160 @@ function parseCommaLines(text: string): string[] {
     .filter(Boolean);
 }
 
+const DEFAULT_SCHEMA: WideTableSchema = { columns: [] };
+
+function resolveWideTableColumnType(
+  dataType: string,
+  columnType?: string,
+): ColumnDefinition["type"] {
+  const dt = (dataType ?? "").toLowerCase();
+  const ct = (columnType ?? "").toLowerCase();
+
+  if (dt === "tinyint" && ct.includes("(1)")) return "BOOLEAN";
+  if (dt === "boolean" || dt === "bool" || dt === "bit") return "BOOLEAN";
+
+  if (
+    dt.includes("int")
+    || dt === "bigint"
+    || dt === "smallint"
+    || dt === "mediumint"
+    || dt === "tinyint"
+  ) {
+    return "INTEGER";
+  }
+
+  if (
+    dt === "decimal"
+    || dt === "numeric"
+    || dt === "float"
+    || dt === "double"
+    || dt === "real"
+  ) {
+    return "NUMBER";
+  }
+
+  if (dt.includes("date") || dt.includes("time") || dt === "timestamp" || dt === "datetime") {
+    return "DATE";
+  }
+
+  return "STRING";
+}
+
+function inferWideTableColumnMeta(
+  columnName: string,
+  columnType: ColumnDefinition["type"],
+): Pick<ColumnDefinition, "category" | "isBusinessDate"> {
+  const name = (columnName ?? "").trim();
+  const lower = name.toLowerCase();
+
+  if (lower === "row_status" || lower === "last_task_id" || lower === "updated_at") {
+    return { category: "system" };
+  }
+
+  if (lower === "biz_date" || lower === "business_date") {
+    return { category: "dimension", isBusinessDate: true };
+  }
+
+  if (lower === "id" || lower.endsWith("_id")) {
+    return { category: "id" };
+  }
+
+  if (columnType === "NUMBER" || columnType === "INTEGER") {
+    return { category: "indicator" };
+  }
+
+  return { category: "dimension" };
+}
+
+function buildColumnsFromTargetTable(columns: TargetTableColumn[]): ColumnDefinition[] {
+  const mapped = (columns ?? [])
+    .filter((col) => Boolean(col?.columnName))
+    .sort((left, right) => (left.ordinalPosition ?? 0) - (right.ordinalPosition ?? 0))
+    .map((col) => {
+      const type = resolveWideTableColumnType(col.dataType, col.columnType);
+      const meta = inferWideTableColumnMeta(col.columnName, type);
+      const required = String(col.isNullable ?? "YES").toUpperCase() === "NO";
+      const comment = col.columnComment ?? "";
+      return {
+        id: col.columnName,
+        name: col.columnName,
+        chineseName: comment || col.columnName,
+        type,
+        category: meta.category,
+        description: comment,
+        unit: undefined,
+        required,
+        isBusinessDate: meta.isBusinessDate,
+        passthroughEnabled: false,
+        passthroughContent: undefined,
+        auditRuleType: undefined,
+        auditRuleValue: undefined,
+      } satisfies ColumnDefinition;
+    });
+
+  if (mapped.length > 0 && !mapped.some((col) => col.category === "id")) {
+    mapped[0] = { ...mapped[0], category: "id" };
+  }
+
+  return mapped;
+}
+
+function BusinessDateInput({
+  frequency,
+  value,
+  onChange,
+  disabled,
+}: {
+  frequency: BusinessDateFrequency;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  if (frequency === "daily" || frequency === "weekly") {
+    return (
+      <input
+        type="date"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          "w-full rounded-md border px-3 py-2 text-sm",
+          disabled ? "bg-muted/20 text-muted-foreground" : "bg-background",
+        )}
+      />
+    );
+  }
+
+  const options = useMemo(() => buildSelectableBusinessDates(frequency).slice().reverse(), [frequency]);
+
+  useEffect(() => {
+    if ((!value || !options.includes(value)) && options.length > 0) {
+      onChange(options[0]);
+    }
+  }, [options, value, onChange]);
+
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      className={cn(
+        "w-full rounded-md border px-3 py-2 text-sm",
+        disabled ? "bg-muted/20 text-muted-foreground" : "bg-background",
+      )}
+    >
+      {!value ? (
+        <option value="">请选择</option>
+      ) : null}
+      {options.map((d) => (
+        <option key={d} value={d}>
+          {formatBusinessDateLabel(d, frequency)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export default function CreateRequirementModal({
   project,
   projectId,
@@ -54,10 +218,10 @@ export default function CreateRequirementModal({
 
   const [wideTableTitle, setWideTableTitle] = useState("");
   const [wideTableName, setWideTableName] = useState("");
-  const [wideTableSchema, setWideTableSchema] = useState<WideTableSchema>({ columns: DEFAULT_SYSTEM_COLUMNS });
-  const [isSchemaEditorOpen, setIsSchemaEditorOpen] = useState(false);
+  const [wideTableSchema, setWideTableSchema] = useState<WideTableSchema>(DEFAULT_SCHEMA);
+  const [isSchemaSelectorOpen, setIsSchemaSelectorOpen] = useState(false);
 
-  const [bizFrequency, setBizFrequency] = useState<"monthly" | "quarterly" | "yearly">("monthly");
+  const [bizFrequency, setBizFrequency] = useState<BusinessDateFrequency>("monthly");
   const [bizStart, setBizStart] = useState("");
   const [bizEnd, setBizEnd] = useState("");
   const [endNever, setEndNever] = useState(false);
@@ -80,7 +244,7 @@ export default function CreateRequirementModal({
     setPreferredSitesText(project.dataSource?.search?.sites?.join("\n") ?? "");
     setWideTableTitle("");
     setWideTableName("");
-    setWideTableSchema({ columns: DEFAULT_SYSTEM_COLUMNS });
+    setWideTableSchema(DEFAULT_SCHEMA);
     setBizFrequency("monthly");
     setBizStart("");
     setBizEnd("");
@@ -90,8 +254,16 @@ export default function CreateRequirementModal({
     setCronExpression("");
     setSaving(false);
     setMessage("");
-    setIsSchemaEditorOpen(false);
+    setIsSchemaSelectorOpen(false);
   }, [isOpen, defaultSearchEngines, project.dataSource]);
+
+  useEffect(() => {
+    if (bizFrequency === "daily" || bizFrequency === "weekly") {
+      const today = new Date().toISOString().slice(0, 10);
+      setBizStart((prev) => prev || today);
+      setBizEnd((prev) => prev || today);
+    }
+  }, [bizFrequency]);
 
   if (!isOpen) return null;
 
@@ -114,6 +286,19 @@ export default function CreateRequirementModal({
 
   const updateDimension = (idx: number, patch: Partial<DimensionDraft>) => {
     setDimensions((prev) => prev.map((d, i) => (i === idx ? { ...d, ...patch } : d)));
+  };
+
+  const handleLinkSchema = async (table: TargetTableSummary) => {
+    setMessage("");
+    try {
+      const rawColumns = await listTargetTableColumns(table.tableName);
+      const nextColumns = buildColumnsFromTargetTable(rawColumns);
+      setWideTableSchema({ columns: nextColumns });
+      setWideTableName(table.tableName);
+      setWideTableTitle((prev) => (prev.trim() ? prev : table.tableName));
+    } catch (error: any) {
+      setMessage(`关联 Schema 失败：${error?.message ?? String(error)}`);
+    }
   };
 
   const handleSave = async () => {
@@ -322,6 +507,9 @@ export default function CreateRequirementModal({
 
           <section className="rounded-lg border p-4 space-y-3">
             <div className="font-semibold">表结构定义</div>
+            <div className="text-xs text-muted-foreground">
+              注：需自行在数据库中创建目标表，后面通过关联 Schema 选择该需求对应的目标表
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">宽表标题</label>
@@ -346,10 +534,10 @@ export default function CreateRequirementModal({
               <div className="text-xs text-muted-foreground">Schema 列数：{wideTableSchema.columns.length}</div>
               <button
                 type="button"
-                onClick={() => setIsSchemaEditorOpen(true)}
+                onClick={() => setIsSchemaSelectorOpen(true)}
                 className="rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
               >
-                编辑 Schema
+                关联 Schema
               </button>
             </div>
           </section>
@@ -358,37 +546,34 @@ export default function CreateRequirementModal({
             <div className="font-semibold">数据范围</div>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">时间频率</label>
+                <label className="text-xs text-muted-foreground">时间粒度</label>
                 <select
                   value={bizFrequency}
-                  onChange={(e) => setBizFrequency(e.target.value as any)}
+                  onChange={(e) => setBizFrequency(e.target.value as BusinessDateFrequency)}
                   className="w-full rounded-md border px-3 py-2 text-sm bg-background"
                 >
+                  <option value="daily">日</option>
+                  <option value="weekly">周</option>
                   <option value="monthly">月</option>
                   <option value="quarterly">季</option>
                   <option value="yearly">年</option>
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">开始（YYYY-MM）</label>
-                <input
+                <label className="text-xs text-muted-foreground">开始时间</label>
+                <BusinessDateInput
+                  frequency={bizFrequency}
                   value={bizStart}
-                  onChange={(e) => setBizStart(e.target.value)}
-                  className="w-full rounded-md border px-3 py-2 text-sm font-mono"
-                  placeholder="例如：2026-04"
+                  onChange={setBizStart}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">结束（YYYY-MM）</label>
-                <input
+                <label className="text-xs text-muted-foreground">结束时间</label>
+                <BusinessDateInput
+                  frequency={bizFrequency}
                   value={bizEnd}
-                  onChange={(e) => setBizEnd(e.target.value)}
                   disabled={endNever}
-                  className={cn(
-                    "w-full rounded-md border px-3 py-2 text-sm font-mono",
-                    endNever ? "bg-muted/20 text-muted-foreground" : "bg-background",
-                  )}
-                  placeholder="例如：2026-04"
+                  onChange={setBizEnd}
                 />
               </div>
             </div>
@@ -522,18 +707,14 @@ export default function CreateRequirementModal({
         </div>
       </div>
 
-      <SchemaEditorModal
-        projectId={projectId}
-        initialName={wideTableTitle || ""}
-        initialSchema={wideTableSchema}
-        isOpen={isSchemaEditorOpen}
-        onClose={() => setIsSchemaEditorOpen(false)}
-        onSave={(name, schema) => {
-          setWideTableTitle(name);
-          setWideTableSchema(schema);
+      <SchemaSelectorModal
+        isOpen={isSchemaSelectorOpen}
+        onClose={() => setIsSchemaSelectorOpen(false)}
+        currentTableName={wideTableName || undefined}
+        onSelect={(table) => {
+          void handleLinkSchema(table);
         }}
       />
     </div>
   );
 }
-

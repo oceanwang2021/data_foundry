@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 public class ProjectRecord {
   private String id;
   private String name;
+  private String createdBy;
   private String businessBackground;
   private String description;
   private String status;
@@ -28,6 +29,14 @@ public class ProjectRecord {
 
   public void setName(String name) {
     this.name = name;
+  }
+
+  public String getCreatedBy() {
+    return createdBy;
+  }
+
+  public void setCreatedBy(String createdBy) {
+    this.createdBy = createdBy;
   }
 
   public String getBusinessBackground() {

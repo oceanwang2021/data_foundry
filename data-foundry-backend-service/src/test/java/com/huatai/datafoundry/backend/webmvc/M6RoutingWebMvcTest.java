@@ -26,6 +26,7 @@ import com.huatai.datafoundry.backend.requirement.interfaces.web.legacy.Requirem
 import com.huatai.datafoundry.backend.requirement.interfaces.web.legacy.WideTablePlanLegacyController;
 import com.huatai.datafoundry.backend.project.application.query.dto.ProjectReadDto;
 import com.huatai.datafoundry.backend.project.application.query.service.ProjectQueryService;
+import com.huatai.datafoundry.backend.project.application.service.ProjectAppService;
 import com.huatai.datafoundry.backend.project.interfaces.web.ProjectFacadeController;
 import com.huatai.datafoundry.backend.ops.application.service.DemoDataService;
 import com.huatai.datafoundry.backend.task.application.service.ScheduleJobFacadeAppService;
@@ -71,6 +72,7 @@ public class M6RoutingWebMvcTest {
   @MockBean private TaskAppService taskAppService;
   @MockBean private ScheduleJobFacadeAppService scheduleJobFacadeAppService;
   @MockBean private ProjectQueryService projectQueryService;
+  @MockBean private ProjectAppService projectAppService;
   @MockBean private DemoDataService demoDataService;
 
   @Test

@@ -20,6 +20,8 @@ import type {
   IndicatorGroup,
   ScheduleRule,
   ColumnDefinition,
+  TargetTableSummary,
+  TargetTableColumn,
   BackfillRequest,
   ExecutionRecord,
 } from "./types";
@@ -121,10 +123,41 @@ function apiDelete(path: string) {
 // ==================== 后端 → 前端 数据转换 ====================
 
 /** 后端 Project → 前端 Project */
+export async function listTargetTables(keyword?: string): Promise<TargetTableSummary[]> {
+  const kw = keyword?.trim();
+  const qs = kw ? `?keyword=${encodeURIComponent(kw)}` : "";
+  const raw = await apiGet<any>(`/api/target-tables${qs}`);
+  const items = Array.isArray(raw) ? raw : raw?.value ?? [];
+  return (items as any[])
+    .map((row) => ({
+      tableName: row.tableName ?? row.table_name ?? "",
+      tableComment: row.tableComment ?? row.table_comment ?? undefined,
+      createTime: row.createTime ?? row.create_time ?? undefined,
+      updateTime: row.updateTime ?? row.update_time ?? undefined,
+    } satisfies TargetTableSummary))
+    .filter((row) => row.tableName.trim() !== "");
+}
+
+export async function listTargetTableColumns(tableName: string): Promise<TargetTableColumn[]> {
+  const raw = await apiGet<any>(`/api/target-tables/${encodeURIComponent(tableName)}/columns`);
+  const items = Array.isArray(raw) ? raw : raw?.value ?? [];
+  return (items as any[])
+    .map((row) => ({
+      columnName: row.columnName ?? row.column_name ?? "",
+      dataType: row.dataType ?? row.data_type ?? "",
+      columnType: row.columnType ?? row.column_type ?? undefined,
+      isNullable: row.isNullable ?? row.is_nullable ?? undefined,
+      columnComment: row.columnComment ?? row.column_comment ?? undefined,
+      ordinalPosition: row.ordinalPosition ?? row.ordinal_position ?? undefined,
+    } satisfies TargetTableColumn))
+    .filter((row) => row.columnName.trim() !== "");
+}
+
 function mapProject(raw: any): Project {
   return {
     id: raw.id,
     name: raw.name,
+    createdBy: raw.created_by ?? "",
     description: raw.description ?? "",
     businessBackground: raw.business_background ?? "",
     status: raw.status ?? "active",
@@ -808,19 +841,19 @@ export async function fetchProject(projectId: string): Promise<Project> {
 
 export async function createProject(data: {
   name: string;
-  ownerTeam: string;
-  description: string;
+  ownerTeam?: string;
+  description?: string;
   status?: string;
   businessBackground?: string;
   dataSource?: any;
+  createdBy: string;
 }): Promise<Project> {
   const raw = await apiPost<any>("/api/projects", {
     name: data.name,
     owner_team: data.ownerTeam,
     description: data.description,
-    status: data.status ?? "planning",
     business_background: data.businessBackground,
-    data_source: data.dataSource,
+    created_by: data.createdBy,
   });
   return mapProject(raw);
 }

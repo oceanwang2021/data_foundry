@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import { buildApiUrl } from "@/lib/api-base";
 import {
   fetchRuntimeSettings,
+  listTargetTableColumns,
   updateRequirementWideTable,
 } from "@/lib/api-client";
 import KnowledgeBaseSelectorModal from "@/components/KnowledgeBaseSelectorModal";
@@ -17,6 +18,8 @@ import type {
   FetchTask,
   Project,
   KnowledgeBase,
+  TargetTableSummary,
+  TargetTableColumn,
 } from "@/lib/types";
 import { DEFAULT_RUNTIME_SETTINGS, formatSearchEngineLabel } from "@/lib/runtime-settings";
 import { cn } from "@/lib/utils";
@@ -82,7 +85,6 @@ type Props = {
   wideTableRecords: WideTableRecord[];
   taskGroups?: TaskGroup[];
   fetchTasks?: FetchTask[];
-  availableSchemaTemplates?: WideTable[];
   onWideTablesChange?: (wideTables: WideTable[]) => void;
   onWideTableRecordsChange?: (wideTableRecords: WideTableRecord[]) => void;
   onTaskGroupsChange?: (taskGroups: TaskGroup[]) => void;
@@ -153,7 +155,6 @@ export default function RequirementDefinitionForm({
   wideTableRecords,
   taskGroups,
   fetchTasks,
-  availableSchemaTemplates,
   onWideTablesChange,
   onWideTableRecordsChange,
   onTaskGroupsChange,
@@ -669,7 +670,6 @@ export default function RequirementDefinitionForm({
       <WideTableSchemaSection
         requirementId={requirement.id}
         wideTables={wideTables}
-        availableSchemaTemplates={availableSchemaTemplates ?? wideTables}
         taskGroups={taskGroups ?? []}
         fetchTasks={fetchTasks ?? []}
         selectedWtId={selectedWtId}
@@ -1671,7 +1671,6 @@ function DataSourceSection({
 function WideTableSchemaSection({
   requirementId,
   wideTables,
-  availableSchemaTemplates,
   taskGroups,
   fetchTasks,
   selectedWtId,
@@ -1688,7 +1687,6 @@ function WideTableSchemaSection({
 }: {
   requirementId: string;
   wideTables: WideTable[];
-  availableSchemaTemplates: WideTable[];
   taskGroups: TaskGroup[];
   fetchTasks: FetchTask[];
   selectedWtId: string;
@@ -1713,16 +1711,6 @@ function WideTableSchemaSection({
     ),
     [selectedWt, taskGroups],
   );
-  const availableTemplates = useMemo(
-    () =>
-      availableSchemaTemplates.filter(
-        (template) =>
-          template.id !== selectedWt?.id
-          && template.schema.columns.length > 0
-          && template.name !== UNLINKED_DATA_TABLE_NAME,
-      ),
-    [availableSchemaTemplates, selectedWt?.id],
-  );
   const isSchemaMetadataEditable = Boolean(!schemaLocked && onUpdateWideTable && selectedWt);
 
   const updateSelectedWideTable = (updater: (wideTable: WideTable) => WideTable) => {
@@ -1739,115 +1727,211 @@ function WideTableSchemaSection({
 
   const handleColumnMetadataChange = (columnId: string, patch: Partial<ColumnDefinition>) => {
     const doChange = () => {
+      const currentPlanVersion = selectedWideTablePlanVersion;
       updateSelectedWideTable((wideTable) => {
         const currentColumn = wideTable.schema.columns.find((col) => col.id === columnId);
         if (!currentColumn) {
           return wideTable;
         }
 
-        wideTable.schema.columns = wideTable.schema.columns.map((col) => {
+        const nextColumns = wideTable.schema.columns.map((col) => {
           if (col.id !== columnId) {
             return col;
           }
 
           const nextCategory = patch.category ?? col.category;
+          const nextIsBusinessDate = patch.category && col.isBusinessDate && nextCategory !== "dimension"
+            ? false
+            : patch.isBusinessDate ?? col.isBusinessDate;
+
           return {
             ...col,
             ...patch,
+            category: nextCategory,
+            isBusinessDate: nextIsBusinessDate,
             unit: nextCategory === "indicator" ? patch.unit ?? col.unit : undefined,
           };
         });
 
+        let nextIndicatorGroups = wideTable.indicatorGroups;
+        let nextDimensionRanges = wideTable.dimensionRanges;
+
         if (patch.category && patch.category !== "indicator") {
-          wideTable.indicatorGroups = wideTable.indicatorGroups.map((group) => ({
+          nextIndicatorGroups = wideTable.indicatorGroups.map((group) => ({
             ...group,
             indicatorColumns: group.indicatorColumns.filter((column) => column !== currentColumn.name),
           }));
         }
 
         if (patch.category && patch.category !== "dimension") {
-          wideTable.dimensionRanges = wideTable.dimensionRanges.filter(
+          nextDimensionRanges = wideTable.dimensionRanges.filter(
             (range) => range.dimensionName !== currentColumn.name,
           );
         }
 
         // Sub-task 5.3: Ensure all dimensionRanges reference valid dimension columns
         const currentDimensionNames = new Set(
-          wideTable.schema.columns
+          nextColumns
             .filter((col) => col.category === "dimension" && !col.isBusinessDate)
             .map((col) => col.name),
         );
-        wideTable.dimensionRanges = wideTable.dimensionRanges.filter(
+        nextDimensionRanges = nextDimensionRanges.filter(
           (range) => currentDimensionNames.has(range.dimensionName),
         );
 
-        return wideTable;
+        const nextWideTable: WideTable = {
+          ...wideTable,
+          schema: {
+            ...wideTable.schema,
+            columns: nextColumns,
+          },
+          indicatorGroups: nextIndicatorGroups,
+          dimensionRanges: nextDimensionRanges,
+        };
+
+        if (!patch.category) {
+          return nextWideTable;
+        }
+
+        return {
+          ...nextWideTable,
+          // Artifact handling: when schema change causes downstream invalidation, mark TaskGroups stale
+          status: "draft" as const,
+          currentPlanFingerprint: undefined,
+          currentPlanVersion: Math.max(currentPlanVersion, 1) + 1,
+          updatedAt: new Date().toISOString(),
+        };
       });
 
       // When column category changes, invalidate downstream of B and re-evaluate B completion
       if (patch.category) {
         onStepStatusesChange(invalidateDownstream(completeStep(stepStatuses, "A"), "A"));
 
-        // Artifact handling: when schema change causes downstream invalidation, mark TaskGroups stale
-        if (selectedWt) {
-          const currentPlanVersion = selectedWideTablePlanVersion;
-          updateSelectedWideTable((wideTable) => ({
-            ...wideTable,
-            status: "draft" as const,
-            currentPlanFingerprint: undefined,
-            currentPlanVersion: Math.max(selectedWideTablePlanVersion, 1) + 1,
-            updatedAt: new Date().toISOString(),
-          }));
-          if (onTaskGroupsChange) {
-            const staleTaskGroups = markTaskGroupsAsStale(taskGroups ?? [], selectedWt.id, currentPlanVersion);
-            onTaskGroupsChange(staleTaskGroups);
-          }
+        if (selectedWt && onTaskGroupsChange) {
+          const staleTaskGroups = markTaskGroupsAsStale(taskGroups ?? [], selectedWt.id, currentPlanVersion);
+          onTaskGroupsChange(staleTaskGroups);
         }
       }
     };
 
-    if (patch.category && shouldConfirmInvalidation(stepStatuses, "A")) {
-      onShowInvalidationDialog("A", doChange);
-      return;
-    }
-
     doChange();
   };
 
-  const handleApplySchemaTemplate = (template: WideTable) => {
+  const resolveWideTableColumnType = (
+    dataType: string,
+    columnType?: string,
+  ): ColumnDefinition["type"] => {
+    const dt = (dataType ?? "").toLowerCase();
+    const ct = (columnType ?? "").toLowerCase();
+
+    if (dt === "tinyint" && ct.includes("(1)")) return "BOOLEAN";
+    if (dt === "boolean" || dt === "bool" || dt === "bit") return "BOOLEAN";
+
+    if (
+      dt.includes("int")
+      || dt === "bigint"
+      || dt === "smallint"
+      || dt === "mediumint"
+      || dt === "tinyint"
+    ) {
+      return "INTEGER";
+    }
+
+    if (
+      dt === "decimal"
+      || dt === "numeric"
+      || dt === "float"
+      || dt === "double"
+      || dt === "real"
+    ) {
+      return "NUMBER";
+    }
+
+    if (dt.includes("date") || dt.includes("time") || dt === "timestamp" || dt === "datetime") {
+      return "DATE";
+    }
+
+    return "STRING";
+  };
+
+  const inferWideTableColumnMeta = (
+    columnName: string,
+    columnType: ColumnDefinition["type"],
+  ): Pick<ColumnDefinition, "category" | "isBusinessDate"> => {
+    const name = (columnName ?? "").trim();
+    const lower = name.toLowerCase();
+
+    if (lower === "row_status" || lower === "last_task_id" || lower === "updated_at") {
+      return { category: "system" };
+    }
+
+    if (lower === "biz_date" || lower === "business_date") {
+      return { category: "dimension", isBusinessDate: true };
+    }
+
+    if (lower === "id" || lower.endsWith("_id")) {
+      return { category: "id" };
+    }
+
+    if (columnType === "NUMBER" || columnType === "INTEGER") {
+      return { category: "indicator" };
+    }
+
+    return { category: "dimension" };
+  };
+
+  const buildColumnsFromTargetTable = (columns: TargetTableColumn[]): ColumnDefinition[] => {
+    const mapped = (columns ?? [])
+      .filter((col) => Boolean(col?.columnName))
+      .sort((left, right) => (left.ordinalPosition ?? 0) - (right.ordinalPosition ?? 0))
+      .map((col) => {
+        const type = resolveWideTableColumnType(col.dataType, col.columnType);
+        const meta = inferWideTableColumnMeta(col.columnName, type);
+        const required = String(col.isNullable ?? "YES").toUpperCase() === "NO";
+        const comment = col.columnComment ?? "";
+        return {
+          id: col.columnName,
+          name: col.columnName,
+          chineseName: comment || col.columnName,
+          type,
+          category: meta.category,
+          description: comment,
+          unit: undefined,
+          required,
+          isBusinessDate: meta.isBusinessDate,
+          passthroughEnabled: false,
+          passthroughContent: undefined,
+          auditRuleType: undefined,
+          auditRuleValue: undefined,
+        } satisfies ColumnDefinition;
+      });
+
+    if (mapped.length > 0 && !mapped.some((col) => col.category === "id")) {
+      mapped[0] = { ...mapped[0], category: "id" };
+    }
+
+    return mapped;
+  };
+
+  const handleApplyTargetTable = (table: TargetTableSummary) => {
     if (!selectedWt) {
       return;
     }
 
-    const doApply = () => {
+    const doApply = async () => {
+      try {
+        setSchemaActionMessage("Loading...");
+        const rawColumns = await listTargetTableColumns(table.tableName);
+        const nextColumns = buildColumnsFromTargetTable(rawColumns);
       updateSelectedWideTable((wideTable) => {
         const currentPlanVersion = Math.max(selectedWideTablePlanVersion, 1);
         wideTable.schema = {
-          columns: template.schema.columns.map((column) => ({ ...column })),
+          columns: nextColumns.map((column) => ({ ...column })),
         };
-        wideTable.name = template.name;
-        wideTable.description = template.description;
-        wideTable.dimensionRanges = template.dimensionRanges.map((range) => ({
-          ...range,
-          values: [...range.values],
-        }));
-        wideTable.businessDateRange = {
-          ...template.businessDateRange,
-        };
-        wideTable.indicatorGroups = template.indicatorGroups.map((group, index) => ({
-          ...group,
-          id: `ig_${wideTable.id}_${index + 1}`,
-          wideTableId: wideTable.id,
-          indicatorColumns: [...group.indicatorColumns],
-          priority: index + 1,
-        }));
-
-        // Sub-task 5.2: Clean up indicatorColumns referencing column names not in the new schema
-        const newColumnNames = new Set(wideTable.schema.columns.map((col) => col.name));
-        wideTable.indicatorGroups = wideTable.indicatorGroups.map((group) => ({
-          ...group,
-          indicatorColumns: group.indicatorColumns.filter((colName) => newColumnNames.has(colName)),
-        }));
+        wideTable.name = table.tableName;
+        wideTable.description = table.tableComment ?? "";
+        wideTable.dimensionRanges = [];
+        wideTable.indicatorGroups = [];
         wideTable.recordCount = 0;
         wideTable.currentPlanVersion = currentPlanVersion + 1;
         wideTable.currentPlanFingerprint = undefined;
@@ -1855,7 +1939,7 @@ function WideTableSchemaSection({
         wideTable.updatedAt = new Date().toISOString();
         return wideTable;
       });
-      setSchemaActionMessage(`已关联 Schema ${template.name}（${template.id}）。当前任务与预览数据将按新 Schema 重建；历史已采集数据会保留。你可以到【数据范围】点击“预览数据”查看最新预览。`);
+      setSchemaActionMessage(`已关联 Schema ${table.tableName}。`);
 
       // Step status: mark A as completed, invalidate downstream (B, C, D)
       onStepStatusesChange(invalidateDownstream(completeStep(stepStatuses, "A"), "A"));
@@ -1866,15 +1950,12 @@ function WideTableSchemaSection({
         const staleTaskGroups = markTaskGroupsAsStale(taskGroups ?? [], selectedWt.id, currentPlanVersion);
         onTaskGroupsChange(staleTaskGroups);
       }
+      } catch (err) {
+        setSchemaActionMessage(err instanceof Error ? err.message : String(err));
+      }
     };
 
-    // Task 8: If downstream has completed steps, show confirmation dialog first
-    if (shouldConfirmInvalidation(stepStatuses, "A")) {
-      onShowInvalidationDialog("A", doApply);
-      return;
-    }
-
-    doApply();
+    void doApply();
   };
 
   const handleLinkDataTable = () => {
@@ -2007,7 +2088,7 @@ function WideTableSchemaSection({
                       {selectedWt.schema.columns.map((col) => (
                         <tr
                           key={col.id}
-                          className={cn(col.category === "system" ? "text-muted-foreground" : "")}
+                          className={cn(normalizeCategoryForUI(col.category) === "system" ? "text-muted-foreground" : "")}
                         >
                           <td className="px-2 py-1.5 font-mono">{col.name}</td>
                           <td className="px-2 py-1.5">
@@ -2024,9 +2105,9 @@ function WideTableSchemaSection({
                           </td>
                           <td className="px-2 py-1.5">{col.type}</td>
                           <td className="px-2 py-1.5">
-                            {isSchemaMetadataEditable && col.category !== "id" && col.category !== "system" && !col.isBusinessDate ? (
+                            {isSchemaMetadataEditable ? (
                               <select
-                                value={col.category}
+                                value={normalizeCategoryForUI(col.category)}
                                 onChange={(event) =>
                                   handleColumnMetadataChange(col.id, {
                                     category: event.target.value as ColumnDefinition["category"],
@@ -2034,15 +2115,17 @@ function WideTableSchemaSection({
                                 }
                                 className={cn(
                                   "w-full rounded-md border px-2 py-1 text-xs",
-                                  categorySelectClass(col.category),
+                                  categorySelectClass(normalizeCategoryForUI(col.category)),
                                 )}
                               >
+                                <option value="id">ID列</option>
+                                <option value="system">系统列</option>
                                 <option value="dimension">维度列</option>
                                 <option value="indicator">指标列</option>
                               </select>
                             ) : (
-                              <span className={cn("px-1.5 py-0.5 rounded text-xs", categoryBadgeClass(col.category))}>
-                                {categoryLabel(col.category)}
+                              <span className={cn("px-1.5 py-0.5 rounded text-xs", categoryBadgeClass(normalizeCategoryForUI(col.category)))}>
+                                {categoryLabel(normalizeCategoryForUI(col.category))}
                               </span>
                             )}
                           </td>
@@ -2150,9 +2233,8 @@ function WideTableSchemaSection({
               <SchemaSelectorModal
                 isOpen={isSchemaSelectorOpen}
                 onClose={() => setIsSchemaSelectorOpen(false)}
-                templates={availableTemplates}
-                currentTemplateId={selectedWt?.id}
-                onSelect={(template) => handleApplySchemaTemplate(template)}
+                currentTableName={selectedWt?.name}
+                onSelect={(table) => handleApplyTargetTable(table)}
               />
             </div>
           ) : null}
@@ -3415,6 +3497,10 @@ function formatPersistError(error: unknown): string {
     return error.message;
   }
   return "请稍后重试";
+}
+
+function normalizeCategoryForUI(category: ColumnDefinition["category"]): Exclude<ColumnDefinition["category"], "attribute"> {
+  return (category === "attribute" ? "system" : category) as Exclude<ColumnDefinition["category"], "attribute">;
 }
 
 function categoryBadgeClass(category: ColumnDefinition["category"]): string {

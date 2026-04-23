@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
       "com.huatai.datafoundry.backend.project",
       "com.huatai.datafoundry.backend.requirement",
       "com.huatai.datafoundry.backend.task",
+      "com.huatai.datafoundry.backend.targettable",
       "com.huatai.datafoundry.common.core"
     })
 public class DataFoundryBackendApplication {

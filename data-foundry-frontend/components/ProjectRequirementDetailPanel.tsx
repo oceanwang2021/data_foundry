@@ -161,16 +161,6 @@ export default function ProjectRequirementDetailPanel({
     );
   }
 
-  const availableSchemaTemplates = useMemo(() => {
-    const mergedTemplates = new Map<string, WideTable>();
-    for (const wideTable of wideTables) {
-      mergedTemplates.set(wideTable.id, wideTable);
-    }
-    for (const wideTable of wideTablesState) {
-      mergedTemplates.set(wideTable.id, wideTable);
-    }
-    return Array.from(mergedTemplates.values());
-  }, [wideTables, wideTablesState]);
   const reqWideTables = wideTablesState.filter((wt) => wt.requirementId === requirement.id);
   const containsFullSnapshotTable = reqWideTables.some((wideTable) => !hasWideTableBusinessDateDimension(wideTable));
   const reqWtIds = new Set(reqWideTables.map((wt) => wt.id));
@@ -313,7 +303,6 @@ export default function ProjectRequirementDetailPanel({
           wideTableRecords={reqWideTableRecords}
           taskGroups={reqTaskGroups}
           fetchTasks={reqFetchTasks}
-          availableSchemaTemplates={availableSchemaTemplates}
           onRequirementChange={handleRequirementChange}
           onProjectChange={setProjectState}
           onWideTablesChange={handleReplaceRequirementWideTables}

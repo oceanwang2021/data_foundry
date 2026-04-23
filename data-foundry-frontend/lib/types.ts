@@ -13,9 +13,26 @@ export type KnowledgeBase = {
 
 // ==================== 项目 ====================
 
+export type TargetTableSummary = {
+  tableName: string;
+  tableComment?: string;
+  createTime?: string;
+  updateTime?: string;
+};
+
+export type TargetTableColumn = {
+  columnName: string;
+  dataType: string;
+  columnType?: string;
+  isNullable?: string;
+  columnComment?: string;
+  ordinalPosition?: number;
+};
+
 export type Project = {
   id: string;
   name: string;
+  createdBy?: string;
   businessBackground?: string;
   description: string;
   status: "active" | "planning";

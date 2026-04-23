@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import type { Project, Requirement, WideTable, TaskGroup, FetchTask } from "@/lib/types";
+import type { Project, Requirement, WideTable } from "@/lib/types";
 import { loadProjectData } from "@/lib/api-client";
 import { ArrowLeft } from "lucide-react";
 import ProjectRequirementsPanel from "@/components/ProjectRequirementsPanel";
@@ -15,8 +15,6 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [wideTables, setWideTables] = useState<WideTable[]>([]);
-  const [taskGroups, setTaskGroups] = useState<TaskGroup[]>([]);
-  const [fetchTasks, setFetchTasks] = useState<FetchTask[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -31,8 +29,6 @@ export default function ProjectDetailPage() {
         setProject(data.project);
         setRequirements(data.requirements);
         setWideTables(data.wideTables);
-        setTaskGroups(data.taskGroups);
-        setFetchTasks(data.fetchTasks);
       })
       .catch(() => {
         setProject(null);
@@ -75,8 +71,6 @@ export default function ProjectDetailPage() {
         projectId={project.id}
         initialRequirements={requirements}
         initialWideTables={wideTables}
-        initialTaskGroups={taskGroups}
-        initialFetchTasks={fetchTasks}
       />
     </div>
   );

@@ -28,6 +28,7 @@ CREATE TABLE projects (
   id                  VARCHAR(64)   NOT NULL PRIMARY KEY,
   sort_order          INT           NOT NULL DEFAULT 0,
   name                VARCHAR(255)  NOT NULL,
+  created_by          VARCHAR(255)  NOT NULL DEFAULT '',
   owner_team          VARCHAR(255)  NOT NULL DEFAULT '',
   description         TEXT          NULL,
   status              VARCHAR(32)   NOT NULL DEFAULT 'active',

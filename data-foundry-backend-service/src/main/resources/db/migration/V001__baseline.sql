@@ -7,6 +7,7 @@
 CREATE TABLE IF NOT EXISTS projects (
   id            VARCHAR(64)  NOT NULL PRIMARY KEY,
   name          VARCHAR(255) NOT NULL,
+  created_by    VARCHAR(255) NOT NULL DEFAULT '',
   business_background TEXT   NULL,
   description   TEXT         NULL,
   status        VARCHAR(32)  NOT NULL DEFAULT 'active',
@@ -120,4 +121,3 @@ CREATE TABLE IF NOT EXISTS fetch_tasks (
   INDEX idx_ft_task_group_id (task_group_id),
   INDEX idx_ft_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

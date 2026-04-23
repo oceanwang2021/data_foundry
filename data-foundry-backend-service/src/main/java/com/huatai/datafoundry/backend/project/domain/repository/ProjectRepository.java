@@ -7,5 +7,6 @@ public interface ProjectRepository {
   List<Project> listProjects();
 
   Project getProject(String projectId);
-}
 
+  int insertProject(Project project);
+}

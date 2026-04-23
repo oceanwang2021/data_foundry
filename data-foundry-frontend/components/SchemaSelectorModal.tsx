@@ -2,53 +2,60 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Check, X, Table as TableIcon, Search } from "lucide-react";
-import type { WideTable } from "@/lib/types";
+import { listTargetTables } from "@/lib/api-client";
+import type { TargetTableSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SchemaSelectorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  templates: WideTable[];
-  currentTemplateId?: string;
-  onSelect: (template: WideTable) => void;
+  currentTableName?: string;
+  onSelect: (table: TargetTableSummary) => void;
 }
 
-function buildMeta(template: WideTable): string {
-  const desc = template.description?.trim();
-  return desc ? `${desc} · ${template.id}` : template.id;
+function buildMeta(table: TargetTableSummary): string {
+  const desc = table.tableComment?.trim();
+  return desc ? `${desc} · ${table.tableName}` : table.tableName;
 }
 
 export default function SchemaSelectorModal({
   isOpen,
   onClose,
-  templates,
-  currentTemplateId,
+  currentTableName,
   onSelect,
 }: SchemaSelectorModalProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [tables, setTables] = useState<TargetTableSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedId(currentTemplateId ?? null);
+      setSelectedName(currentTableName ?? null);
       setSearchTerm("");
+      setLoadError(null);
+      setLoading(true);
+      listTargetTables()
+        .then((data) => setTables(data ?? []))
+        .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setLoading(false));
     }
-  }, [isOpen, currentTemplateId]);
+  }, [isOpen, currentTableName]);
 
   const filtered = useMemo(() => {
-    if (!searchTerm.trim()) return templates;
+    if (!searchTerm.trim()) return tables;
     const kw = searchTerm.trim().toLowerCase();
-    return templates.filter(
+    return tables.filter(
       (t) =>
-        t.name.toLowerCase().includes(kw) ||
-        (t.description ?? "").toLowerCase().includes(kw) ||
-        t.id.toLowerCase().includes(kw),
+        (t.tableName ?? "").toLowerCase().includes(kw) ||
+        (t.tableComment ?? "").toLowerCase().includes(kw),
     );
-  }, [searchTerm, templates]);
+  }, [searchTerm, tables]);
 
   if (!isOpen) return null;
 
-  const selectedTemplate = templates.find((t) => t.id === selectedId);
+  const selectedTable = tables.find((t) => t.tableName === selectedName);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -76,16 +83,20 @@ export default function SchemaSelectorModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 max-h-[50vh]">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
+          ) : loadError ? (
+            <div className="p-8 text-center text-destructive text-sm">{loadError}</div>
+          ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground text-sm">无匹配的 Schema</div>
           ) : (
             <div className="space-y-1">
               {filtered.map((t) => {
-                const isSelected = selectedId === t.id;
+                const isSelected = selectedName === t.tableName;
                 return (
                   <div
-                    key={t.id}
-                    onClick={() => setSelectedId(t.id)}
+                    key={t.tableName}
+                    onClick={() => setSelectedName(t.tableName)}
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors border",
                       isSelected
@@ -102,13 +113,8 @@ export default function SchemaSelectorModal({
                       {isSelected && <Check className="h-3.5 w-3.5" />}
                     </div>
                     <div className="flex-1">
-                      <div className="font-medium text-sm text-foreground">{t.name}</div>
+                      <div className="font-medium text-sm text-foreground">{t.tableName}</div>
                       <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{buildMeta(t)}</div>
-                      <div className="text-[10px] text-muted-foreground mt-1.5 flex gap-2">
-                        <span>{t.schema.columns.length} 字段</span>
-                        <span>·</span>
-                        <span>{t.status}</span>
-                      </div>
                     </div>
                   </div>
                 );
@@ -126,15 +132,15 @@ export default function SchemaSelectorModal({
           </button>
           <button
             onClick={() => {
-              if (selectedTemplate) {
-                onSelect(selectedTemplate);
+              if (selectedTable) {
+                onSelect(selectedTable);
                 onClose();
               }
             }}
-            disabled={!selectedTemplate}
+            disabled={!selectedTable}
             className={cn(
               "px-6 py-2 text-sm font-medium rounded-md shadow-sm",
-              selectedTemplate
+              selectedTable
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
                 : "bg-muted text-muted-foreground cursor-not-allowed",
             )}
