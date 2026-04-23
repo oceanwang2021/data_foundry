@@ -55,7 +55,10 @@ import {
   pickDefaultBusinessYear,
   snapToPeriodEnd,
 } from "@/lib/business-date";
-import { generateWideTablePreviewRecords } from "@/lib/wide-table-preview";
+import {
+  generateWideTablePreviewRecords,
+  generateWideTablePreviewRecordsFromDimensionRows,
+} from "@/lib/wide-table-preview";
 import {
   resolveRecordPlanVersion,
   resolveCurrentPlanVersion,
@@ -1734,7 +1737,7 @@ function WideTableSchemaSection({
           return wideTable;
         }
 
-        const nextColumns = wideTable.schema.columns.map((col) => {
+        let nextColumns = wideTable.schema.columns.map((col) => {
           if (col.id !== columnId) {
             return col;
           }
@@ -1752,6 +1755,12 @@ function WideTableSchemaSection({
             unit: nextCategory === "indicator" ? patch.unit ?? col.unit : undefined,
           };
         });
+
+        if (patch.isBusinessDate === true) {
+          nextColumns = nextColumns.map((col) => (
+            col.id === columnId ? col : { ...col, isBusinessDate: false }
+          ));
+        }
 
         let nextIndicatorGroups = wideTable.indicatorGroups;
         let nextDimensionRanges = wideTable.dimensionRanges;
@@ -2107,25 +2116,48 @@ function WideTableSchemaSection({
                           <td className="px-2 py-1.5">
                             {isSchemaMetadataEditable ? (
                               <select
-                                value={normalizeCategoryForUI(col.category)}
-                                onChange={(event) =>
+                                value={col.isBusinessDate ? "time" : normalizeCategoryForUI(col.category)}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  if (nextValue === "time") {
+                                    handleColumnMetadataChange(col.id, {
+                                      category: "dimension",
+                                      isBusinessDate: true,
+                                      type: "DATE",
+                                    });
+                                    return;
+                                  }
+                                  if (nextValue === "dimension") {
+                                    handleColumnMetadataChange(col.id, {
+                                      category: "dimension",
+                                      isBusinessDate: false,
+                                    });
+                                    return;
+                                  }
                                   handleColumnMetadataChange(col.id, {
-                                    category: event.target.value as ColumnDefinition["category"],
-                                  })
-                                }
+                                    category: nextValue as ColumnDefinition["category"],
+                                    isBusinessDate: false,
+                                  });
+                                }}
                                 className={cn(
                                   "w-full rounded-md border px-2 py-1 text-xs",
-                                  categorySelectClass(normalizeCategoryForUI(col.category)),
+                                  categorySelectClass(col.isBusinessDate ? "time" : normalizeCategoryForUI(col.category)),
                                 )}
                               >
                                 <option value="id">ID列</option>
+                                <option value="time">时间列</option>
                                 <option value="system">系统列</option>
                                 <option value="dimension">维度列</option>
                                 <option value="indicator">指标列</option>
                               </select>
                             ) : (
-                              <span className={cn("px-1.5 py-0.5 rounded text-xs", categoryBadgeClass(normalizeCategoryForUI(col.category)))}>
-                                {categoryLabel(normalizeCategoryForUI(col.category))}
+                              <span
+                                className={cn(
+                                  "px-1.5 py-0.5 rounded text-xs",
+                                  categoryBadgeClass(col.isBusinessDate ? "time" : normalizeCategoryForUI(col.category)),
+                                )}
+                              >
+                                {categoryLabel(col.isBusinessDate ? "time" : normalizeCategoryForUI(col.category))}
                               </span>
                             )}
                           </td>
@@ -2288,10 +2320,10 @@ function ScopeAndGroupSection({
   const [selectedPreviewBusinessDate, setSelectedPreviewBusinessDate] = useState("");
   const [selectedPreviewYear, setSelectedPreviewYear] = useState("");
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-  const [excelImportTargetDimension, setExcelImportTargetDimension] = useState<string | null>(null);
-  const [sqlImportTargetDimension, setSqlImportTargetDimension] = useState<string | null>(null);
-  const [sqlImportText, setSqlImportText] = useState("");
-  const excelImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [dimensionExcelImports, setDimensionExcelImports] = useState<
+    Record<string, { fileName: string; rows: Array<Record<string, string>> }>
+  >({});
+  const dimensionExcelImportInputRef = useRef<HTMLInputElement | null>(null);
   const selectedWideTableAllRecords = useMemo(
     () => wideTableRecords.filter((record) => record.wideTableId === selectedWtId),
     [wideTableRecords, selectedWtId],
@@ -2310,6 +2342,7 @@ function ScopeAndGroupSection({
   const previewColumns = selectedWt?.schema.columns.filter((col) => col.category !== "system") ?? [];
   const previewBusinessDateFieldName = businessDateColumn?.name ?? "";
   const isPreviewMonthlyFrequency = Boolean(usesBusinessDateAxis && selectedWt?.businessDateRange.frequency === "monthly");
+  const activeDimensionExcelImport = selectedWtId ? dimensionExcelImports[selectedWtId] : undefined;
   const previewBusinessDates = useMemo(
     () => !usesBusinessDateAxis
       ? []
@@ -2592,49 +2625,169 @@ function ScopeAndGroupSection({
     }
   };
 
-  const handleExcelImport = async (dimensionName: string, file: File) => {
+  const normalizeExcelHeaderKey = (value: string) => value.trim().toLowerCase();
+
+  const parseDelimitedTable = (text: string, delimiter: string): string[][] => {
+    const rows: string[][] = [];
+    let currentRow: string[] = [];
+    let currentCell = "";
+    let inQuotes = false;
+
+    const pushCell = () => {
+      currentRow.push(currentCell);
+      currentCell = "";
+    };
+
+    const pushRow = () => {
+      rows.push(currentRow);
+      currentRow = [];
+    };
+
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (char === "\"") {
+        if (inQuotes && text[index + 1] === "\"") {
+          currentCell += "\"";
+          index += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+
+      if (!inQuotes && char === delimiter) {
+        pushCell();
+        continue;
+      }
+
+      if (!inQuotes && (char === "\n" || char === "\r")) {
+        pushCell();
+        pushRow();
+        if (char === "\r" && text[index + 1] === "\n") {
+          index += 1;
+        }
+        continue;
+      }
+
+      currentCell += char;
+    }
+
+    pushCell();
+    if (currentRow.length > 0) {
+      pushRow();
+    }
+
+    return rows.filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""));
+  };
+
+  const detectDelimiter = (headerLine: string): string => {
+    const commaCount = (headerLine.match(/,/g) ?? []).length;
+    const tabCount = (headerLine.match(/\t/g) ?? []).length;
+    if (tabCount > commaCount) return "\t";
+    return ",";
+  };
+
+  const handleDimensionExcelImport = async (file: File) => {
+    if (!selectedWt) {
+      setRangeMessage("当前需求尚未关联数据表，无法导入维度取值。");
+      return;
+    }
+
     const fileName = file.name.toLowerCase();
     if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
       setRangeMessage("暂不支持直接解析 .xlsx/.xls，请先在 Excel 中另存为 CSV 后导入。");
       return;
     }
-    const text = await file.text();
-    const values = Array.from(
-      new Set(
-        text
-          .split(/[\r\n,\t]+/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-      ),
-    );
-    if (values.length === 0) {
-      setRangeMessage("导入内容为空，请检查文件。");
-      return;
-    }
-    appendDimensionValues(dimensionName, values);
-    setRangeMessage(`已从文件导入 ${values.length} 个维度取值。`);
-  };
 
-  const handleSqlImportConfirm = () => {
-    if (!sqlImportTargetDimension) {
+    const text = await file.text();
+    const normalizedText = text.replace(/^\uFEFF/, "");
+    const firstLine = normalizedText.split(/\r?\n/, 1)[0] ?? "";
+    const delimiter = detectDelimiter(firstLine);
+    const table = parseDelimitedTable(normalizedText, delimiter);
+
+    if (table.length < 2) {
+      setRangeMessage("导入内容为空或缺少数据行，请检查文件。");
       return;
     }
-    const quotedValues = Array.from(sqlImportText.matchAll(/'([^']+)'|"([^"]+)"/g))
-      .map((match) => (match[1] || match[2] || "").trim())
-      .filter(Boolean);
-    const fallbackValues = sqlImportText
-      .split(/[\s,\r\n;()]+/)
-      .map((item) => item.trim())
-      .filter((item) => item && !/^(select|from|where|and|or|in|like|limit|order|by)$/i.test(item));
-    const values = Array.from(new Set(quotedValues.length > 0 ? quotedValues : fallbackValues));
-    if (values.length === 0) {
-      setRangeMessage("未识别到可导入的维度取值，请在 SQL 中使用 IN (...) 或引号值。");
+
+    const headers = (table[0] ?? []).map((h) => String(h ?? "").trim());
+    const headerIndex = new Map<string, number>();
+    headers.forEach((header, idx) => {
+      const key = normalizeExcelHeaderKey(header);
+      if (key && !headerIndex.has(key)) {
+        headerIndex.set(key, idx);
+      }
+    });
+
+    const requiredDimensionNames = dimensionColumns.map((col) => col.name);
+    if (requiredDimensionNames.length === 0) {
+      setRangeMessage("当前宽表没有可配置的普通维度列，无需导入。");
       return;
     }
-    appendDimensionValues(sqlImportTargetDimension, values);
-    setRangeMessage(`已从 SQL 中导入 ${values.length} 个维度取值。`);
-    setSqlImportTargetDimension(null);
-    setSqlImportText("");
+    const missingHeaders = requiredDimensionNames.filter((name) => !headerIndex.has(normalizeExcelHeaderKey(name)));
+    if (missingHeaders.length > 0) {
+      setRangeMessage(`导入失败：Excel 缺少维度列（列名需与维度字段名一致）：${missingHeaders.join("、")}`);
+      return;
+    }
+
+    const businessDateFieldName = businessDateColumn?.name;
+    const businessDateIndex = businessDateFieldName
+      ? headerIndex.get(normalizeExcelHeaderKey(businessDateFieldName))
+      : undefined;
+
+    const seenKeys = new Set<string>();
+    const rows: Array<Record<string, string>> = [];
+    let skipped = 0;
+
+    for (const dataRow of table.slice(1)) {
+      const rowObject: Record<string, string> = {};
+      let hasEmptyRequired = false;
+
+      for (const dimName of requiredDimensionNames) {
+        const idx = headerIndex.get(normalizeExcelHeaderKey(dimName)) ?? -1;
+        const value = String(dataRow[idx] ?? "").trim();
+        rowObject[dimName] = value;
+        if (!value) {
+          hasEmptyRequired = true;
+        }
+      }
+
+      if (businessDateFieldName && businessDateIndex != null) {
+        rowObject[businessDateFieldName] = String(dataRow[businessDateIndex] ?? "").trim();
+      }
+
+      if (requiredDimensionNames.every((name) => !rowObject[name])) {
+        continue;
+      }
+
+      if (hasEmptyRequired) {
+        skipped += 1;
+        continue;
+      }
+
+      const key = requiredDimensionNames.map((name) => rowObject[name]).join("|");
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      rows.push(rowObject);
+    }
+
+    if (rows.length === 0) {
+      setRangeMessage("导入内容为空或维度列缺失有效取值，请检查文件。");
+      return;
+    }
+
+    setDimensionExcelImports((prev) => ({
+      ...prev,
+      [selectedWt.id]: { fileName: file.name, rows },
+    }));
+
+    setRangeMessage(
+      `已导入 Excel（${file.name}），识别到 ${rows.length} 行维度组合。` +
+        (skipped > 0 ? `（已跳过 ${skipped} 行不完整数据）` : "") +
+        " 点击预览数据查看。",
+    );
   };
 
   const handleOpenPreview = () => {
@@ -2642,19 +2795,26 @@ function ScopeAndGroupSection({
       return;
     }
 
-    const missingDimensions = dimensionColumns
-      .filter((column) => {
-        const values = selectedWt.dimensionRanges.find((range) => range.dimensionName === column.name)?.values ?? [];
-        return values.length === 0;
-      })
-      .map((column) => column.chineseName || column.name);
+    const excelRows = activeDimensionExcelImport?.rows ?? [];
+    const useExcelRows = excelRows.length > 0;
 
-    if (missingDimensions.length > 0) {
-      setRangeMessage(`请先为以下维度配置取值：${missingDimensions.join("、")}`);
-      return;
+    if (!useExcelRows) {
+      const missingDimensions = dimensionColumns
+        .filter((column) => {
+          const values = selectedWt.dimensionRanges.find((range) => range.dimensionName === column.name)?.values ?? [];
+          return values.length === 0;
+        })
+        .map((column) => column.chineseName || column.name);
+
+      if (missingDimensions.length > 0) {
+        setRangeMessage(`请先为以下维度配置取值：${missingDimensions.join("、")}`);
+        return;
+      }
     }
 
-    const { records, totalCount } = generateWideTablePreviewRecords(selectedWt, selectedWideTableRecords, wideTableRecords);
+    const { records, totalCount } = useExcelRows
+      ? generateWideTablePreviewRecordsFromDimensionRows(selectedWt, excelRows, selectedWideTableRecords, wideTableRecords)
+      : generateWideTablePreviewRecords(selectedWt, selectedWideTableRecords, wideTableRecords);
     if (totalCount === 0) {
       setRangeMessage(
         usesBusinessDateAxis
@@ -2888,12 +3048,47 @@ function ScopeAndGroupSection({
 
               {/* 维度范围 */}
               <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
-                <h4 className="text-sm font-semibold">维度取值</h4>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-semibold">维度取值</h4>
+                  {isRangeEditable && isCEditable && dimensionColumns.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => dimensionExcelImportInputRef.current?.click()}
+                      className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                    >
+                      导入Excel
+                    </button>
+                  ) : null}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {requirement.schemaLocked
                     ? "Schema 已锁定。维度取值的调整会触发计划重建，并以新版本运行。"
                     : "这里只管理非业务日期维度。每个维度都要明确可枚举的取值。"}
                 </p>
+                {activeDimensionExcelImport ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
+                    <div className="text-muted-foreground">
+                      已导入：{activeDimensionExcelImport.fileName}（{activeDimensionExcelImport.rows.length} 行）
+                    </div>
+                    {isRangeEditable && isCEditable ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!selectedWt) return;
+                          setDimensionExcelImports((prev) => {
+                            const next = { ...prev };
+                            delete next[selectedWt.id];
+                            return next;
+                          });
+                          setRangeMessage("已清除 Excel 导入内容。");
+                        }}
+                        className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        清除
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {dimensionColumns.length === 0 ? (
                   <div className="text-xs text-muted-foreground">当前宽表没有可配置的普通维度列。</div>
                 ) : (
@@ -2932,55 +3127,31 @@ function ScopeAndGroupSection({
                             ) : null}
                           </div>
                           {isRangeEditable && isCEditable ? (
-                            <div className="space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setExcelImportTargetDimension(dimensionColumn.name);
-                                    excelImportInputRef.current?.click();
-                                  }}
-                                  className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
-                                >
-                                  导入Excel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSqlImportTargetDimension(dimensionColumn.name);
-                                    setSqlImportText("");
-                                  }}
-                                  className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
-                                >
-                                  导入SQL
-                                </button>
-                              </div>
-                              <div className="flex gap-2">
-                                <input
-                                  value={pendingDimensionValues[dimensionColumn.name] ?? ""}
-                                  onChange={(event) =>
-                                    setPendingDimensionValues((prev) => ({
-                                      ...prev,
-                                      [dimensionColumn.name]: event.target.value,
-                                    }))
+                            <div className="flex gap-2">
+                              <input
+                                value={pendingDimensionValues[dimensionColumn.name] ?? ""}
+                                onChange={(event) =>
+                                  setPendingDimensionValues((prev) => ({
+                                    ...prev,
+                                    [dimensionColumn.name]: event.target.value,
+                                  }))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    handleAddDimensionValue(dimensionColumn.name);
                                   }
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter") {
-                                      event.preventDefault();
-                                      handleAddDimensionValue(dimensionColumn.name);
-                                    }
-                                  }}
-                                  className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-                                  placeholder={`新增 ${dimensionColumn.name} 枚举值`}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddDimensionValue(dimensionColumn.name)}
-                                  className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
-                                >
-                                  添加
-                                </button>
-                              </div>
+                                }}
+                                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                                placeholder={`新增 ${dimensionColumn.name} 枚举值`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddDimensionValue(dimensionColumn.name)}
+                                className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
+                              >
+                                添加
+                              </button>
                             </div>
                           ) : null}
                         </div>
@@ -2990,19 +3161,15 @@ function ScopeAndGroupSection({
                 )}
               </div>
               <input
-                ref={excelImportInputRef}
+                ref={dimensionExcelImportInputRef}
                 type="file"
                 accept=".csv,.txt,.tsv,.xlsx,.xls"
                 className="hidden"
                 onChange={async (event) => {
                   const file = event.target.files?.[0];
-                  const dimensionName = excelImportTargetDimension;
                   event.currentTarget.value = "";
-                  if (!file || !dimensionName) {
-                    return;
-                  }
-                  await handleExcelImport(dimensionName, file);
-                  setExcelImportTargetDimension(null);
+                  if (!file) return;
+                  await handleDimensionExcelImport(file);
                 }}
               />
 
@@ -3134,39 +3301,7 @@ function ScopeAndGroupSection({
                     </div>
                   </div>
                 ) : null}
-                {sqlImportTargetDimension ? (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-                    <div className="w-full max-w-2xl rounded-xl border bg-card p-4 shadow-lg space-y-3">
-                      <div className="text-sm font-semibold">导入 SQL - {sqlImportTargetDimension}</div>
-                      <p className="text-xs text-muted-foreground">支持粘贴 SQL，并从引号值或 IN 列表中提取维度取值。</p>
-                      <textarea
-                        value={sqlImportText}
-                        onChange={(event) => setSqlImportText(event.target.value)}
-                        className="min-h-40 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                        placeholder="例如：SELECT * FROM t WHERE company IN ('Waymo','Pony.ai')"
-                      />
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSqlImportTargetDimension(null);
-                            setSqlImportText("");
-                          }}
-                          className="rounded-md border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          取消
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSqlImportConfirm}
-                          className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90"
-                        >
-                          导入
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+                {null}
               </div>
             </div>
             )
@@ -3503,9 +3638,12 @@ function normalizeCategoryForUI(category: ColumnDefinition["category"]): Exclude
   return (category === "attribute" ? "system" : category) as Exclude<ColumnDefinition["category"], "attribute">;
 }
 
-function categoryBadgeClass(category: ColumnDefinition["category"]): string {
+function categoryBadgeClass(category: ColumnDefinition["category"] | "time"): string {
   if (category === "id") {
     return "bg-purple-100 text-purple-700";
+  }
+  if (category === "time") {
+    return "bg-sky-100 text-sky-700";
   }
   if (category === "dimension") {
     return "bg-blue-100 text-blue-700";
@@ -3519,7 +3657,10 @@ function categoryBadgeClass(category: ColumnDefinition["category"]): string {
   return "bg-gray-100 text-gray-600";
 }
 
-function categorySelectClass(category: ColumnDefinition["category"]): string {
+function categorySelectClass(category: ColumnDefinition["category"] | "time"): string {
+  if (category === "time") {
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  }
   if (category === "dimension") {
     return "border-blue-200 bg-blue-50 text-blue-700";
   }
@@ -3559,9 +3700,12 @@ const GROUP_TONE_CLASSES = [
   "border-cyan-200 bg-cyan-50 text-cyan-700",
 ];
 
-function categoryLabel(category: ColumnDefinition["category"]): string {
+function categoryLabel(category: ColumnDefinition["category"] | "time"): string {
   if (category === "id") {
     return "ID列";
+  }
+  if (category === "time") {
+    return "时间列";
   }
   if (category === "dimension") {
     return "维度列";

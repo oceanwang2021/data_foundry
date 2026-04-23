@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { generateWideTablePreviewRecords } from "@/lib/wide-table-preview";
+import {
+  generateWideTablePreviewRecords,
+  generateWideTablePreviewRecordsFromDimensionRows,
+} from "@/lib/wide-table-preview";
 import type { WideTable, WideTableRecord } from "@/lib/types";
 
 function buildWideTable(): WideTable {
@@ -112,6 +115,45 @@ describe("generateWideTablePreviewRecords", () => {
       { rowId: 2, businessDate: "2025-12-31", company: "Pony.ai" },
       { rowId: 3, businessDate: "2026-01-31", company: "Waymo" },
       { rowId: 4, businessDate: "2026-01-31", company: "Pony.ai" },
+    ]);
+  });
+});
+
+describe("generateWideTablePreviewRecordsFromDimensionRows", () => {
+  it("generates preview rows based on provided dimension rows (no cartesian product)", () => {
+    const wideTable = buildWideTable();
+    const existingRecords = [
+      buildRecord(1, "2025-12-31", "Waymo"),
+      buildRecord(2, "2025-12-31", "Pony.ai"),
+      buildRecord(3, "2026-01-31", "Waymo"),
+    ];
+
+    const dimensionRows = [
+      { company: "Waymo", city: "旧金山", biz_date: "2025-12-31" },
+      { company: "Pony.ai", city: "旧金山", biz_date: "2025-12-31" },
+      { company: "Waymo", city: "旧金山", biz_date: "2026-01-31" },
+    ];
+
+    const { records, totalCount } = generateWideTablePreviewRecordsFromDimensionRows(
+      wideTable,
+      dimensionRows,
+      existingRecords,
+      existingRecords,
+    );
+
+    expect(totalCount).toBe(3);
+    expect(records).toHaveLength(3);
+    expect(
+      records.map((record) => ({
+        rowId: Number(record.ROW_ID ?? record.id),
+        businessDate: String(record.biz_date),
+        company: String(record.company),
+        city: String(record.city),
+      })),
+    ).toEqual([
+      { rowId: 1, businessDate: "2025-12-31", company: "Waymo", city: "旧金山" },
+      { rowId: 2, businessDate: "2025-12-31", company: "Pony.ai", city: "旧金山" },
+      { rowId: 3, businessDate: "2026-01-31", company: "Waymo", city: "旧金山" },
     ]);
   });
 });

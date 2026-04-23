@@ -84,6 +84,79 @@ export function generateWideTablePreviewRecords(
   return { records, totalCount };
 }
 
+export function generateWideTablePreviewRecordsFromDimensionRows(
+  wideTable: WideTable,
+  dimensionRows: Array<Record<string, string>>,
+  existingRecords: WideTableRecord[] = [],
+  allExistingRecords: WideTableRecord[] = existingRecords,
+): { records: WideTableRecord[]; totalCount: number } {
+  const usesBusinessDateAxis = hasWideTableBusinessDateDimension(wideTable);
+  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "biz_date";
+  const dimensionColumns = wideTable.schema.columns.filter(
+    (column) => column.category === "dimension" && !column.isBusinessDate,
+  );
+  const attributeColumns = wideTable.schema.columns.filter((column) => column.category === "attribute");
+  const attributeBindings = buildAttributeBindings(wideTable, existingRecords, attributeColumns);
+
+  const totalCount = dimensionRows.length;
+  if (totalCount === 0) {
+    return { records: [], totalCount: 0 };
+  }
+
+  const fallbackBusinessDate = usesBusinessDateAxis
+    ? (buildBusinessDateSlots(wideTable.businessDateRange).find((d) => d != null) ?? null)
+    : null;
+
+  const records: WideTableRecord[] = [];
+  const existingRowIdsByBinding = buildExistingRowIdsByBinding(
+    wideTable,
+    existingRecords,
+    dimensionColumns,
+    usesBusinessDateAxis,
+  );
+  let nextRowId = Math.max(
+    0,
+    ...allExistingRecords
+      .filter((record) => record.wideTableId === wideTable.id)
+      .map((record) => Number(record.ROW_ID ?? record.id) || 0),
+  ) + 1;
+
+  for (const row of dimensionRows) {
+    const dimensionValues = Object.fromEntries(
+      dimensionColumns.map((column) => [column.name, String(row[column.name] ?? "").trim()]),
+    );
+    const businessDate = usesBusinessDateAxis
+      ? String(row[businessDateFieldName] ?? row.BIZ_DATE ?? "").trim() || (fallbackBusinessDate ?? "")
+      : null;
+
+    const previewKey = buildPreviewRecordKey(wideTable, businessDate, dimensionValues);
+    const rowId = existingRowIdsByBinding.get(previewKey) ?? nextRowId;
+    const record: WideTableRecord = {
+      id: rowId,
+      wideTableId: wideTable.id,
+    };
+    const bindingKey = getWideTableDimensionBindingKey(wideTable, dimensionValues);
+    const bindingAttributes = attributeBindings.get(bindingKey);
+
+    for (const column of wideTable.schema.columns) {
+      record[column.name] = buildColumnPreviewValue(
+        column,
+        rowId,
+        usesBusinessDateAxis ? businessDate : null,
+        dimensionValues,
+        bindingAttributes?.[column.name],
+      );
+    }
+
+    records.push(record);
+    if (!existingRowIdsByBinding.has(previewKey)) {
+      nextRowId += 1;
+    }
+  }
+
+  return { records, totalCount };
+}
+
 function buildExistingRowIdsByBinding(
   wideTable: WideTable,
   existingRecords: WideTableRecord[],
