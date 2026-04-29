@@ -7,8 +7,10 @@ public class WideTableReadDto {
   private String id;
   private String title;
   private String description;
+  private String tableName;
   private Object schema;
   private Object scope;
+  private WideTableScopeImportReadDto scopeImport;
   private Object indicatorGroups;
   private Object scheduleRules;
   private String semanticTimeAxis;
@@ -43,6 +45,14 @@ public class WideTableReadDto {
     this.description = description;
   }
 
+  public String getTableName() {
+    return tableName;
+  }
+
+  public void setTableName(String tableName) {
+    this.tableName = tableName;
+  }
+
   public Object getSchema() {
     return schema;
   }
@@ -57,6 +67,14 @@ public class WideTableReadDto {
 
   public void setScope(Object scope) {
     this.scope = scope;
+  }
+
+  public WideTableScopeImportReadDto getScopeImport() {
+    return scopeImport;
+  }
+
+  public void setScopeImport(WideTableScopeImportReadDto scopeImport) {
+    this.scopeImport = scopeImport;
   }
 
   public Object getIndicatorGroups() {
@@ -131,4 +149,3 @@ public class WideTableReadDto {
     this.updatedAt = updatedAt;
   }
 }
-

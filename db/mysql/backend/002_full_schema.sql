@@ -11,6 +11,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS wide_table_row_snapshots;
 DROP TABLE IF EXISTS wide_table_rows;
+DROP TABLE IF EXISTS wide_table_scope_imports;
 DROP TABLE IF EXISTS retrieval_tasks;
 DROP TABLE IF EXISTS execution_records;
 DROP TABLE IF EXISTS fetch_tasks;
@@ -89,6 +90,24 @@ CREATE TABLE wide_tables (
   updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_wide_tables_requirement_id (requirement_id),
   INDEX idx_wide_tables_sort_order (sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE wide_table_scope_imports (
+  wide_table_id           VARCHAR(64)   NOT NULL PRIMARY KEY,
+  requirement_id          VARCHAR(64)   NOT NULL,
+  import_mode             VARCHAR(64)   NOT NULL,
+  file_name               VARCHAR(255)  NOT NULL,
+  file_type               VARCHAR(64)   NOT NULL,
+  content_hash            VARCHAR(64)   NULL,
+  row_count               INT           NOT NULL DEFAULT 0,
+  header_json             JSON          NULL,
+  file_content            MEDIUMTEXT    NULL,
+  created_by              VARCHAR(255)  NULL,
+  created_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_wide_table_scope_imports_wide_table
+    FOREIGN KEY (wide_table_id) REFERENCES wide_tables(id) ON DELETE CASCADE,
+  INDEX idx_wide_table_scope_imports_requirement_id (requirement_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE wide_table_rows (

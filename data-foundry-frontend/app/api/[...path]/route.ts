@@ -6,19 +6,19 @@ export const dynamic = "force-dynamic";
 
 function filterProxyHeaders(source: Headers): Headers {
   const headers = new Headers();
-  for (const [key, value] of source.entries()) {
+  source.forEach((value, key) => {
     const lower = key.toLowerCase();
     // Remove hop-by-hop and browser-specific headers that break undici fetch proxying.
-    if (lower === "host") continue;
-    if (lower === "connection") continue;
-    if (lower === "content-length") continue;
-    if (lower === "accept-encoding") continue;
-    if (lower === "keep-alive") continue;
-    if (lower === "proxy-connection") continue;
-    if (lower === "transfer-encoding") continue;
-    if (lower === "upgrade") continue;
+    if (lower === "host") return;
+    if (lower === "connection") return;
+    if (lower === "content-length") return;
+    if (lower === "accept-encoding") return;
+    if (lower === "keep-alive") return;
+    if (lower === "proxy-connection") return;
+    if (lower === "transfer-encoding") return;
+    if (lower === "upgrade") return;
     headers.set(key, value);
-  }
+  });
   return headers;
 }
 

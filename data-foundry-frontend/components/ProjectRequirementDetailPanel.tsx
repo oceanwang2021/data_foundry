@@ -113,6 +113,7 @@ export default function ProjectRequirementDetailPanel({
       assignee: nextRequirement.assignee,
       businessGoal: nextRequirement.businessGoal,
       backgroundKnowledge: nextRequirement.backgroundKnowledge,
+      collectionPolicy: nextRequirement.collectionPolicy,
       dataUpdateEnabled: nextRequirement.dataUpdateEnabled,
       dataUpdateMode: nextRequirement.dataUpdateMode,
       processingRuleDrafts: nextRequirement.processingRuleDrafts,

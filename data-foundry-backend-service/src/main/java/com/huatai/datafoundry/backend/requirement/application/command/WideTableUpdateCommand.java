@@ -5,6 +5,7 @@ import java.util.Map;
 public class WideTableUpdateCommand {
   private String title;
   private String description;
+  private String tableName;
   private Object schema;
   private Object scope;
   private Object indicatorGroups;
@@ -26,6 +27,14 @@ public class WideTableUpdateCommand {
 
   public void setDescription(String description) {
     this.description = description;
+  }
+
+  public String getTableName() {
+    return tableName;
+  }
+
+  public void setTableName(String tableName) {
+    this.tableName = tableName;
   }
 
   public Object getSchema() {
@@ -87,4 +96,3 @@ public class WideTableUpdateCommand {
     return null;
   }
 }
-

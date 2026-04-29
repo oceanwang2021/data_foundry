@@ -48,6 +48,7 @@ public interface WideTableMapper {
       "<set>",
       "  <if test='title != null'>title = #{title},</if>",
       "  <if test='description != null'>description = #{description},</if>",
+      "  <if test='tableName != null'>table_name = #{tableName},</if>",
       "  <if test='schemaVersion != null'>schema_version = #{schemaVersion},</if>",
       "  <if test='schemaJson != null'>schema_json = #{schemaJson},</if>",
       "  <if test='scopeJson != null'>scope_json = #{scopeJson},</if>",

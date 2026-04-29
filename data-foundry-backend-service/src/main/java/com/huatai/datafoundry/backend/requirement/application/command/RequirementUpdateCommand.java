@@ -11,6 +11,7 @@ public class RequirementUpdateCommand {
   private Boolean dataUpdateEnabled;
   private String dataUpdateMode;
   private Object processingRuleDrafts;
+  private Object collectionPolicy;
 
   public boolean hasDefinitionEdits() {
     return title != null
@@ -21,7 +22,8 @@ public class RequirementUpdateCommand {
         || deliveryScope != null
         || dataUpdateEnabled != null
         || dataUpdateMode != null
-        || processingRuleDrafts != null;
+        || processingRuleDrafts != null
+        || collectionPolicy != null;
   }
 
   public String getTitle() {
@@ -103,5 +105,12 @@ public class RequirementUpdateCommand {
   public void setProcessingRuleDrafts(Object processingRuleDrafts) {
     this.processingRuleDrafts = processingRuleDrafts;
   }
-}
 
+  public Object getCollectionPolicy() {
+    return collectionPolicy;
+  }
+
+  public void setCollectionPolicy(Object collectionPolicy) {
+    this.collectionPolicy = collectionPolicy;
+  }
+}

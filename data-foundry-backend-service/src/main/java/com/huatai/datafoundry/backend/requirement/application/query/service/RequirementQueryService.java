@@ -6,9 +6,12 @@ import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTas
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableScopeImportReadDto;
 import com.huatai.datafoundry.backend.requirement.domain.model.Requirement;
 import com.huatai.datafoundry.backend.requirement.domain.model.WideTable;
 import com.huatai.datafoundry.backend.requirement.domain.repository.RequirementRepository;
+import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper.WideTableScopeImportMapper;
+import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.WideTableScopeImportRecord;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
@@ -24,16 +27,19 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class RequirementQueryService {
   private final RequirementRepository requirementRepository;
+  private final WideTableScopeImportMapper wideTableScopeImportMapper;
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
   private final ObjectMapper objectMapper;
 
   public RequirementQueryService(
       RequirementRepository requirementRepository,
+      WideTableScopeImportMapper wideTableScopeImportMapper,
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       ObjectMapper objectMapper) {
     this.requirementRepository = requirementRepository;
+    this.wideTableScopeImportMapper = wideTableScopeImportMapper;
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.objectMapper = objectMapper;
@@ -204,8 +210,10 @@ public class RequirementQueryService {
     dto.setId(record.getId());
     dto.setTitle(record.getTitle());
     dto.setDescription(record.getDescription());
+    dto.setTableName(record.getTableName());
     dto.setSchema(parseJsonAny(record.getSchemaJson()));
     dto.setScope(parseJsonAny(record.getScopeJson()));
+    dto.setScopeImport(mapScopeImport(wideTableScopeImportMapper.getByWideTableId(record.getId())));
     dto.setIndicatorGroups(parseJsonAny(record.getIndicatorGroupsJson()));
     dto.setScheduleRules(parseJsonAny(record.getScheduleRulesJson()));
     dto.setSemanticTimeAxis(record.getSemanticTimeAxis());
@@ -213,6 +221,21 @@ public class RequirementQueryService {
     dto.setSchemaVersion(record.getSchemaVersion());
     dto.setRecordCount(record.getRecordCount());
     dto.setStatus(record.getStatus());
+    dto.setCreatedAt(record.getCreatedAt());
+    dto.setUpdatedAt(record.getUpdatedAt());
+    return dto;
+  }
+
+  private WideTableScopeImportReadDto mapScopeImport(WideTableScopeImportRecord record) {
+    if (record == null) {
+      return null;
+    }
+    WideTableScopeImportReadDto dto = new WideTableScopeImportReadDto();
+    dto.setFileName(record.getFileName());
+    dto.setFileType(record.getFileType());
+    dto.setRowCount(record.getRowCount());
+    dto.setImportMode(record.getImportMode());
+    dto.setContentHash(record.getContentHash());
     dto.setCreatedAt(record.getCreatedAt());
     dto.setUpdatedAt(record.getUpdatedAt());
     return dto;

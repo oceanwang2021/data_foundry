@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { buildApiUrl } from "@/lib/api-base";
 import {
+  downloadWideTableScopeImport,
   fetchRuntimeSettings,
   listTargetTableColumns,
+  persistWideTablePreview,
   updateRequirementWideTable,
 } from "@/lib/api-client";
 import KnowledgeBaseSelectorModal from "@/components/KnowledgeBaseSelectorModal";
@@ -62,6 +64,7 @@ import {
 import {
   resolveRecordPlanVersion,
   resolveCurrentPlanVersion,
+  reconcileTaskPlanChange,
 } from "@/lib/task-plan-reconciliation";
 import {
   type StepStatusMap,
@@ -98,6 +101,15 @@ type Props = {
 };
 
 const UNLINKED_DATA_TABLE_NAME = "待关联数据表";
+const MAX_PERSISTED_DIMENSION_ROWS = 5000;
+
+type DimensionExcelImportState = {
+  fileName: string;
+  fileType: "text/csv";
+  fileContent: string;
+  headers: string[];
+  rows: Array<Record<string, string>>;
+};
 
 type SchemaTemplateOption = {
   key: string;
@@ -221,6 +233,10 @@ export default function RequirementDefinitionForm({
   const [submitMessage, setSubmitMessage] = useState("");
   const [isSavingDefinition, setIsSavingDefinition] = useState(false);
   const [isSubmittingDefinition, setIsSubmittingDefinition] = useState(false);
+  const [dimensionExcelImports, setDimensionExcelImports] = useState<
+    Record<string, DimensionExcelImportState>
+  >({});
+  const [scopePreviewDirtyByWideTableId, setScopePreviewDirtyByWideTableId] = useState<Record<string, boolean>>({});
   const usesBusinessDateAxis = Boolean(selectedWt && hasWideTableBusinessDateDimension(selectedWt));
   const isOpenEndedRange = Boolean(selectedWt && usesBusinessDateAxis && isOpenEndedBusinessDateRange(selectedWt.businessDateRange));
   const canSubmit = !requirement.schemaLocked && (requirement.status === "draft" || requirement.status === "aligning");
@@ -229,7 +245,7 @@ export default function RequirementDefinitionForm({
       return "请先关联 Schema 并完成宽表配置。";
     }
     if (stepStatuses.A !== "completed") {
-      return "请先在【表结构定义】里关联 Schema，补齐字段定义后再提交。";
+      return "请先在【表结构定义】里关联 Schema，并补齐字段定义后再提交。";
     }
     if (stepStatuses.C !== "completed") {
       return "请先在【数据范围】里补齐时间范围与维度取值后再提交。";
@@ -264,9 +280,82 @@ export default function RequirementDefinitionForm({
     if (!selectedWt) {
       throw new Error("尚未关联数据表，无法保存。");
     }
+
+    const persistWideTableDimensionRows = async (wideTable: WideTable) => {
+      const allRecordsForTable = wideTableRecords.filter((record) => record.wideTableId === wideTable.id);
+      const currentPlanVersion = resolveCurrentPlanVersion(wideTable, allRecordsForTable, taskGroups ?? []);
+      const currentPlanRecords = allRecordsForTable.filter(
+        (record) => resolveRecordPlanVersion(record, currentPlanVersion) === currentPlanVersion,
+      );
+
+      const excelImport = dimensionExcelImports[wideTable.id];
+      const excelRows = excelImport?.rows ?? [];
+      const hasUnsavedScopePreviewChanges = scopePreviewDirtyByWideTableId[wideTable.id] ?? false;
+      const useExcelRows = excelRows.length > 0;
+      const shouldReusePersistedDimensionRows = Boolean(
+        !useExcelRows
+        && !hasUnsavedScopePreviewChanges
+        && wideTable.scopeImport?.importMode === "dimension_rows_csv"
+        && currentPlanRecords.length > 0,
+      );
+      const preview = shouldReusePersistedDimensionRows
+        ? { records: currentPlanRecords, totalCount: currentPlanRecords.length }
+        : useExcelRows
+          ? generateWideTablePreviewRecordsFromDimensionRows(wideTable, excelRows, currentPlanRecords, wideTableRecords)
+          : generateWideTablePreviewRecords(wideTable, currentPlanRecords, wideTableRecords);
+
+      if (preview.totalCount > MAX_PERSISTED_DIMENSION_ROWS) {
+        throw new Error(`维度组合行数过大（${preview.totalCount}），请缩小业务日期范围或维度枚举值后再保存。`);
+      }
+
+      const reconcile = reconcileTaskPlanChange({
+        requirement,
+        wideTable,
+        previousRecords: currentPlanRecords,
+        nextRecords: preview.records,
+        taskGroups: taskGroups ?? [],
+        fetchTasks: fetchTasks ?? [],
+      });
+      const nextPlanVersion = reconcile.nextPlanVersion;
+
+      const recordsWithPlanVersion = preview.records.map((record) => ({
+        ...record,
+        _metadata: {
+          ...record._metadata,
+          planVersion: nextPlanVersion,
+        },
+      }));
+
+      await persistWideTablePreview(
+        requirement.id,
+        { ...wideTable, currentPlanVersion: nextPlanVersion },
+        recordsWithPlanVersion,
+        excelImport
+          ? {
+              fileName: excelImport.fileName,
+              fileType: excelImport.fileType,
+              rowCount: excelImport.rows.length,
+              fileContent: excelImport.fileContent,
+              headers: excelImport.headers,
+              rows: excelImport.rows,
+            }
+          : hasUnsavedScopePreviewChanges
+            ? null
+            : undefined,
+      );
+      setScopePreviewDirtyByWideTableId((prev) => ({
+        ...prev,
+        [wideTable.id]: false,
+      }));
+      handleReplaceWideTableRecords(wideTable.id, recordsWithPlanVersion);
+    };
+
     // Persist every wide table (even if only one) so the backend always has a consistent snapshot.
     await Promise.all(
-      wideTables.map((wt) => updateRequirementWideTable(requirement.id, wt)),
+      wideTables.map(async (wt) => {
+        await updateRequirementWideTable(requirement.id, wt);
+        await persistWideTableDimensionRows(wt);
+      }),
     );
   };
 
@@ -638,8 +727,6 @@ export default function RequirementDefinitionForm({
             description="配置范围，预览可选。"
             isActive={activeSection === "scope-generation"}
             onNavigate={handleSectionNavigation("scope-generation")}
-            // Step D (预览) 已改为弹窗辅助能力，不再作为保存/提交的强校验条件；
-            // “数据范围”阶段的完成状态仅依赖 Step C（时间范围 + 维度取值）。
             trailing={<SectionStatusBadge label="数据范围" status={stepStatuses.C} />}
           />
           <StageSummaryCard
@@ -667,7 +754,8 @@ export default function RequirementDefinitionForm({
 
       <DataSourceSection
         project={project}
-        onProjectChange={onProjectChange}
+        requirement={requirement}
+        onRequirementChange={onRequirementChange}
       />
 
       <WideTableSchemaSection
@@ -695,6 +783,10 @@ export default function RequirementDefinitionForm({
         highlightedSections={highlightedSections}
         wideTables={wideTables}
         wideTableRecords={wideTableRecords}
+        dimensionExcelImports={dimensionExcelImports}
+        onDimensionExcelImportsChange={setDimensionExcelImports}
+        scopePreviewDirtyByWideTableId={scopePreviewDirtyByWideTableId}
+        onScopePreviewDirtyChange={setScopePreviewDirtyByWideTableId}
         selectedWtId={selectedWtId}
         selectedWt={selectedWt}
         selectedWideTableRecords={selectedWideTableRecords}
@@ -856,7 +948,7 @@ function buildDraftWideTable(requirementId: string): WideTable {
     id: `wt_${requirementId}_${timestamp}`,
     requirementId,
     name: UNLINKED_DATA_TABLE_NAME,
-    description: "请先选择要关联的数据表 Schema。",
+    description: "请选择要关联的数据表 Schema。",
     schema: {
       columns: [],
     },
@@ -972,7 +1064,7 @@ function CompactChoiceButton({
   );
 }
 
-// ==================== 基础信息 ====================
+// ==================== 鍩虹淇℃伅 ====================
 
 function BasicInfoSection({
   requirement,
@@ -995,7 +1087,7 @@ function BasicInfoSection({
         <p className="text-xs text-muted-foreground">明确这条需求的背景知识与角色分工。</p>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <CompactInfoItem label="需求ID" value={requirement.id} />
+        <CompactInfoItem label="需求 ID" value={requirement.id} />
         <EditableField label="业务负责人" control={
           <input className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             value={requirement.owner} onChange={(e) => update({ owner: e.target.value })} />
@@ -1247,7 +1339,7 @@ function DataUpdateSection({
       <div className="space-y-1">
         {entryGuide === "production-scope" ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            你刚从【数据产出】返回。正式范围确认完成后，请在这里补充是否持续更新、更新方式和调度设置；如需持续更新但范围还未改为长期有效，请回到上方的数据范围节继续调整。
+            你刚从【数据产出】返回。正式范围确认完成后，请在这里补充是否持续更新、更新方式和调度设置；如需持续更新但范围还未改为长期有效，请回到上方的数据范围步骤继续调整。
           </div>
         ) : null}
         <div className="flex items-center gap-2">
@@ -1482,12 +1574,15 @@ function DataUpdateSection({
   );
 }
 
+
 function DataSourceSection({
   project,
-  onProjectChange,
+  requirement,
+  onRequirementChange,
 }: {
   project: Project;
-  onProjectChange?: (project: Project) => void;
+  requirement: Requirement;
+  onRequirementChange?: (requirement: Requirement) => void;
 }) {
   const [isKnowledgeBaseSelectorOpen, setKnowledgeBaseSelectorOpen] = useState(false);
   const [allKnowledgeBases, setAllKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -1524,8 +1619,36 @@ function DataSourceSection({
     [allKnowledgeBases],
   );
 
-  const updateProjectDataSource = (updater: (project: Project) => Project) => {
-    onProjectChange?.(updater(project));
+  const effectiveCollectionPolicy: NonNullable<Requirement["collectionPolicy"]> = useMemo(() => {
+    if (requirement.collectionPolicy) {
+      const normalizedEngines = requirement.collectionPolicy.searchEngines?.length
+        ? requirement.collectionPolicy.searchEngines
+        : enabledSearchEngines;
+      return {
+        ...requirement.collectionPolicy,
+        searchEngines: normalizedEngines,
+      };
+    }
+
+    return {
+      searchEngines: enabledSearchEngines,
+      preferredSites: project.dataSource.search.sites ?? [],
+      sitePolicy: project.dataSource.search.sitePolicy ?? "preferred",
+      knowledgeBases: project.dataSource.knowledgeBases ?? [],
+      nullPolicy: "",
+      sourcePriority: "",
+      valueFormat: "",
+    };
+  }, [enabledSearchEngines, project.dataSource, requirement.collectionPolicy]);
+
+  const updateRequirementCollectionPolicy = (
+    updater: (policy: NonNullable<Requirement["collectionPolicy"]>) => NonNullable<Requirement["collectionPolicy"]>,
+  ) => {
+    onRequirementChange?.({
+      ...requirement,
+      collectionPolicy: updater(effectiveCollectionPolicy),
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const blockClass = "space-y-3 rounded-lg bg-muted/10 p-4";
@@ -1534,7 +1657,7 @@ function DataSourceSection({
     <section id="data-source" className="scroll-mt-28 rounded-xl border bg-card p-6 space-y-4">
       <div className="space-y-1">
         <h3 className="font-semibold">2. 数据来源</h3>
-        <p className="text-xs text-muted-foreground">这里修改的是项目级共享配置。当前项目下的需求共用这套来源策略。</p>
+        <p className="text-xs text-muted-foreground">这里修改的是需求级来源策略（唯一真源：requirements.collection_policy）。</p>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
@@ -1547,8 +1670,7 @@ function DataSourceSection({
             <div className="text-xs font-medium text-muted-foreground">全局启用引擎</div>
             {enabledSearchEngines.length === 0 ? (
               <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                当前未启用搜索引擎，请前往“设置”页统一配置。
-              </div>
+                当前未启用搜索引擎，请前往【设置】页面统一配置。              </div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {enabledSearchEngines.map((engine) => (
@@ -1562,23 +1684,17 @@ function DataSourceSection({
               </div>
             )}
             <div className="text-[11px] text-muted-foreground">
-              引擎列表在“设置 &gt; 搜索引擎与接入”中统一维护。
-            </div>
+              引擎列表在“设置 &gt; 搜索引擎与接入”中统一维护。            </div>
           </div>
           <label className="space-y-1 block">
             <div className="text-xs font-medium text-muted-foreground">站点策略</div>
             <select
-              value={project.dataSource.search.sitePolicy}
+              value={effectiveCollectionPolicy.sitePolicy}
               onChange={(event) =>
-                updateProjectDataSource((currentProject) => ({
-                  ...currentProject,
-                  dataSource: {
-                    ...currentProject.dataSource,
-                    search: {
-                      ...currentProject.dataSource.search,
-                      sitePolicy: event.target.value as Project["dataSource"]["search"]["sitePolicy"],
-                    },
-                  },
+                updateRequirementCollectionPolicy((currentPolicy) => ({
+                  ...currentPolicy,
+                  sitePolicy: event.target.value as NonNullable<Requirement["collectionPolicy"]>["sitePolicy"],
+                  searchEngines: enabledSearchEngines,
                 }))
               }
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
@@ -1590,17 +1706,12 @@ function DataSourceSection({
           <label className="space-y-1 block">
             <div className="text-xs font-medium text-muted-foreground">站点范围</div>
             <textarea
-              value={project.dataSource.search.sites.join("\n")}
+              value={(effectiveCollectionPolicy.preferredSites ?? []).join("\n")}
               onChange={(event) =>
-                updateProjectDataSource((currentProject) => ({
-                  ...currentProject,
-                  dataSource: {
-                    ...currentProject.dataSource,
-                    search: {
-                      ...currentProject.dataSource.search,
-                      sites: parseMultilineList(event.target.value),
-                    },
-                  },
+                updateRequirementCollectionPolicy((currentPolicy) => ({
+                  ...currentPolicy,
+                  preferredSites: parseMultilineList(event.target.value),
+                  searchEngines: enabledSearchEngines,
                 }))
               }
               className="min-h-36 w-full rounded-md border bg-background px-3 py-2 text-sm"
@@ -1620,16 +1731,14 @@ function DataSourceSection({
               onClick={() => setKnowledgeBaseSelectorOpen(true)}
               className="rounded-md border px-2 py-1 text-xs text-primary hover:bg-primary/5"
             >
-              选择知识库
-            </button>
+              选择知识库            </button>
           </div>
-          {project.dataSource.knowledgeBases.length === 0 ? (
+          {(effectiveCollectionPolicy.knowledgeBases ?? []).length === 0 ? (
             <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-              暂未关联知识库
-            </div>
+              暂未关联知识库            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {project.dataSource.knowledgeBases.map((id) => (
+              {(effectiveCollectionPolicy.knowledgeBases ?? []).map((id) => (
                 <span
                   key={id}
                   className="inline-flex items-center rounded-full border bg-background px-2 py-1 text-xs text-foreground"
@@ -1640,28 +1749,26 @@ function DataSourceSection({
             </div>
           )}
           <div className="text-[11px] text-muted-foreground">
-            已关联 {project.dataSource.knowledgeBases.length} 个知识库
+            已关联 {(effectiveCollectionPolicy.knowledgeBases ?? []).length} 个知识库
           </div>
         </div>
 
       </div>
 
       <div className="rounded-lg bg-muted/10 px-4 py-3 text-xs text-muted-foreground">
-        当前项目复用 {enabledSearchEngines.length} 个全局检索引擎、{project.dataSource.knowledgeBases.length} 个知识库。
+        当前需求使用 {enabledSearchEngines.length} 个全局搜索引擎，关联 {(effectiveCollectionPolicy.knowledgeBases ?? []).length} 个知识库。
       </div>
 
       <KnowledgeBaseSelectorModal
         isOpen={isKnowledgeBaseSelectorOpen}
         onClose={() => setKnowledgeBaseSelectorOpen(false)}
         allKnowledgeBases={allKnowledgeBases}
-        linkedIds={project.dataSource.knowledgeBases}
+        linkedIds={effectiveCollectionPolicy.knowledgeBases ?? []}
         onSave={(ids) =>
-          updateProjectDataSource((currentProject) => ({
-            ...currentProject,
-            dataSource: {
-              ...currentProject.dataSource,
-              knowledgeBases: ids,
-            },
+          updateRequirementCollectionPolicy((currentPolicy) => ({
+            ...currentPolicy,
+            knowledgeBases: ids,
+            searchEngines: enabledSearchEngines,
           }))
         }
       />
@@ -1669,7 +1776,7 @@ function DataSourceSection({
   );
 }
 
-// ==================== 表结构定义 ====================
+// ==================== 琛ㄧ粨鏋勫畾涔?====================
 
 function WideTableSchemaSection({
   requirementId,
@@ -1975,7 +2082,7 @@ function WideTableSchemaSection({
     const nextWideTable = buildDraftWideTable(requirementId);
     onReplaceWideTables([nextWideTable]);
     onSelectWt(nextWideTable.id);
-    setSchemaActionMessage(`已初始化数据表关联，选择 Schema 后即可继续定义结构。`);
+    setSchemaActionMessage("已初始化数据表关联，选择 Schema 后即可继续定义结构。");
     setIsSchemaSelectorOpen(true);
   };
 
@@ -1989,7 +2096,7 @@ function WideTableSchemaSection({
               <SectionStatusBadge label="Schema 定义" status={stepStatuses.A} />
             </span>
           </div>
-          <p className="text-xs text-muted-foreground">这里只定义宽表结构与字段元数据；指标分组已迁移到【执行】Tab 中配置。</p>
+          <p className="text-xs text-muted-foreground">这里仅定义宽表结构与字段元数据；指标分组已迁移到【执行】Tab 中配置。</p>
         </div>
         {wideTables.length === 0 ? (
           <button
@@ -1997,15 +2104,13 @@ function WideTableSchemaSection({
             onClick={handleLinkDataTable}
             className="rounded-md border px-3 py-1.5 text-xs text-primary hover:bg-primary/5"
           >
-            关联数据表
-          </button>
+            关联数据表          </button>
         ) : null}
       </div>
 
       {wideTables.length === 0 ? (
         <div className="rounded-lg border border-dashed px-4 py-8 text-sm text-muted-foreground">
-          当前需求尚未关联数据表。点击“关联数据表”后选择一个 Schema 即可开始配置。
-        </div>
+          当前需求尚未关联数据表。点击“关联数据表”后选择一个 Schema 即可开始配置。        </div>
       ) : (
         <>
           {wideTables.length > 1 ? (
@@ -2037,7 +2142,7 @@ function WideTableSchemaSection({
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-4">
-                <CompactInfoItem label="宽表ID" value={selectedWt.id} />
+                <CompactInfoItem label="宽表 ID" value={selectedWt.id} />
                 {!schemaLocked ? (
                   <div className="rounded-lg bg-muted/10 px-3 py-2.5">
                     <div className="text-[11px] font-medium text-muted-foreground">表名</div>
@@ -2058,13 +2163,12 @@ function WideTableSchemaSection({
                   <CompactInfoItem label="表名" value={selectedWt.name} />
                 )}
                 <CompactInfoItem label="状态" value={selectedWt.status} />
-                <CompactInfoItem label="当前记录" value={String(selectedWt.recordCount)} />
+                <CompactInfoItem label="当前记录数" value={String(selectedWt.recordCount)} />
               </div>
 
               {schemaLocked ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                  Schema 已锁定：字段元数据仅支持只读查看；如需调整，请新建版本并重新生成计划。
-                </div>
+                  Schema 已锁定：字段元数据仅支持只读查看；如需调整，请新建版本并重新生成计划。                </div>
               ) : null}
 
               {schemaActionMessage ? (
@@ -2075,8 +2179,7 @@ function WideTableSchemaSection({
 
               {selectedWt.schema.columns.length === 0 ? (
                 <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-                  当前宽表还未关联 Schema。请点击“关联 Schema”按钮选择一个结构。
-                </div>
+                  当前宽表还未关联 Schema。请点击“关联 Schema”按钮选择一个结构。                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
@@ -2235,9 +2338,9 @@ function WideTableSchemaSection({
                                   className="w-full rounded-md border bg-background px-2 py-1 text-xs"
                                 >
                                   <option value="">不设置</option>
-                                  <option value="max_lte">最大值小于等于xxx</option>
-                                  <option value="min_gte">最小值大于等于xxx</option>
-                                  <option value="change_rate_lte">本期较上期变化范围不超过xxx</option>
+                                  <option value="max_lte">最大值小于等于 xxx</option>
+                                  <option value="min_gte">最小值大于等于 xxx</option>
+                                  <option value="change_rate_lte">本期较上期变化范围不超过 xxx</option>
                                   <option value="not_empty">不为空</option>
                                 </select>
                                 {col.auditRuleType && auditRuleNeedsValue(col.auditRuleType) ? (
@@ -2247,7 +2350,7 @@ function WideTableSchemaSection({
                                       handleColumnMetadataChange(col.id, { auditRuleValue: event.target.value })
                                     }
                                     className="w-full rounded-md border bg-background px-2 py-1 text-xs"
-                                    placeholder="填写xxx的数值"
+                                    placeholder="填写 xxx 的数值"
                                   />
                                 ) : null}
                               </div>
@@ -2276,13 +2379,17 @@ function WideTableSchemaSection({
   );
 }
 
-// ==================== 范围定义 ====================
+// ==================== 鑼冨洿瀹氫箟 ====================
 
 function ScopeAndGroupSection({
   requirement,
   highlightedSections,
   wideTables,
   wideTableRecords,
+  dimensionExcelImports,
+  onDimensionExcelImportsChange,
+  scopePreviewDirtyByWideTableId,
+  onScopePreviewDirtyChange,
   selectedWtId,
   selectedWt,
   selectedWideTableRecords,
@@ -2300,6 +2407,16 @@ function ScopeAndGroupSection({
   highlightedSections?: readonly DefinitionSectionId[];
   wideTables: WideTable[];
   wideTableRecords: WideTableRecord[];
+  dimensionExcelImports: Record<string, DimensionExcelImportState>;
+  onDimensionExcelImportsChange: (
+    value: Record<string, DimensionExcelImportState>
+      | ((prev: Record<string, DimensionExcelImportState>) => Record<string, DimensionExcelImportState>),
+  ) => void;
+  scopePreviewDirtyByWideTableId: Record<string, boolean>;
+  onScopePreviewDirtyChange: (
+    value: Record<string, boolean>
+      | ((prev: Record<string, boolean>) => Record<string, boolean>),
+  ) => void;
   selectedWtId: string;
   selectedWt?: WideTable;
   selectedWideTableRecords: WideTableRecord[];
@@ -2320,9 +2437,6 @@ function ScopeAndGroupSection({
   const [selectedPreviewBusinessDate, setSelectedPreviewBusinessDate] = useState("");
   const [selectedPreviewYear, setSelectedPreviewYear] = useState("");
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-  const [dimensionExcelImports, setDimensionExcelImports] = useState<
-    Record<string, { fileName: string; rows: Array<Record<string, string>> }>
-  >({});
   const dimensionExcelImportInputRef = useRef<HTMLInputElement | null>(null);
   const selectedWideTableAllRecords = useMemo(
     () => wideTableRecords.filter((record) => record.wideTableId === selectedWtId),
@@ -2342,7 +2456,34 @@ function ScopeAndGroupSection({
   const previewColumns = selectedWt?.schema.columns.filter((col) => col.category !== "system") ?? [];
   const previewBusinessDateFieldName = businessDateColumn?.name ?? "";
   const isPreviewMonthlyFrequency = Boolean(usesBusinessDateAxis && selectedWt?.businessDateRange.frequency === "monthly");
-  const activeDimensionExcelImport = selectedWtId ? dimensionExcelImports[selectedWtId] : undefined;
+  const draftDimensionExcelImport = selectedWtId ? dimensionExcelImports[selectedWtId] : undefined;
+  const isScopePreviewDirty = selectedWtId ? Boolean(scopePreviewDirtyByWideTableId[selectedWtId]) : false;
+  const savedDimensionScopeImport = !isScopePreviewDirty ? selectedWt?.scopeImport : undefined;
+  const displayedDimensionScopeImport = draftDimensionExcelImport
+    ? {
+        fileName: draftDimensionExcelImport.fileName,
+        rowCount: draftDimensionExcelImport.rows.length,
+        isPersisted: false,
+      }
+    : savedDimensionScopeImport
+      ? {
+          fileName: savedDimensionScopeImport.fileName,
+          rowCount: savedDimensionScopeImport.rowCount,
+          isPersisted: true,
+        }
+      : undefined;
+  const activeDimensionExcelImport = displayedDimensionScopeImport
+    ? (
+        draftDimensionExcelImport
+          ?? {
+            fileName: displayedDimensionScopeImport.fileName,
+            fileType: "text/csv" as const,
+            fileContent: "",
+            headers: [],
+            rows: Array.from({ length: displayedDimensionScopeImport.rowCount }, () => ({})),
+          }
+      )
+    : undefined;
   const previewBusinessDates = useMemo(
     () => !usesBusinessDateAxis
       ? []
@@ -2430,6 +2571,15 @@ function ScopeAndGroupSection({
   const isOpenEnded = selectedWt && usesBusinessDateAxis
     ? isOpenEndedBusinessDateRange(selectedWt.businessDateRange)
     : false;
+  const markSelectedScopePreviewDirty = () => {
+    if (!selectedWtId) {
+      return;
+    }
+    onScopePreviewDirtyChange((prev) => ({
+      ...prev,
+      [selectedWtId]: true,
+    }));
+  };
 
   useEffect(() => {
     setRangeMessage("");
@@ -2473,6 +2623,7 @@ function ScopeAndGroupSection({
     patch: Partial<WideTable["businessDateRange"]>,
   ) => {
     setRangeMessage("时间范围已修改，如需查看请点击预览数据。");
+    markSelectedScopePreviewDirty();
     updateSelectedWideTable((wideTable) => {
       const merged = {
         ...wideTable.businessDateRange,
@@ -2480,7 +2631,7 @@ function ScopeAndGroupSection({
       };
 
       const freq = merged.frequency;
-      // 当频率为月频/季频/年频时，自动对齐到周期末尾
+      // 月频 / 季频 / 年频时，自动对齐到周期末尾
       if (freq === "monthly" || freq === "quarterly" || freq === "yearly") {
         merged.start = snapToPeriodEnd(merged.start, freq);
         if (merged.end !== "never") {
@@ -2545,6 +2696,7 @@ function ScopeAndGroupSection({
       [dimensionName]: "",
     }));
     setRangeMessage("维度取值已修改，如需查看请点击预览数据。");
+    markSelectedScopePreviewDirty();
 
     // Step status: invalidate downstream of C (i.e., D)
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
@@ -2558,6 +2710,7 @@ function ScopeAndGroupSection({
   };
 
   const handleRemoveDimensionValue = (dimensionName: string, value: string) => {
+    markSelectedScopePreviewDirty();
     updateSelectedWideTable((wideTable) => {
       const currentPlanVersion = wideTable.currentPlanVersion ?? resolveCurrentPlanVersion(wideTable, selectedWideTableRecords, taskGroups ?? []);
       wideTable.dimensionRanges = wideTable.dimensionRanges
@@ -2596,6 +2749,7 @@ function ScopeAndGroupSection({
     if (values.length === 0) {
       return;
     }
+    markSelectedScopePreviewDirty();
     updateSelectedWideTable((wideTable) => {
       const currentPlanVersion = wideTable.currentPlanVersion ?? resolveCurrentPlanVersion(wideTable, selectedWideTableRecords, taskGroups ?? []);
       const existingRange = wideTable.dimensionRanges.find((range) => range.dimensionName === dimensionName);
@@ -2778,10 +2932,17 @@ function ScopeAndGroupSection({
       return;
     }
 
-    setDimensionExcelImports((prev) => ({
+    onDimensionExcelImportsChange((prev) => ({
       ...prev,
-      [selectedWt.id]: { fileName: file.name, rows },
+      [selectedWt.id]: {
+        fileName: file.name,
+        fileType: "text/csv",
+        fileContent: normalizedText,
+        headers,
+        rows,
+      },
     }));
+    markSelectedScopePreviewDirty();
 
     setRangeMessage(
       `已导入 Excel（${file.name}），识别到 ${rows.length} 行维度组合。` +
@@ -2795,8 +2956,22 @@ function ScopeAndGroupSection({
       return;
     }
 
-    const excelRows = activeDimensionExcelImport?.rows ?? [];
+    const excelRows = draftDimensionExcelImport?.rows ?? [];
     const useExcelRows = excelRows.length > 0;
+    const shouldUsePersistedImportedRows = Boolean(
+      !useExcelRows
+      && !isScopePreviewDirty
+      && selectedWt.scopeImport?.importMode === "dimension_rows_csv"
+      && selectedWideTableRecords.length > 0,
+    );
+
+    if (shouldUsePersistedImportedRows) {
+      setPreviewRecords(selectedWideTableRecords);
+      setPreviewTotalCount(selectedWideTableRecords.length);
+      setIsPreviewModalOpen(true);
+      setRangeMessage(`已加载已保存的 CSV 逐行维度组合（${selectedWideTableRecords.length} 行）。`);
+      return;
+    }
 
     if (!useExcelRows) {
       const missingDimensions = dimensionColumns
@@ -2807,6 +2982,13 @@ function ScopeAndGroupSection({
         .map((column) => column.chineseName || column.name);
 
       if (missingDimensions.length > 0) {
+        if (selectedWideTableRecords.length > 0) {
+          setPreviewRecords(selectedWideTableRecords);
+          setPreviewTotalCount(selectedWideTableRecords.length);
+          setIsPreviewModalOpen(true);
+          setRangeMessage(`已加载已保存的维度组合列表（${selectedWideTableRecords.length} 行）。`);
+          return;
+        }
         setRangeMessage(`请先为以下维度配置取值：${missingDimensions.join("、")}`);
         return;
       }
@@ -2819,7 +3001,7 @@ function ScopeAndGroupSection({
       setRangeMessage(
         usesBusinessDateAxis
           ? "当前业务日期范围或维度取值不足，无法生成预览数据。"
-          : "当前维度取值不足，无法生成快照预览数据。",
+          : "当前维度取值不足，无法生成预览数据。",
       );
       return;
     }
@@ -2882,16 +3064,17 @@ function ScopeAndGroupSection({
           {selectedWt ? (
             selectedWt.schema.columns.length === 0 ? (
               <div className="rounded-lg border border-dashed px-4 py-8 text-sm text-muted-foreground">
-                先在“表结构定义”里完成 Schema 关联，再回到这里配置范围。
-              </div>
+                先在“表结构定义”里完成 Schema 关联，再回到这里配置范围。              </div>
             ) : (
             <div className="space-y-6">
-              {/* 业务日期范围 */}
+              {/* 涓氬姟鏃ユ湡鑼冨洿 */}
               {usesBusinessDateAxis ? (
                 <div className={cn("rounded-lg bg-muted/10 p-4 space-y-2", !isCEditable ? "opacity-60" : "")}>
                   <h4 className="text-sm font-semibold">业务日期</h4>
                   <p className="text-xs text-muted-foreground">
-                    {businessDateColumn ? `${businessDateColumn.name}${businessDateColumn.chineseName ? `（${businessDateColumn.chineseName}）` : ""}` : "未识别到业务日期维度"}
+                    {businessDateColumn
+                      ? `${businessDateColumn.name}${businessDateColumn.chineseName ? `（${businessDateColumn.chineseName}）` : ""}`
+                      : "未识别到业务日期维度"}
                     。月频、季频、年频会自动对齐到周期末尾。
                     {!hasConfirmedDataUpdateEnabled
                       ? " 请先在下方确认是否定期更新，再决定结束方式。"
@@ -3036,14 +3219,12 @@ function ScopeAndGroupSection({
 
               {usesBusinessDateAxis && !hasConfirmedDataUpdateEnabled ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前尚未确认是否定期更新。提交前需要在下方“数据更新”里完成选择。
-                </div>
+                  当前尚未确认是否定期更新。提交前需要在下方“数据更新”里完成选择。                </div>
               ) : null}
 
               {usesBusinessDateAxis && hasConfirmedDataUpdateEnabled && !dataUpdateEnabled && isOpenEnded ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前已标记为一次性交付，但业务日期结束方式仍为“永不”。提交前请将结束方式改为“具体日期”。
-                </div>
+                  当前已标记为一次性交付，但业务日期结束方式仍为“永不”。提交前请将结束方式改为“具体日期”。                </div>
               ) : null}
 
               {/* 维度范围 */}
@@ -3056,37 +3237,69 @@ function ScopeAndGroupSection({
                       onClick={() => dimensionExcelImportInputRef.current?.click()}
                       className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
                     >
-                      导入Excel
+                      导入 Excel
                     </button>
                   ) : null}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {requirement.schemaLocked
                     ? "Schema 已锁定。维度取值的调整会触发计划重建，并以新版本运行。"
-                    : "这里只管理非业务日期维度。每个维度都要明确可枚举的取值。"}
+                    : "这里仅管理非业务日期维度。每个维度都要明确可枚举的取值。"}
                 </p>
-                {activeDimensionExcelImport ? (
+                {displayedDimensionScopeImport ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
                     <div className="text-muted-foreground">
-                      已导入：{activeDimensionExcelImport.fileName}（{activeDimensionExcelImport.rows.length} 行）
+                      {displayedDimensionScopeImport.isPersisted ? "已保存导入：" : "已导入："}
+                      {displayedDimensionScopeImport.fileName}（{displayedDimensionScopeImport.rowCount} 行）
                     </div>
-                    {isRangeEditable && isCEditable ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!selectedWt) return;
-                          setDimensionExcelImports((prev) => {
-                            const next = { ...prev };
-                            delete next[selectedWt.id];
-                            return next;
-                          });
-                          setRangeMessage("已清除 Excel 导入内容。");
-                        }}
-                        className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        清除
-                      </button>
-                    ) : null}
+                    <div className="flex items-center gap-2">
+                      {displayedDimensionScopeImport.isPersisted && selectedWt ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await downloadWideTableScopeImport(
+                                selectedWt.id,
+                                displayedDimensionScopeImport.fileName,
+                              );
+                              setRangeMessage("已下载已保存的 CSV。");
+                            } catch (error) {
+                              const message = error instanceof Error ? error.message : "下载 CSV 失败";
+                              setRangeMessage(message);
+                            }
+                          }}
+                          className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          下载 CSV
+                        </button>
+                      ) : null}
+                      {isRangeEditable && isCEditable ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!selectedWt) return;
+                            onDimensionExcelImportsChange((prev) => {
+                              const next = { ...prev };
+                              delete next[selectedWt.id];
+                              return next;
+                            });
+                            onScopePreviewDirtyChange((prev) => ({
+                              ...prev,
+                              [selectedWt.id]: true,
+                            }));
+                            updateSelectedWideTable((wideTable) => ({
+                              ...wideTable,
+                              scopeImport: undefined,
+                              updatedAt: new Date().toISOString(),
+                            }));
+                            setRangeMessage("已清除 Excel 导入内容。");
+                          }}
+                          className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          清除
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
                 {dimensionColumns.length === 0 ? (
@@ -3177,8 +3390,7 @@ function ScopeAndGroupSection({
                 <div className="space-y-1">
                   <h4 className="text-sm font-semibold">预览与生成</h4>
                   <p className="text-xs text-muted-foreground">
-                    预览以弹窗形式展示，点击右侧按钮即可查看。
-                  </p>
+                    预览以弹窗形式展示，点击右侧按钮即可查看。                  </p>
                 </div>
 
                 {rangeMessage ? (
@@ -3218,8 +3430,7 @@ function ScopeAndGroupSection({
                       ) : (
                         <div className="space-y-3">
                           <div className="text-xs text-muted-foreground">
-                            预计生成 {previewTotalCount} 行，当前展示 {previewRecords.length} 行预览。
-                          </div>
+                            预计生成 {previewTotalCount} 行，当前展示 {previewRecords.length} 行预览。                          </div>
                           {previewBusinessDates.length > 0 ? (
                             <div className="space-y-2">
                               {isPreviewMonthlyFrequency && previewBusinessYears.length > 0 ? (
@@ -3312,7 +3523,7 @@ function ScopeAndGroupSection({
   );
 }
 
-// ==================== 步骤状态徽标 ====================
+// ==================== 姝ラ鐘舵€佸窘鏍?====================
 
 
 
@@ -3326,7 +3537,7 @@ function formatStepStatusLabel(status: StepStatus): string {
   return "待完成";
 }
 
-// ==================== 失效确认对话框 ====================
+// ==================== 澶辨晥确认瀵硅瘽妗?====================
 
 type InvalidationDialogProps = {
   open: boolean;
@@ -3400,7 +3611,7 @@ function InvalidationDialog({
   );
 }
 
-// ==================== 辅助组件 ====================
+// ==================== 杈呭姪缁勪欢 ====================
 
 function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
@@ -3454,10 +3665,8 @@ function fallbackBusinessDateEnd(start: string): string {
 }
 
 /**
- * 频率感知的业务日期选择器。
- * - daily / weekly → 普通 date input
- * - monthly / quarterly / yearly → 下拉选择周期末尾日期，显示友好标签
- */
+ * 频率感知的业务日期选择器。 * - daily / weekly => 普通 date input
+ * - monthly / quarterly / yearly => 下拉选择周期末尾日期，显示友好标签 */
 function BusinessDateInput({
   frequency,
   value,
@@ -3739,13 +3948,13 @@ function formatAuditRuleDisplay(column: ColumnDefinition): string {
   }
   const value = (column.auditRuleValue ?? "").trim();
   if (column.auditRuleType === "max_lte") {
-    return `最大值小于等于${value || "xxx"}`;
+    return `最大值小于等于 ${value || "xxx"}`;
   }
   if (column.auditRuleType === "min_gte") {
-    return `最小值大于等于${value || "xxx"}`;
+    return `最小值大于等于 ${value || "xxx"}`;
   }
   if (column.auditRuleType === "change_rate_lte") {
-    return `本期较上期变化范围不超过${value || "xxx"}`;
+    return `本期较上期变化范围不超过 ${value || "xxx"}`;
   }
   return "不为空";
 }

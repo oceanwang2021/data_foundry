@@ -24,6 +24,7 @@ import type {
   TargetTableColumn,
   BackfillRequest,
   ExecutionRecord,
+  WideTableScopeImport,
 } from "./types";
 import type {
   AcceptanceTicket,
@@ -118,6 +119,22 @@ function apiPut<T>(path: string, body: unknown) {
 
 function apiDelete(path: string) {
   return apiFetch<void>(path, { method: "DELETE" });
+}
+
+function resolveDownloadFileName(contentDisposition: string | null, fallbackName: string): string {
+  if (!contentDisposition) {
+    return fallbackName;
+  }
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch (error) {
+      return utf8Match[1];
+    }
+  }
+  const plainMatch = contentDisposition.match(/filename="?([^\";]+)"?/i);
+  return plainMatch?.[1] ? plainMatch[1] : fallbackName;
 }
 
 // ==================== 后端 → 前端 数据转换 ====================
@@ -261,11 +278,12 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
   const scheduleRules = (raw.schedule_rules ?? []).map((sr: any) =>
     mapScheduleRule(sr, raw.id),
   );
+  const scopeImport = mapWideTableScopeImport(raw.scopeImport ?? raw.scope_import);
 
   return normalizeWideTableMode({
     id: raw.id,
     requirementId,
-    name: schema.table_name ?? raw.title ?? "",
+    name: raw.tableName ?? raw.table_name ?? schema.table_name ?? raw.title ?? "",
     description: raw.description ?? "",
     schema: { columns: allColumns },
     schemaVersion: raw.schema_version ?? schema.version ?? 1,
@@ -279,6 +297,7 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
       frequency: bizDate.frequency ?? "monthly",
       quarterlyForLatestYear: bizDate.latest_year_quarterly ?? false,
     },
+    scopeImport,
     semanticTimeAxis: raw.semantic_time_axis ?? "business_date",
     collectionCoverageMode: raw.collection_coverage_mode ?? "incremental_by_business_date",
     indicatorGroups,
@@ -290,6 +309,26 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
     createdAt: fallbackIso(raw.created_at),
     updatedAt: fallbackIso(raw.updated_at),
   });
+}
+
+function mapWideTableScopeImport(raw: any): WideTableScopeImport | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const fileName = String(raw.fileName ?? raw.file_name ?? "").trim();
+  const importMode = String(raw.importMode ?? raw.import_mode ?? "").trim();
+  if (!fileName || !importMode) {
+    return undefined;
+  }
+  return {
+    fileName,
+    fileType: String(raw.fileType ?? raw.file_type ?? "text/csv").trim() || "text/csv",
+    rowCount: Number(raw.rowCount ?? raw.row_count ?? 0) || 0,
+    importMode: importMode as WideTableScopeImport["importMode"],
+    contentHash: String(raw.contentHash ?? raw.content_hash ?? "").trim() || undefined,
+    createdAt: raw.createdAt ? fallbackIso(raw.createdAt) : raw.created_at ? fallbackIso(raw.created_at) : undefined,
+    updatedAt: raw.updatedAt ? fallbackIso(raw.updatedAt) : raw.updated_at ? fallbackIso(raw.updated_at) : undefined,
+  };
 }
 
 /** 后端 Requirement → 前端 Requirement */
@@ -395,6 +434,73 @@ function mapWideTableRow(raw: any, businessDateFieldName = "biz_date"): WideTabl
   };
 
   return record;
+}
+
+function deriveDimensionRangesFromRows(
+  wideTable: WideTable,
+  records: WideTableRecord[],
+): WideTable["dimensionRanges"] {
+  const dimensionColumns = wideTable.schema.columns.filter(
+    (column) => column.category === "dimension" && !column.isBusinessDate,
+  );
+  const valuesByDimension = new Map<string, Set<string>>();
+
+  for (const column of dimensionColumns) {
+    valuesByDimension.set(column.name, new Set<string>());
+  }
+
+  for (const record of records) {
+    if (record.wideTableId !== wideTable.id) {
+      continue;
+    }
+    for (const column of dimensionColumns) {
+      const rawValue = record[column.name];
+      const value = rawValue == null ? "" : String(rawValue).trim();
+      if (!value) {
+        continue;
+      }
+      valuesByDimension.get(column.name)?.add(value);
+    }
+  }
+
+  return dimensionColumns.map((column) => ({
+    dimensionName: column.name,
+    values: Array.from(valuesByDimension.get(column.name) ?? []),
+  }));
+}
+
+function hydrateWideTablesFromRows(
+  wideTables: WideTable[],
+  wideTableRecords: WideTableRecord[],
+): WideTable[] {
+  const recordsByWideTableId = new Map<string, WideTableRecord[]>();
+
+  for (const record of wideTableRecords) {
+    if (!recordsByWideTableId.has(record.wideTableId)) {
+      recordsByWideTableId.set(record.wideTableId, []);
+    }
+    recordsByWideTableId.get(record.wideTableId)?.push(record);
+  }
+
+  return wideTables.map((wideTable) => {
+    const rows = recordsByWideTableId.get(wideTable.id) ?? [];
+    if (rows.length === 0) {
+      return wideTable;
+    }
+
+    const derivedDimensionRanges = deriveDimensionRangesFromRows(wideTable, rows);
+    const derivedPlanVersion = Math.max(
+      wideTable.currentPlanVersion ?? 0,
+      ...rows.map((row) => row._metadata?.planVersion ?? 0),
+    );
+
+    return normalizeWideTableMode({
+      ...wideTable,
+      dimensionRanges: derivedDimensionRanges,
+      currentPlanVersion: derivedPlanVersion > 0 ? derivedPlanVersion : wideTable.currentPlanVersion,
+      recordCount: rows.length,
+    });
+  });
 }
 
 /** 后端 TaskGroup → 前端 TaskGroup */
@@ -990,6 +1096,7 @@ export async function updateRequirement(
     businessGoal: string;
     backgroundKnowledge: string;
     deliveryScope: string;
+    collectionPolicy: Requirement["collectionPolicy"];
     dataUpdateEnabled: boolean;
     dataUpdateMode: RequirementDataUpdateMode | null;
     processingRuleDrafts: any[];
@@ -1003,6 +1110,19 @@ export async function updateRequirement(
   if (data.businessGoal !== undefined) body.business_goal = data.businessGoal;
   if (data.backgroundKnowledge !== undefined) body.background_knowledge = data.backgroundKnowledge;
   if (data.deliveryScope !== undefined) body.delivery_scope = data.deliveryScope;
+  if (data.collectionPolicy !== undefined) {
+    body.collection_policy = data.collectionPolicy
+      ? {
+          search_engines: data.collectionPolicy.searchEngines ?? [],
+          preferred_sites: data.collectionPolicy.preferredSites ?? [],
+          site_policy: data.collectionPolicy.sitePolicy ?? "preferred",
+          knowledge_bases: data.collectionPolicy.knowledgeBases ?? [],
+          null_policy: data.collectionPolicy.nullPolicy ?? "",
+          source_priority: data.collectionPolicy.sourcePriority ?? "",
+          value_format: data.collectionPolicy.valueFormat ?? "",
+        }
+      : null;
+  }
   if (data.dataUpdateEnabled !== undefined) body.data_update_enabled = data.dataUpdateEnabled;
   if (data.dataUpdateMode !== undefined) body.data_update_mode = data.dataUpdateMode;
   if (data.processingRuleDrafts !== undefined) body.processing_rule_drafts = data.processingRuleDrafts;
@@ -1200,6 +1320,7 @@ export async function updateRequirementWideTable(
     `/api/requirements/${requirementId}/wide-tables/${normalizedWideTable.id}`,
     {
       title: normalizedWideTable.name,
+      table_name: normalizedWideTable.name,
       description: normalizedWideTable.description,
       schema: toBackendWideTableSchema(normalizedWideTable),
       scope: toBackendWideTableScope(normalizedWideTable),
@@ -1257,9 +1378,18 @@ export async function persistWideTablePreview(
   requirementId: string,
   wideTable: WideTable,
   records: WideTableRecord[],
+  scopeImport?: {
+    fileName: string;
+    fileType: string;
+    rowCount: number;
+    fileContent: string;
+    headers: string[];
+    rows: Array<Record<string, string>>;
+  } | null,
 ): Promise<void> {
   const normalizedWideTable = normalizeWideTableMode(wideTable);
   const planVersion = Math.max(
+    1,
     normalizedWideTable.currentPlanVersion ?? 0,
     ...records.map((record) => record._metadata?.planVersion ?? 0),
   );
@@ -1283,12 +1413,46 @@ export async function persistWideTablePreview(
       } : undefined,
     })),
     rows: toBackendWideTablePlanRows(normalizedWideTable, records, planVersion),
+    ...(scopeImport !== undefined
+      ? {
+          scope_import: scopeImport
+            ? {
+                file_name: scopeImport.fileName,
+                file_type: scopeImport.fileType,
+                row_count: scopeImport.rowCount,
+                file_content: scopeImport.fileContent,
+                header: scopeImport.headers,
+                import_mode: "dimension_rows_csv",
+              }
+            : null,
+        }
+      : {}),
     task_groups: [],
     semantic_time_axis: resolveWideTableSemanticTimeAxis(normalizedWideTable),
     collection_coverage_mode: resolveWideTableCollectionCoverageMode(normalizedWideTable),
     status: normalizedWideTable.status,
     record_count: normalizedWideTable.recordCount,
   });
+}
+
+export async function downloadWideTableScopeImport(
+  wideTableId: string,
+  fallbackName = "scope-import.csv",
+): Promise<void> {
+  const response = await fetch(buildApiUrl(`/api/wide-tables/${wideTableId}/scope-import/download`));
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`API ${response.status}: ${text}`);
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = resolveDownloadFileName(response.headers.get("content-disposition"), fallbackName);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(objectUrl);
 }
 
 // ---- Task Groups ----
@@ -1574,12 +1738,20 @@ export async function loadRequirementDetailData(
       fetchWideTableRows(wt.id, wt).catch(() => [] as WideTableRecord[]),
     ),
   );
+  const wideTableRecords = wideTableRecordsArrays.flat();
+  const hydratedWideTables = hydrateWideTablesFromRows(reqData.wideTables, wideTableRecords);
+  const hydratedWideTableByRequirementId = new Map(
+    hydratedWideTables.map((wideTable) => [wideTable.requirementId, wideTable]),
+  );
 
   return {
     project,
-    requirements: reqData.requirements,
-    wideTables: reqData.wideTables,
-    wideTableRecords: wideTableRecordsArrays.flat(),
+    requirements: reqData.requirements.map((requirement) => ({
+      ...requirement,
+      wideTable: hydratedWideTableByRequirementId.get(requirement.id) ?? requirement.wideTable,
+    })),
+    wideTables: hydratedWideTables,
+    wideTableRecords,
     taskGroups,
     fetchTasks,
     acceptanceTickets: acceptanceTickets.filter((t) => t.requirementId === requirementId),

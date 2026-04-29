@@ -130,6 +130,16 @@ export type BusinessDateRange = {
   quarterlyForLatestYear?: boolean;
 };
 
+export type WideTableScopeImport = {
+  fileName: string;
+  fileType: string;
+  rowCount: number;
+  importMode: "dimension_rows_csv";
+  contentHash?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type WideTable = {
   id: string;
   requirementId: string;
@@ -139,6 +149,7 @@ export type WideTable = {
   schemaVersion?: number;
   dimensionRanges: DimensionRange[];
   businessDateRange: BusinessDateRange;
+  scopeImport?: WideTableScopeImport;
   semanticTimeAxis?: "business_date" | "none";
   collectionCoverageMode?: "incremental_by_business_date" | "full_snapshot";
   indicatorGroups: IndicatorGroup[];

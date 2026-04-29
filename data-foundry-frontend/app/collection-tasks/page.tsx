@@ -48,7 +48,7 @@ function resolveCollectionTaskLabel(taskGroup: TaskGroup): string {
 
 function resolveAggregateStatus(statuses: Array<TaskGroup["status"]>): keyof typeof statusStyle {
   if (statuses.some((s) => s === "running")) return "running";
-  if (statuses.some((s) => s === "failed" || s === "partial")) return "failed";
+  if (statuses.some((s) => s === "partial")) return "failed";
   if (statuses.some((s) => s === "invalidated")) return "paused";
   if (statuses.length > 0 && statuses.every((s) => s === "completed")) return "completed";
   return "pending";
@@ -110,9 +110,9 @@ export default function CollectionTasksPage() {
       bucket.push(tg);
       map.set(requirementId, bucket);
     }
-    for (const [reqId, list] of map.entries()) {
+    Array.from(map.entries()).forEach(([reqId, list]) => {
       map.set(reqId, [...list].sort((a, b) => (b.businessDate ?? "").localeCompare(a.businessDate ?? "")));
-    }
+    });
     return map;
   }, [taskGroups, wideTableById]);
 
@@ -160,13 +160,13 @@ export default function CollectionTasksPage() {
     }
 
     const buckets: CollectionTaskBucket[] = [];
-    for (const b of map.values()) {
+    Array.from(map.values()).forEach((b) => {
       buckets.push({
         ...b,
         taskGroups: [...b.taskGroups].sort((a, b2) => (b2.businessDate ?? "").localeCompare(a.businessDate ?? "")),
-        status: resolveAggregateStatus(b.taskGroups.map((tg) => tg.status)),
+        status: resolveAggregateStatus(b.taskGroups.map((tg: TaskGroup) => tg.status)),
       });
-    }
+    });
 
     buckets.sort((a, b) => a.label.localeCompare(b.label));
     return buckets;

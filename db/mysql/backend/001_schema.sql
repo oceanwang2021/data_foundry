@@ -76,6 +76,24 @@ CREATE TABLE IF NOT EXISTS wide_tables (
   INDEX idx_wide_tables_sort_order (sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS wide_table_scope_imports (
+  wide_table_id           VARCHAR(64)   NOT NULL PRIMARY KEY,
+  requirement_id          VARCHAR(64)   NOT NULL,
+  import_mode             VARCHAR(64)   NOT NULL,
+  file_name               VARCHAR(255)  NOT NULL,
+  file_type               VARCHAR(64)   NOT NULL,
+  content_hash            VARCHAR(64)   NULL,
+  row_count               INT           NOT NULL DEFAULT 0,
+  header_json             JSON          NULL,
+  file_content            MEDIUMTEXT    NULL,
+  created_by              VARCHAR(255)  NULL,
+  created_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_wide_table_scope_imports_wide_table
+    FOREIGN KEY (wide_table_id) REFERENCES wide_tables(id) ON DELETE CASCADE,
+  INDEX idx_wide_table_scope_imports_requirement_id (requirement_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS task_groups (
   id                 VARCHAR(64)  NOT NULL PRIMARY KEY,
   sort_order          INT          NOT NULL DEFAULT 0,
@@ -139,4 +157,26 @@ CREATE TABLE IF NOT EXISTS fetch_tasks (
   INDEX idx_ft_task_group_sort (task_group_id, sort_order),
   INDEX idx_ft_batch_id (batch_id),
   INDEX idx_ft_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Wide table rows (dimension combinations / persisted plan rows).
+-- Note: dimension_values_json stores non-business-date dimension bindings.
+--       business_date is stored separately (e.g., biz_date from Excel).
+CREATE TABLE IF NOT EXISTS wide_table_rows (
+  wide_table_id           VARCHAR(64)   NOT NULL,
+  row_id                  INT           NOT NULL,
+  sort_order              INT           NOT NULL DEFAULT 0,
+  requirement_id          VARCHAR(64)   NOT NULL,
+  schema_version          INT           NOT NULL DEFAULT 1,
+  plan_version            INT           NOT NULL DEFAULT 1,
+  row_status              VARCHAR(32)   NOT NULL DEFAULT 'initialized',
+  dimension_values_json   JSON          NULL,
+  business_date           VARCHAR(32)   NULL,
+  row_binding_key         VARCHAR(512)  NULL,
+  indicator_values_json   JSON          NULL,
+  system_values_json      JSON          NULL,
+  PRIMARY KEY (wide_table_id, row_id),
+  INDEX idx_wtr_requirement_id (requirement_id),
+  INDEX idx_wtr_business_date (business_date),
+  INDEX idx_wtr_row_binding_key (row_binding_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
