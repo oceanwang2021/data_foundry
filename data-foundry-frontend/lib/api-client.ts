@@ -1014,6 +1014,94 @@ export async function fetchRequirementWideTables(
   return { requirements, wideTables };
 }
 
+export type RequirementSearchSortBy =
+  | "updated_at"
+  | "created_at"
+  | "title"
+  | "project_name"
+  | "owner"
+  | "assignee"
+  | "status"
+  | "wide_table_name";
+
+export type RequirementSearchSortDir = "asc" | "desc";
+
+export type RequirementSearchItem = {
+  requirement: Requirement;
+  project: { id: string; name: string };
+  wideTable?: {
+    id: string;
+    tableName: string;
+    columnCount?: number;
+    recordCount?: number;
+  } | null;
+};
+
+export type RequirementSearchPage = {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: RequirementSearchItem[];
+};
+
+export async function searchRequirementsPage(params: {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+  projectId?: string;
+  owner?: string;
+  assignee?: string;
+  statuses?: Array<Requirement["status"]>;
+  wideTableId?: string;
+  wideTableKeyword?: string;
+  hasWideTable?: boolean;
+  sortBy?: RequirementSearchSortBy;
+  sortDir?: RequirementSearchSortDir;
+}): Promise<RequirementSearchPage> {
+  const qs = new URLSearchParams();
+  qs.set("page", String(params.page));
+  qs.set("page_size", String(params.pageSize));
+  if (params.keyword) qs.set("keyword", params.keyword);
+  if (params.projectId) qs.set("project_id", params.projectId);
+  if (params.owner) qs.set("owner", params.owner);
+  if (params.assignee) qs.set("assignee", params.assignee);
+  if (params.wideTableId) qs.set("wide_table_id", params.wideTableId);
+  if (params.wideTableKeyword) qs.set("wide_table_keyword", params.wideTableKeyword);
+  if (params.hasWideTable !== undefined) qs.set("has_wide_table", String(params.hasWideTable));
+  if (params.sortBy) qs.set("sort_by", params.sortBy);
+  if (params.sortDir) qs.set("sort_dir", params.sortDir);
+  if (params.statuses && params.statuses.length > 0) {
+    for (const status of params.statuses) {
+      qs.append("status", status);
+    }
+  }
+
+  const raw = await apiGet<any>(`/api/requirements/search?${qs.toString()}`);
+  const items: RequirementSearchItem[] = (raw.items ?? []).map((row: any) => {
+    const projectRaw = row.project ?? {};
+    const wideTableRaw = row.wide_table ?? row.wideTable ?? null;
+    return {
+      requirement: mapRequirement(row.requirement ?? {}),
+      project: { id: projectRaw.id ?? "", name: projectRaw.name ?? "" },
+      wideTable: wideTableRaw
+        ? {
+            id: wideTableRaw.id ?? "",
+            tableName: wideTableRaw.table_name ?? wideTableRaw.tableName ?? "",
+            columnCount: wideTableRaw.column_count ?? wideTableRaw.columnCount ?? undefined,
+            recordCount: wideTableRaw.record_count ?? wideTableRaw.recordCount ?? undefined,
+          }
+        : null,
+    };
+  });
+
+  return {
+    page: raw.page ?? params.page,
+    pageSize: raw.page_size ?? raw.pageSize ?? params.pageSize,
+    total: raw.total ?? 0,
+    items,
+  };
+}
+
 export async function fetchRequirement(
   projectId: string,
   requirementId: string,

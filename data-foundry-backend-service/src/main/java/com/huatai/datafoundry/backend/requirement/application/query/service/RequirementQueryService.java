@@ -4,13 +4,17 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchItemReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchPageReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableScopeImportReadDto;
 import com.huatai.datafoundry.backend.requirement.domain.model.Requirement;
 import com.huatai.datafoundry.backend.requirement.domain.model.WideTable;
 import com.huatai.datafoundry.backend.requirement.domain.repository.RequirementRepository;
+import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper.RequirementSearchMapper;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper.WideTableScopeImportMapper;
+import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.RequirementSearchRowRecord;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.WideTableScopeImportRecord;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
@@ -27,6 +31,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class RequirementQueryService {
   private final RequirementRepository requirementRepository;
+  private final RequirementSearchMapper requirementSearchMapper;
   private final WideTableScopeImportMapper wideTableScopeImportMapper;
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
@@ -34,11 +39,13 @@ public class RequirementQueryService {
 
   public RequirementQueryService(
       RequirementRepository requirementRepository,
+      RequirementSearchMapper requirementSearchMapper,
       WideTableScopeImportMapper wideTableScopeImportMapper,
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       ObjectMapper objectMapper) {
     this.requirementRepository = requirementRepository;
+    this.requirementSearchMapper = requirementSearchMapper;
     this.wideTableScopeImportMapper = wideTableScopeImportMapper;
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
@@ -173,6 +180,94 @@ public class RequirementQueryService {
       dto.setUpdatedAt(record.getUpdatedAt());
       out.add(dto);
     }
+    return out;
+  }
+
+  public RequirementSearchPageReadDto search(
+      String keyword,
+      String projectId,
+      String owner,
+      String assignee,
+      List<String> statuses,
+      String wideTableId,
+      String wideTableKeyword,
+      Boolean hasWideTable,
+      String sortBy,
+      String sortDir,
+      int page,
+      int pageSize) {
+    int normalizedPage = Math.max(page, 1);
+    int normalizedPageSize = Math.max(1, Math.min(pageSize, 100));
+    int offset = (normalizedPage - 1) * normalizedPageSize;
+
+    long total =
+        requirementSearchMapper.count(
+            keyword,
+            projectId,
+            owner,
+            assignee,
+            statuses,
+            wideTableId,
+            wideTableKeyword,
+            hasWideTable);
+    List<RequirementSearchRowRecord> rows =
+        requirementSearchMapper.list(
+            keyword,
+            projectId,
+            owner,
+            assignee,
+            statuses,
+            wideTableId,
+            wideTableKeyword,
+            hasWideTable,
+            sortBy,
+            sortDir,
+            offset,
+            normalizedPageSize);
+
+    List<RequirementSearchItemReadDto> items = new ArrayList<RequirementSearchItemReadDto>();
+    if (rows != null) {
+      for (RequirementSearchRowRecord row : rows) {
+        if (row == null) continue;
+        RequirementReadDto req = new RequirementReadDto();
+        req.setId(row.getRequirementId());
+        req.setProjectId(row.getProjectId());
+        req.setTitle(row.getTitle());
+        req.setPhase(row.getPhase());
+        req.setStatus(row.getStatus());
+        req.setSchemaLocked(row.getSchemaLocked());
+        req.setOwner(row.getOwner());
+        req.setAssignee(row.getAssignee());
+        req.setCreatedAt(row.getCreatedAt());
+        req.setUpdatedAt(row.getUpdatedAt());
+
+        RequirementSearchItemReadDto.ProjectSummaryReadDto project =
+            new RequirementSearchItemReadDto.ProjectSummaryReadDto();
+        project.setId(row.getProjectId());
+        project.setName(row.getProjectName());
+
+        RequirementSearchItemReadDto.WideTableSummaryReadDto wideTable = null;
+        if (row.getWideTableId() != null) {
+          wideTable = new RequirementSearchItemReadDto.WideTableSummaryReadDto();
+          wideTable.setId(row.getWideTableId());
+          wideTable.setTableName(row.getWideTableTableName());
+          wideTable.setRecordCount(row.getWideTableRecordCount());
+          wideTable.setColumnCount(row.getWideTableColumnCount());
+        }
+
+        RequirementSearchItemReadDto item = new RequirementSearchItemReadDto();
+        item.setRequirement(req);
+        item.setProject(project);
+        item.setWideTable(wideTable);
+        items.add(item);
+      }
+    }
+
+    RequirementSearchPageReadDto out = new RequirementSearchPageReadDto();
+    out.setPage(normalizedPage);
+    out.setPageSize(normalizedPageSize);
+    out.setTotal(total);
+    out.setItems(items);
     return out;
   }
 

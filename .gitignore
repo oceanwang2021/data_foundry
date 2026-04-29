@@ -18,6 +18,7 @@ data-foundry-frontend/tsconfig.tsbuildinfo
 tmp/
 .npm-cache/
 .uv-cache/
+.m2repo/
 *.log
 *.err.log
 
