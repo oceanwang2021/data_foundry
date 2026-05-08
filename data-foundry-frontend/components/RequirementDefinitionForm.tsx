@@ -15,6 +15,7 @@ import type {
   Requirement,
   WideTable,
   WideTableRecord,
+  ParameterRow,
   ColumnDefinition,
   TaskGroup,
   FetchTask,
@@ -105,7 +106,7 @@ const MAX_PERSISTED_DIMENSION_ROWS = 5000;
 
 type DimensionExcelImportState = {
   fileName: string;
-  fileType: "text/csv";
+  fileType: "text/csv" | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   fileContent: string;
   headers: string[];
   rows: Array<Record<string, string>>;
@@ -248,7 +249,7 @@ export default function RequirementDefinitionForm({
       return "请先在【表结构定义】里关联 Schema，并补齐字段定义后再提交。";
     }
     if (stepStatuses.C !== "completed") {
-      return "请先在【数据范围】里补齐时间范围与维度取值后再提交。";
+      return "请先在【数据范围】里补齐时间范围与采集参数表后再提交。";
     }
     if (requirement.dataUpdateEnabled == null) {
       return "请先在【数据更新】里确认是否持续更新后再提交。";
@@ -295,7 +296,7 @@ export default function RequirementDefinitionForm({
       const shouldReusePersistedDimensionRows = Boolean(
         !useExcelRows
         && !hasUnsavedScopePreviewChanges
-        && wideTable.scopeImport?.importMode === "dimension_rows_csv"
+        && (wideTable.scopeImport?.importMode === "dimension_rows_csv" || wideTable.scopeImport?.importMode === "parameter_rows_file")
         && currentPlanRecords.length > 0,
       );
       const preview = shouldReusePersistedDimensionRows
@@ -305,7 +306,7 @@ export default function RequirementDefinitionForm({
           : generateWideTablePreviewRecords(wideTable, currentPlanRecords, wideTableRecords);
 
       if (preview.totalCount > MAX_PERSISTED_DIMENSION_ROWS) {
-        throw new Error(`维度组合行数过大（${preview.totalCount}），请缩小业务日期范围或维度枚举值后再保存。`);
+        throw new Error(`采集参数行数过大（${preview.totalCount}），请缩小业务日期范围或参数行数量后再保存。`);
       }
 
       const reconcile = reconcileTaskPlanChange({
@@ -325,6 +326,25 @@ export default function RequirementDefinitionForm({
           planVersion: nextPlanVersion,
         },
       }));
+
+      const businessDateColumnName =
+        wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "biz_date";
+      const parameterRows = recordsWithPlanVersion.map((record, index) => ({
+        rowId: Number((record as any).ROW_ID ?? record.id ?? index + 1),
+        businessDate: String((record as Record<string, unknown>)[businessDateColumnName] ?? (record as any).BIZ_DATE ?? "").trim() || undefined,
+        values: record._metadata?.parameterValues
+          ? { ...record._metadata.parameterValues }
+          : Object.fromEntries(
+              wideTable.schema.columns
+                .filter((column) => column.category === "dimension" && !column.isBusinessDate)
+                .map((column) => [column.name, String((record as Record<string, unknown>)[column.name] ?? "")]),
+            ),
+      }));
+
+      await updateRequirementWideTable(requirement.id, {
+        ...wideTable,
+        parameterRows,
+      });
 
       await persistWideTablePreview(
         requirement.id,
@@ -351,12 +371,7 @@ export default function RequirementDefinitionForm({
     };
 
     // Persist every wide table (even if only one) so the backend always has a consistent snapshot.
-    await Promise.all(
-      wideTables.map(async (wt) => {
-        await updateRequirementWideTable(requirement.id, wt);
-        await persistWideTableDimensionRows(wt);
-      }),
-    );
+    await Promise.all(wideTables.map((wt) => persistWideTableDimensionRows(wt)));
   };
 
   const handleSaveDefinition = async () => {
@@ -2484,6 +2499,21 @@ function ScopeAndGroupSection({
           }
       )
     : undefined;
+  const parameterTableColumns = useMemo(
+    () => {
+      const cols = dimensionColumns.map((column) => ({
+        key: column.name,
+        label: column.chineseName ? `${column.name} / ${column.chineseName}` : column.name,
+      }));
+      if (usesBusinessDateAxis) {
+        const key = businessDateColumn?.name ?? "business_date";
+        return [{ key, label: key }, ...cols];
+      }
+      return cols;
+    },
+    [businessDateColumn?.name, dimensionColumns, usesBusinessDateAxis],
+  );
+  const parameterRows = selectedWt?.parameterRows ?? [];
   const previewBusinessDates = useMemo(
     () => !usesBusinessDateAxis
       ? []
@@ -2619,6 +2649,107 @@ function ScopeAndGroupSection({
     onUpdateWideTable(selectedWt.id, (wideTable) => normalizeWideTableMode(updater(wideTable)));
   };
 
+  const normalizeParameterHeaderKey = (value: string) => value.trim().toLowerCase();
+
+  const applyParameterRows = (rows: ParameterRow[], message: string) => {
+    markSelectedScopePreviewDirty();
+    updateSelectedWideTable((wideTable) => {
+      const currentPlanVersion = wideTable.currentPlanVersion ?? resolveCurrentPlanVersion(wideTable, selectedWideTableRecords, taskGroups ?? []);
+      return {
+        ...wideTable,
+        parameterRows: rows.map((row, index) => ({
+          rowId: index + 1,
+          businessDate: row.businessDate,
+          values: { ...row.values },
+        })),
+        dimensionRanges: [],
+        currentPlanVersion: currentPlanVersion + 1,
+        currentPlanFingerprint: undefined,
+        recordCount: 0,
+        status: "draft",
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    setRangeMessage(message);
+    onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
+    if (onTaskGroupsChange && selectedWt) {
+      const staleTaskGroups = markTaskGroupsAsStale(taskGroups ?? [], selectedWt.id, selectedWideTablePlanVersion);
+      onTaskGroupsChange(staleTaskGroups);
+    }
+  };
+
+  const handleAddParameterRow = () => {
+    const emptyValues = Object.fromEntries(dimensionColumns.map((column) => [column.name, ""]));
+    applyParameterRows(
+      [
+        ...parameterRows,
+        {
+          rowId: parameterRows.length + 1,
+          businessDate: undefined,
+          values: emptyValues,
+        },
+      ],
+      "已新增一行采集参数。",
+    );
+  };
+
+  const handleUpdateParameterCell = (rowIndex: number, columnKey: string, value: string) => {
+    const businessDateKey = businessDateColumn?.name ?? "business_date";
+    const nextRows = parameterRows.map((row, index) => {
+      if (index !== rowIndex) {
+        return row;
+      }
+      if (usesBusinessDateAxis && columnKey === businessDateKey) {
+        return { ...row, businessDate: value.trim() || undefined };
+      }
+      return {
+        ...row,
+        values: {
+          ...row.values,
+          [columnKey]: value,
+        },
+      };
+    });
+    applyParameterRows(nextRows, "采集参数表已更新。");
+  };
+
+  const handleRemoveParameterRow = (rowIndex: number) => {
+    applyParameterRows(
+      parameterRows.filter((_, index) => index !== rowIndex),
+      "已删除采集参数行。",
+    );
+  };
+
+  const handlePasteParameterRows = (text: string) => {
+    const rows = text
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/)
+      .map((line) => line.split(/\t|,/).map((cell) => cell.trim()))
+      .filter((row) => row.some((cell) => cell !== ""));
+    if (rows.length < 2) {
+      setRangeMessage("粘贴内容需要包含表头和至少一行数据。");
+      return;
+    }
+    const headers = rows[0];
+    const normalizedHeaders = headers.map((header) => normalizeParameterHeaderKey(header));
+    const businessDateKey = businessDateColumn?.name ?? "business_date";
+    const nextRows = rows.slice(1).map((cells, index) => {
+      const values: Record<string, string> = {};
+      let businessDate: string | undefined;
+      parameterTableColumns.forEach((column) => {
+        const headerIndex = normalizedHeaders.indexOf(normalizeParameterHeaderKey(column.key));
+        const value = headerIndex >= 0 ? String(cells[headerIndex] ?? "").trim() : "";
+        if (usesBusinessDateAxis && column.key === businessDateKey) {
+          businessDate = value || undefined;
+        } else {
+          values[column.key] = value;
+        }
+      });
+      return { rowId: index + 1, values, businessDate };
+    });
+    applyParameterRows(nextRows, `已粘贴 ${nextRows.length} 行采集参数。`);
+  };
+
   const handleBusinessDateRangeChange = (
     patch: Partial<WideTable["businessDateRange"]>,
   ) => {
@@ -2695,7 +2826,7 @@ function ScopeAndGroupSection({
       ...prev,
       [dimensionName]: "",
     }));
-    setRangeMessage("维度取值已修改，如需查看请点击预览数据。");
+    setRangeMessage("采集参数表已修改，如需查看请点击预览数据。");
     markSelectedScopePreviewDirty();
 
     // Step status: invalidate downstream of C (i.e., D)
@@ -2732,7 +2863,7 @@ function ScopeAndGroupSection({
         updatedAt: new Date().toISOString(),
       };
     });
-    setRangeMessage("维度取值已修改，如需查看请点击预览数据。");
+    setRangeMessage("采集参数表已修改，如需查看请点击预览数据。");
 
     // Step status: invalidate downstream of C (i.e., D)
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
@@ -2770,7 +2901,7 @@ function ScopeAndGroupSection({
         updatedAt: new Date().toISOString(),
       };
     });
-    setRangeMessage("维度取值已更新，如需查看请点击预览数据。");
+    setRangeMessage("采集参数表已更新，如需查看请点击预览数据。");
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
     if (onTaskGroupsChange && selectedWt) {
       const prevPlanVersion = selectedWideTablePlanVersion;
@@ -2841,19 +2972,40 @@ function ScopeAndGroupSection({
     return ",";
   };
 
+  const readImportFileAsDelimitedText = async (file: File): Promise<string> => {
+    const fileName = file.name.toLowerCase();
+    if (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls")) {
+      return file.text();
+    }
+    const xlsx = await import("xlsx");
+    const buffer = await file.arrayBuffer();
+    const workbook = xlsx.read(buffer, { type: "array" });
+    const firstSheetName = workbook.SheetNames[0];
+    const firstSheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined;
+    if (!firstSheet) {
+      return "";
+    }
+    const aoa = xlsx.utils.sheet_to_json<string[]>(firstSheet, {
+      header: 1,
+      raw: false,
+      defval: "",
+    });
+    return aoa.map((row) => row.map((cell) => String(cell ?? "")).join(",")).join("\n");
+  };
+
   const handleDimensionExcelImport = async (file: File) => {
     if (!selectedWt) {
-      setRangeMessage("当前需求尚未关联数据表，无法导入维度取值。");
+      setRangeMessage("当前需求尚未关联数据表，无法导入采集参数表。");
       return;
     }
 
     const fileName = file.name.toLowerCase();
-    if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+    if (false && (fileName.endsWith(".xlsx") || fileName.endsWith(".xls"))) {
       setRangeMessage("暂不支持直接解析 .xlsx/.xls，请先在 Excel 中另存为 CSV 后导入。");
       return;
     }
 
-    const text = await file.text();
+    const text = await readImportFileAsDelimitedText(file);
     const normalizedText = text.replace(/^\uFEFF/, "");
     const firstLine = normalizedText.split(/\r?\n/, 1)[0] ?? "";
     const delimiter = detectDelimiter(firstLine);
@@ -2932,11 +3084,23 @@ function ScopeAndGroupSection({
       return;
     }
 
+    const businessDateKey = businessDateColumn?.name ?? "business_date";
+    const importedParameterRows = rows.map((row, index) => ({
+      rowId: index + 1,
+      businessDate: usesBusinessDateAxis ? (String(row[businessDateKey] ?? "").trim() || undefined) : undefined,
+      values: Object.fromEntries(
+        dimensionColumns.map((column) => [column.name, String(row[column.name] ?? "").trim()]),
+      ),
+    }));
+    applyParameterRows(importedParameterRows, `已导入 ${importedParameterRows.length} 行采集参数。`);
+
     onDimensionExcelImportsChange((prev) => ({
       ...prev,
       [selectedWt.id]: {
         fileName: file.name,
-        fileType: "text/csv",
+        fileType: fileName.endsWith(".xlsx") || fileName.endsWith(".xls")
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "text/csv",
         fileContent: normalizedText,
         headers,
         rows,
@@ -2945,7 +3109,7 @@ function ScopeAndGroupSection({
     markSelectedScopePreviewDirty();
 
     setRangeMessage(
-      `已导入 Excel（${file.name}），识别到 ${rows.length} 行维度组合。` +
+      `已导入 ${file.name}，识别到 ${rows.length} 行采集参数。` +
         (skipped > 0 ? `（已跳过 ${skipped} 行不完整数据）` : "") +
         " 点击预览数据查看。",
     );
@@ -2956,12 +3120,18 @@ function ScopeAndGroupSection({
       return;
     }
 
-    const excelRows = draftDimensionExcelImport?.rows ?? [];
+    const businessDateKey = businessDateColumn?.name ?? "business_date";
+    const importedRows = draftDimensionExcelImport?.rows ?? [];
+    const savedParameterRows = parameterRows.map((row) => ({
+      ...row.values,
+      ...(usesBusinessDateAxis && row.businessDate ? { [businessDateKey]: row.businessDate } : {}),
+    }));
+    const excelRows = importedRows.length > 0 ? importedRows : savedParameterRows;
     const useExcelRows = excelRows.length > 0;
     const shouldUsePersistedImportedRows = Boolean(
       !useExcelRows
       && !isScopePreviewDirty
-      && selectedWt.scopeImport?.importMode === "dimension_rows_csv"
+      && (selectedWt.scopeImport?.importMode === "dimension_rows_csv" || selectedWt.scopeImport?.importMode === "parameter_rows_file")
       && selectedWideTableRecords.length > 0,
     );
 
@@ -2969,29 +3139,20 @@ function ScopeAndGroupSection({
       setPreviewRecords(selectedWideTableRecords);
       setPreviewTotalCount(selectedWideTableRecords.length);
       setIsPreviewModalOpen(true);
-      setRangeMessage(`已加载已保存的 CSV 逐行维度组合（${selectedWideTableRecords.length} 行）。`);
+      setRangeMessage(`已加载已保存的采集参数表（${selectedWideTableRecords.length} 行）。`);
       return;
     }
 
     if (!useExcelRows) {
-      const missingDimensions = dimensionColumns
-        .filter((column) => {
-          const values = selectedWt.dimensionRanges.find((range) => range.dimensionName === column.name)?.values ?? [];
-          return values.length === 0;
-        })
-        .map((column) => column.chineseName || column.name);
-
-      if (missingDimensions.length > 0) {
-        if (selectedWideTableRecords.length > 0) {
-          setPreviewRecords(selectedWideTableRecords);
-          setPreviewTotalCount(selectedWideTableRecords.length);
-          setIsPreviewModalOpen(true);
-          setRangeMessage(`已加载已保存的维度组合列表（${selectedWideTableRecords.length} 行）。`);
-          return;
-        }
-        setRangeMessage(`请先为以下维度配置取值：${missingDimensions.join("、")}`);
+      if (selectedWideTableRecords.length > 0) {
+        setPreviewRecords(selectedWideTableRecords);
+        setPreviewTotalCount(selectedWideTableRecords.length);
+        setIsPreviewModalOpen(true);
+        setRangeMessage(`已加载已保存的采集参数表（${selectedWideTableRecords.length} 行）。`);
         return;
       }
+      setRangeMessage("请先新增采集参数行，或导入 CSV/XLSX 参数表。");
+      return;
     }
 
     const { records, totalCount } = useExcelRows
@@ -3000,8 +3161,8 @@ function ScopeAndGroupSection({
     if (totalCount === 0) {
       setRangeMessage(
         usesBusinessDateAxis
-          ? "当前业务日期范围或维度取值不足，无法生成预览数据。"
-          : "当前维度取值不足，无法生成预览数据。",
+          ? "当前业务日期范围或采集参数表为空，无法生成预览数据。"
+          : "当前采集参数表为空，无法生成预览数据。",
       );
       return;
     }
@@ -3034,7 +3195,7 @@ function ScopeAndGroupSection({
             <SectionStatusBadge label="数据范围" status={stepStatuses.C} />
           </span>
         </div>
-        <p className="text-xs text-muted-foreground">在这里配置时间范围与维度取值，并在需要时查看预览。</p>
+        <p className="text-xs text-muted-foreground">在这里配置时间范围与采集参数表，并在需要时查看预览。</p>
       </div>
 
       {wideTables.length === 0 ? (
@@ -3227,149 +3388,105 @@ function ScopeAndGroupSection({
                   当前已标记为一次性交付，但业务日期结束方式仍为“永不”。提交前请将结束方式改为“具体日期”。                </div>
               ) : null}
 
-              {/* 维度范围 */}
+              {/* 采集参数表 */}
               <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h4 className="text-sm font-semibold">维度取值</h4>
-                  {isRangeEditable && isCEditable && dimensionColumns.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => dimensionExcelImportInputRef.current?.click()}
-                      className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
-                    >
-                      导入 Excel
-                    </button>
+                  <div>
+                    <h4 className="text-sm font-semibold">采集参数表</h4>
+                    <p className="mt-1 text-xs text-muted-foreground">每一行是一组提示词变量，预览与任务生成都会按行替换占位符。</p>
+                  </div>
+                  {isRangeEditable && isCEditable ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={handleAddParameterRow} className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5">新增行</button>
+                      <button type="button" onClick={() => dimensionExcelImportInputRef.current?.click()} className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5">导入 CSV/XLSX</button>
+                    </div>
                   ) : null}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {requirement.schemaLocked
-                    ? "Schema 已锁定。维度取值的调整会触发计划重建，并以新版本运行。"
-                    : "这里仅管理非业务日期维度。每个维度都要明确可枚举的取值。"}
-                </p>
                 {displayedDimensionScopeImport ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
                     <div className="text-muted-foreground">
                       {displayedDimensionScopeImport.isPersisted ? "已保存导入：" : "已导入："}
                       {displayedDimensionScopeImport.fileName}（{displayedDimensionScopeImport.rowCount} 行）
                     </div>
-                    <div className="flex items-center gap-2">
-                      {displayedDimensionScopeImport.isPersisted && selectedWt ? (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await downloadWideTableScopeImport(
-                                selectedWt.id,
-                                displayedDimensionScopeImport.fileName,
-                              );
-                              setRangeMessage("已下载已保存的 CSV。");
-                            } catch (error) {
-                              const message = error instanceof Error ? error.message : "下载 CSV 失败";
-                              setRangeMessage(message);
-                            }
-                          }}
-                          className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          下载 CSV
-                        </button>
-                      ) : null}
-                      {isRangeEditable && isCEditable ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!selectedWt) return;
-                            onDimensionExcelImportsChange((prev) => {
-                              const next = { ...prev };
-                              delete next[selectedWt.id];
-                              return next;
-                            });
-                            onScopePreviewDirtyChange((prev) => ({
-                              ...prev,
-                              [selectedWt.id]: true,
-                            }));
-                            updateSelectedWideTable((wideTable) => ({
-                              ...wideTable,
-                              scopeImport: undefined,
-                              updatedAt: new Date().toISOString(),
-                            }));
-                            setRangeMessage("已清除 Excel 导入内容。");
-                          }}
-                          className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          清除
-                        </button>
-                      ) : null}
-                    </div>
+                    {isRangeEditable && isCEditable ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!selectedWt) return;
+                          onDimensionExcelImportsChange((prev) => {
+                            const next = { ...prev };
+                            delete next[selectedWt.id];
+                            return next;
+                          });
+                          applyParameterRows([], "已清空采集参数表。");
+                        }}
+                        className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        清空
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
-                {dimensionColumns.length === 0 ? (
-                  <div className="text-xs text-muted-foreground">当前宽表没有可配置的普通维度列。</div>
+                {parameterTableColumns.length === 0 ? (
+                  <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">当前 Schema 没有可填写的参数列。</div>
                 ) : (
-                  <div className="space-y-2">
-                    {dimensionColumns.map((dimensionColumn) => {
-                      const range = selectedWt.dimensionRanges.find((item) => item.dimensionName === dimensionColumn.name);
-                      return (
-                        <div key={dimensionColumn.id} className="rounded-md border bg-muted/10 px-3 py-3 text-xs space-y-3">
-                          <div>
-                            <div className="font-medium">{dimensionColumn.name}</div>
-                            <div className="text-muted-foreground mt-1">
-                              {dimensionColumn.chineseName ? `${dimensionColumn.chineseName} · ` : ""}
-                              {dimensionColumn.description}
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {(range?.values ?? []).map((value) => (
-                              <span
-                                key={value}
-                                className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-[11px]"
-                              >
-                                {value}
+                  <div
+                    className="overflow-x-auto rounded-md border bg-background"
+                    onPaste={(event) => {
+                      if (!isRangeEditable || !isCEditable) return;
+                      const pastedText = event.clipboardData.getData("text/plain");
+                      if (!pastedText.trim()) return;
+                      event.preventDefault();
+                      handlePasteParameterRows(pastedText);
+                    }}
+                  >
+                    <table className="w-full min-w-[760px] text-xs">
+                      <thead className="border-b bg-muted/40">
+                        <tr>
+                          <th className="w-14 px-2 py-2 text-left font-medium">#</th>
+                          {parameterTableColumns.map((column) => (
+                            <th key={column.key} className="px-2 py-2 text-left font-medium">{column.label}</th>
+                          ))}
+                          {isRangeEditable && isCEditable ? <th className="w-20 px-2 py-2 text-right font-medium">操作</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {parameterRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={parameterTableColumns.length + (isRangeEditable && isCEditable ? 2 : 1)} className="px-3 py-6 text-center text-muted-foreground">
+                              暂无参数行，可新增一行或直接粘贴 Excel 表格。
+                            </td>
+                          </tr>
+                        ) : (
+                          parameterRows.map((row, rowIndex) => {
+                            const businessDateKey = businessDateColumn?.name ?? "business_date";
+                            return (
+                              <tr key={row.rowId || rowIndex}>
+                                <td className="px-2 py-2 text-muted-foreground">{rowIndex + 1}</td>
+                                {parameterTableColumns.map((column) => {
+                                  const value = usesBusinessDateAxis && column.key === businessDateKey ? row.businessDate ?? "" : row.values[column.key] ?? "";
+                                  return (
+                                    <td key={column.key} className="px-2 py-2">
+                                      <input
+                                        value={value}
+                                        disabled={!isRangeEditable || !isCEditable}
+                                        onChange={(event) => handleUpdateParameterCell(rowIndex, column.key, event.target.value)}
+                                        className="w-full rounded-md border bg-background px-2 py-1.5 text-xs disabled:bg-muted/30"
+                                      />
+                                    </td>
+                                  );
+                                })}
                                 {isRangeEditable && isCEditable ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveDimensionValue(dimensionColumn.name, value)}
-                                    className="text-muted-foreground hover:text-red-600"
-                                  >
-                                    x
-                                  </button>
+                                  <td className="px-2 py-2 text-right">
+                                    <button type="button" onClick={() => handleRemoveParameterRow(rowIndex)} className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-red-600">删除</button>
+                                  </td>
                                 ) : null}
-                              </span>
-                            ))}
-                            {(range?.values ?? []).length === 0 ? (
-                              <span className="text-muted-foreground">暂未配置枚举值</span>
-                            ) : null}
-                          </div>
-                          {isRangeEditable && isCEditable ? (
-                            <div className="flex gap-2">
-                              <input
-                                value={pendingDimensionValues[dimensionColumn.name] ?? ""}
-                                onChange={(event) =>
-                                  setPendingDimensionValues((prev) => ({
-                                    ...prev,
-                                    [dimensionColumn.name]: event.target.value,
-                                  }))
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    handleAddDimensionValue(dimensionColumn.name);
-                                  }
-                                }}
-                                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-                                placeholder={`新增 ${dimensionColumn.name} 枚举值`}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleAddDimensionValue(dimensionColumn.name)}
-                                className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5"
-                              >
-                                添加
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
@@ -3424,7 +3541,7 @@ function ScopeAndGroupSection({
                       </div>
                       {previewRecords.length === 0 ? (
                         <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                          {usesBusinessDateAxis ? "还没有可展示的预览数据，请先补齐业务日期和维度取值。" : "还没有可展示的预览数据，请先补齐维度取值。"}
+                          {usesBusinessDateAxis ? "还没有可展示的预览数据，请先补齐业务日期和采集参数表。" : "还没有可展示的预览数据，请先补齐采集参数表。"}
                           {isOpenEnded ? ` open-ended 范围仅会生成截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期的预览。` : ""}
                         </div>
                       ) : (

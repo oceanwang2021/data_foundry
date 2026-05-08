@@ -13,7 +13,7 @@ import org.apache.ibatis.annotations.Update;
 public interface WideTableRowMapper {
   @Select(
       "select wide_table_id, row_id, sort_order, requirement_id, schema_version, plan_version, row_status, "
-          + "dimension_values_json, business_date, row_binding_key, indicator_values_json, system_values_json "
+          + "dimension_values_json, parameter_values_json, business_date, row_binding_key, indicator_values_json, system_values_json "
           + "from wide_table_rows where wide_table_id = #{wideTableId} order by sort_order asc, row_id asc")
   List<WideTableRowRecord> listByWideTableId(@Param("wideTableId") String wideTableId);
 
@@ -29,12 +29,12 @@ public interface WideTableRowMapper {
       "<script>",
       "insert into wide_table_rows (",
       "  wide_table_id, row_id, sort_order, requirement_id, schema_version, plan_version, row_status, ",
-      "  dimension_values_json, business_date, row_binding_key",
+      "  dimension_values_json, parameter_values_json, business_date, row_binding_key",
       ") values",
       "<foreach collection='rows' item='r' separator=','>",
       "  (",
       "    #{r.wideTableId}, #{r.rowId}, #{r.sortOrder}, #{r.requirementId}, #{r.schemaVersion}, #{r.planVersion}, #{r.rowStatus},",
-      "    #{r.dimensionValuesJson}, #{r.businessDate}, #{r.rowBindingKey}",
+      "    #{r.dimensionValuesJson}, #{r.parameterValuesJson}, #{r.businessDate}, #{r.rowBindingKey}",
       "  )",
       "</foreach>",
       "on duplicate key update",
@@ -44,6 +44,7 @@ public interface WideTableRowMapper {
       "  plan_version = values(plan_version),",
       "  row_status = values(row_status),",
       "  dimension_values_json = values(dimension_values_json),",
+      "  parameter_values_json = values(parameter_values_json),",
       "  business_date = values(business_date),",
       "  row_binding_key = values(row_binding_key)",
       "</script>",

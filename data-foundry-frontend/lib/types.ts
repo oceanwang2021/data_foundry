@@ -134,10 +134,16 @@ export type WideTableScopeImport = {
   fileName: string;
   fileType: string;
   rowCount: number;
-  importMode: "dimension_rows_csv";
+  importMode: "dimension_rows_csv" | "parameter_rows_file";
   contentHash?: string;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type ParameterRow = {
+  rowId: number;
+  values: Record<string, string>;
+  businessDate?: string;
 };
 
 export type WideTable = {
@@ -148,6 +154,7 @@ export type WideTable = {
   schema: WideTableSchema;
   schemaVersion?: number;
   dimensionRanges: DimensionRange[];
+  parameterRows?: ParameterRow[];
   businessDateRange: BusinessDateRange;
   scopeImport?: WideTableScopeImport;
   semanticTimeAxis?: "business_date" | "none";
@@ -186,6 +193,7 @@ export type WideTableRecord = {
     }>;
     /** 上一轮采集值，用于验收差异展示 */
     previousValues?: Record<string, string | number | null>;
+    parameterValues?: Record<string, string>;
   };
 };
 
