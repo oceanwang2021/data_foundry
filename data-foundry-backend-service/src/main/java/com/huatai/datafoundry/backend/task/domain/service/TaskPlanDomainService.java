@@ -33,20 +33,38 @@ public class TaskPlanDomainService {
       return Collections.emptyList();
     }
 
-    List<Map<String, String>> dimensionCombos = buildDimensionCombinations(input.dimensions);
-    if (dimensionCombos.isEmpty()) {
+    List<ParameterRow> parameterRows = input.parameterRows != null ? input.parameterRows : Collections.<ParameterRow>emptyList();
+    boolean useParameterRows = !parameterRows.isEmpty();
+    List<Map<String, String>> dimensionCombos = useParameterRows
+        ? Collections.<Map<String, String>>emptyList()
+        : buildDimensionCombinations(input.dimensions);
+    if (!useParameterRows && dimensionCombos.isEmpty()) {
       dimensionCombos = Collections.singletonList(new HashMap<String, String>());
     }
 
     int planVersion = input.planVersion != null ? input.planVersion.intValue() : 1;
     int schemaVersion = input.schemaVersion != null ? input.schemaVersion.intValue() : 1;
 
-    List<FetchTaskDraft> out = new ArrayList<FetchTaskDraft>(dimensionCombos.size());
+    int expectedCount = useParameterRows ? parameterRows.size() : dimensionCombos.size();
+    List<FetchTaskDraft> out = new ArrayList<FetchTaskDraft>(expectedCount);
     int sortOrder = 0;
-    for (int i = 0; i < dimensionCombos.size(); i++) {
-      int rowId = i + 1;
-      Map<String, String> dim = dimensionCombos.get(i);
-      String rowBindingKey = buildRowBindingKey(input.businessDate, dim);
+    for (int i = 0; i < expectedCount; i++) {
+      int rowId;
+      Map<String, String> dim;
+      String effectiveBusinessDate;
+      if (useParameterRows) {
+        ParameterRow row = parameterRows.get(i);
+        rowId = row.rowId > 0 ? row.rowId : (i + 1);
+        dim = row.values != null ? row.values : new HashMap<String, String>();
+        effectiveBusinessDate = row.businessDate != null && !row.businessDate.trim().isEmpty()
+            ? row.businessDate
+            : input.businessDate;
+      } else {
+        rowId = i + 1;
+        dim = dimensionCombos.get(i);
+        effectiveBusinessDate = input.businessDate;
+      }
+      String rowBindingKey = buildRowBindingKey(effectiveBusinessDate, dim);
 
       FetchTaskDraft ft = new FetchTaskDraft();
       ft.id = buildFetchTaskId(input.taskGroupId, indicatorGroup.id, rowId);
@@ -59,7 +77,7 @@ public class TaskPlanDomainService {
       ft.executionMode = "normal";
       ft.indicatorKeys = indicatorGroup.indicatorColumns;
       ft.dimensionValues = dim;
-      ft.businessDate = input.businessDate;
+      ft.businessDate = effectiveBusinessDate;
       ft.status = "pending";
       ft.canRerun = true;
       ft.planVersion = planVersion;
@@ -231,7 +249,14 @@ public class TaskPlanDomainService {
     public Integer schemaVersion;
     public String partitionKey;
     public List<DimensionRange> dimensions = new ArrayList<DimensionRange>();
+    public List<ParameterRow> parameterRows = new ArrayList<ParameterRow>();
     public List<IndicatorGroup> indicatorGroups = new ArrayList<IndicatorGroup>();
+  }
+
+  public static class ParameterRow {
+    public int rowId;
+    public String businessDate;
+    public Map<String, String> values = new HashMap<String, String>();
   }
 
   public static class FetchTaskDraft {

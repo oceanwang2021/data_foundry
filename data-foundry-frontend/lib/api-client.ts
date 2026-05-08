@@ -270,6 +270,7 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
   const scope = raw.scope ?? {};
   const bizDate = scope.business_date ?? {};
   const dimensions = scope.dimensions ?? [];
+  const parameterRows = scope.parameter_rows ?? [];
 
   const indicatorGroups = (raw.indicator_groups ?? []).map((ig: any) =>
     mapIndicatorGroup(ig, raw.id),
@@ -290,6 +291,11 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
     dimensionRanges: dimensions.map((d: any) => ({
       dimensionName: d.column_key,
       values: d.values ?? [],
+    })),
+    parameterRows: (parameterRows as any[]).map((row: any, index: number) => ({
+      rowId: Number(row.row_id ?? index + 1),
+      values: row.values ?? row.parameter_values ?? {},
+      businessDate: row.business_date ?? undefined,
     })),
     businessDateRange: {
       start: normalizeApiBusinessDate(bizDate.start),
@@ -865,6 +871,11 @@ function toBackendWideTableScope(wideTable: WideTable) {
       column_key: range.dimensionName,
       values: range.values,
     })),
+    parameter_rows: (wideTable.parameterRows ?? []).map((row, index) => ({
+      row_id: Number(row.rowId ?? index + 1),
+      values: row.values ?? {},
+      business_date: row.businessDate ?? null,
+    })),
   };
 }
 
@@ -884,6 +895,9 @@ function toBackendWideTablePlanRows(
   );
 
   return records.map((record) => ({
+    parameter_values: record._metadata?.parameterValues ?? Object.fromEntries(
+      dimensionColumns.map((column) => [column.name, String(record[column.name] ?? "")]),
+    ),
     row_id: Number(record.ROW_ID ?? record.id),
     plan_version: record._metadata?.planVersion ?? planVersion,
     row_status: record.row_status ?? record.ROW_STATUS ?? "initialized",
@@ -1510,7 +1524,7 @@ export async function persistWideTablePreview(
                 row_count: scopeImport.rowCount,
                 file_content: scopeImport.fileContent,
                 header: scopeImport.headers,
-                import_mode: "dimension_rows_csv",
+                import_mode: "parameter_rows_file",
               }
             : null,
         }

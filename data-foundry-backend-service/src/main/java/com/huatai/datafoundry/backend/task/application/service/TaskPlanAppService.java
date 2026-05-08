@@ -11,6 +11,7 @@ import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.DimensionRange;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.FetchTaskDraft;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.IndicatorGroup;
+import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.ParameterRow;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.PlanFetchTasksInput;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.Scope;
 import java.util.ArrayList;
@@ -61,7 +62,7 @@ public class TaskPlanAppService {
       return;
     }
 
-    int dimensionCombinationCount = Math.max(1, scope.dimensionCombinationCount);
+    int dimensionCombinationCount = Math.max(1, scope.parameterRows.isEmpty() ? scope.dimensionCombinationCount : scope.parameterRows.size());
     int planVersion = 1;
     List<String> businessDates = taskPlanDomainService.buildBusinessDates(scope);
     int sortOrder = 0;
@@ -257,6 +258,7 @@ public class TaskPlanAppService {
     input.schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion() : 1;
     input.partitionKey = taskGroup.getPartitionKey();
     input.dimensions = scope.dimensions;
+    input.parameterRows = resolveParameterRowsForTaskGroup(scope.parameterRows, taskGroup.getBusinessDate());
     input.indicatorGroups = indicatorGroups;
 
     List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
@@ -348,11 +350,54 @@ public class TaskPlanAppService {
           }
         }
       }
+      Object parameterRowsObj = raw.get("parameter_rows");
+      if (parameterRowsObj instanceof List) {
+        List<?> list = (List<?>) parameterRowsObj;
+        int autoRowId = 1;
+        for (Object item : list) {
+          if (!(item instanceof Map)) continue;
+          Map<?, ?> row = (Map<?, ?>) item;
+          ParameterRow parameterRow = new ParameterRow();
+          parameterRow.rowId = asIntOr(row.get("row_id"), autoRowId++);
+          parameterRow.businessDate = asString(row.get("business_date"));
+          Object valuesObj = row.get("values");
+          if (!(valuesObj instanceof Map)) {
+            valuesObj = row.get("parameter_values");
+          }
+          if (valuesObj instanceof Map) {
+            Map<?, ?> valuesMap = (Map<?, ?>) valuesObj;
+            for (Map.Entry<?, ?> entry : valuesMap.entrySet()) {
+              if (entry.getKey() == null) continue;
+              String k = String.valueOf(entry.getKey()).trim();
+              if (k.isEmpty()) continue;
+              String v = entry.getValue() == null ? "" : String.valueOf(entry.getValue());
+              parameterRow.values.put(k, v);
+            }
+          }
+          scope.parameterRows.add(parameterRow);
+        }
+      }
       scope.dimensionCombinationCount = taskPlanDomainService.calculateDimensionCombinationCount(scope.dimensions);
       return scope;
     } catch (Exception ex) {
       return scope;
     }
+  }
+
+  private List<ParameterRow> resolveParameterRowsForTaskGroup(List<ParameterRow> rows, String taskGroupBusinessDate) {
+    if (rows == null || rows.isEmpty()) {
+      return Collections.emptyList();
+    }
+    List<ParameterRow> matched = new ArrayList<ParameterRow>();
+    for (ParameterRow row : rows) {
+      if (row == null) continue;
+      String rowBizDate = row.businessDate != null ? row.businessDate.trim() : "";
+      String groupBizDate = taskGroupBusinessDate != null ? taskGroupBusinessDate.trim() : "";
+      if (rowBizDate.isEmpty() || groupBizDate.isEmpty() || rowBizDate.equals(groupBizDate)) {
+        matched.add(row);
+      }
+    }
+    return matched;
   }
 
   private List<IndicatorGroup> parseIndicatorGroups(String indicatorGroupsJson, String wideTableId) {

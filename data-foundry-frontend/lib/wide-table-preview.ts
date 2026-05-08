@@ -60,6 +60,11 @@ export function generateWideTablePreviewRecords(
       const record: WideTableRecord = {
         id: rowId,
         wideTableId: wideTable.id,
+        _metadata: {
+          parameterValues: Object.fromEntries(
+            Object.entries(dimensionValues).map(([k, v]) => [k, String(v ?? "")]),
+          ),
+        },
       };
       const bindingKey = getWideTableDimensionBindingKey(wideTable, dimensionValues);
       const bindingAttributes = attributeBindings.get(bindingKey);
@@ -98,14 +103,13 @@ export function generateWideTablePreviewRecordsFromDimensionRows(
   const attributeColumns = wideTable.schema.columns.filter((column) => column.category === "attribute");
   const attributeBindings = buildAttributeBindings(wideTable, existingRecords, attributeColumns);
 
-  const totalCount = dimensionRows.length;
-  if (totalCount === 0) {
+  if (dimensionRows.length === 0) {
     return { records: [], totalCount: 0 };
   }
 
-  const fallbackBusinessDate = usesBusinessDateAxis
-    ? (buildBusinessDateSlots(wideTable.businessDateRange).find((d) => d != null) ?? null)
-    : null;
+  const fallbackBusinessDates: Array<string | null> = usesBusinessDateAxis
+    ? buildBusinessDateSlots(wideTable.businessDateRange)
+    : [null];
 
   const records: WideTableRecord[] = [];
   const existingRowIdsByBinding = buildExistingRowIdsByBinding(
@@ -125,36 +129,47 @@ export function generateWideTablePreviewRecordsFromDimensionRows(
     const dimensionValues = Object.fromEntries(
       dimensionColumns.map((column) => [column.name, String(row[column.name] ?? "").trim()]),
     );
-    const businessDate = usesBusinessDateAxis
-      ? String(row[businessDateFieldName] ?? row.BIZ_DATE ?? "").trim() || (fallbackBusinessDate ?? "")
-      : null;
 
-    const previewKey = buildPreviewRecordKey(wideTable, businessDate, dimensionValues);
-    const rowId = existingRowIdsByBinding.get(previewKey) ?? nextRowId;
-    const record: WideTableRecord = {
-      id: rowId,
-      wideTableId: wideTable.id,
-    };
-    const bindingKey = getWideTableDimensionBindingKey(wideTable, dimensionValues);
-    const bindingAttributes = attributeBindings.get(bindingKey);
+    const rowBusinessDate = usesBusinessDateAxis
+      ? String(row[businessDateFieldName] ?? row.BIZ_DATE ?? row.business_date ?? "").trim()
+      : "";
+    const businessDates = usesBusinessDateAxis
+      ? (rowBusinessDate ? [rowBusinessDate] : fallbackBusinessDates)
+      : [null];
 
-    for (const column of wideTable.schema.columns) {
-      record[column.name] = buildColumnPreviewValue(
-        column,
-        rowId,
-        usesBusinessDateAxis ? businessDate : null,
-        dimensionValues,
-        bindingAttributes?.[column.name],
-      );
-    }
+    for (const businessDate of businessDates) {
+      const previewKey = buildPreviewRecordKey(wideTable, businessDate, dimensionValues);
+      const rowId = existingRowIdsByBinding.get(previewKey) ?? nextRowId;
+      const record: WideTableRecord = {
+        id: rowId,
+        wideTableId: wideTable.id,
+        _metadata: {
+          parameterValues: Object.fromEntries(
+            Object.entries(row).map(([k, v]) => [k, String(v ?? "")]),
+          ),
+        },
+      };
+      const bindingKey = getWideTableDimensionBindingKey(wideTable, dimensionValues);
+      const bindingAttributes = attributeBindings.get(bindingKey);
 
-    records.push(record);
-    if (!existingRowIdsByBinding.has(previewKey)) {
-      nextRowId += 1;
+      for (const column of wideTable.schema.columns) {
+        record[column.name] = buildColumnPreviewValue(
+          column,
+          rowId,
+          usesBusinessDateAxis ? businessDate : null,
+          dimensionValues,
+          bindingAttributes?.[column.name],
+        );
+      }
+
+      records.push(record);
+      if (!existingRowIdsByBinding.has(previewKey)) {
+        nextRowId += 1;
+      }
     }
   }
 
-  return { records, totalCount };
+  return { records, totalCount: records.length };
 }
 
 function buildExistingRowIdsByBinding(
