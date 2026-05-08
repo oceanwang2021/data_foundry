@@ -218,13 +218,14 @@ public class TaskPlanDomainService {
     return MONTH_FMT.format(date);
   }
 
-  public static class Scope {
+public static class Scope {
     public String businessDateStart;
     public String businessDateEnd;
     public String frequency;
     public List<DimensionRange> dimensions = new ArrayList<DimensionRange>();
+    public List<ParameterRow> parameterRows = new ArrayList<ParameterRow>();
     public int dimensionCombinationCount = 1;
-  }
+}
 
   public static class DimensionRange {
     public final String key;
