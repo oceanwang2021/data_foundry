@@ -483,6 +483,47 @@ function deriveDimensionRangesFromRows(
   }));
 }
 
+function deriveParameterRowsFromRows(
+  wideTable: WideTable,
+  records: WideTableRecord[],
+  currentPlanVersion?: number,
+): NonNullable<WideTable["parameterRows"]> {
+  const dimensionColumns = wideTable.schema.columns.filter(
+    (column) => column.category === "dimension" && !column.isBusinessDate,
+  );
+
+  if (dimensionColumns.length === 0) {
+    return [];
+  }
+
+  const scopedRecords = currentPlanVersion != null
+    ? records.filter((record) => (record._metadata?.planVersion ?? 0) === currentPlanVersion)
+    : records;
+  const sourceRecords = scopedRecords.length > 0 ? scopedRecords : records;
+  const dedupedRows = new Map<string, Record<string, string>>();
+
+  for (const record of sourceRecords) {
+    if (record.wideTableId !== wideTable.id) {
+      continue;
+    }
+    const values = Object.fromEntries(
+      dimensionColumns.map((column) => [column.name, String(record[column.name] ?? "").trim()]),
+    );
+    const rowKey = dimensionColumns.map((column) => values[column.name] ?? "").join("\u0001");
+    if (!rowKey.trim()) {
+      continue;
+    }
+    if (!dedupedRows.has(rowKey)) {
+      dedupedRows.set(rowKey, values);
+    }
+  }
+
+  return Array.from(dedupedRows.values()).map((values, index) => ({
+    rowId: index + 1,
+    values,
+  }));
+}
+
 function hydrateWideTablesFromRows(
   wideTables: WideTable[],
   wideTableRecords: WideTableRecord[],
@@ -507,9 +548,15 @@ function hydrateWideTablesFromRows(
       wideTable.currentPlanVersion ?? 0,
       ...rows.map((row) => row._metadata?.planVersion ?? 0),
     );
+    const derivedParameterRows = deriveParameterRowsFromRows(
+      wideTable,
+      rows,
+      derivedPlanVersion > 0 ? derivedPlanVersion : undefined,
+    );
 
     return normalizeWideTableMode({
       ...wideTable,
+      parameterRows: derivedParameterRows.length > 0 ? derivedParameterRows : (wideTable.parameterRows ?? []),
       dimensionRanges: derivedDimensionRanges,
       currentPlanVersion: derivedPlanVersion > 0 ? derivedPlanVersion : wideTable.currentPlanVersion,
       recordCount: rows.length,

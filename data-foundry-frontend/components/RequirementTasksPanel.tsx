@@ -902,7 +902,24 @@ export default function RequirementTasksPanel({
       return { wideTable, records: currentWideTableRecords };
     }
 
-    const { records, totalCount } = generateWideTablePreviewRecords(wideTable, currentWideTableRecords, wideTableRecords);
+    const { records, totalCount } = generateWideTablePreviewRecords(
+      wideTable,
+      currentWideTableRecords,
+      wideTableRecords,
+    );
+    if (totalCount === 0) {
+      const hasConfiguredTimeRange = Boolean(
+        wideTable.businessDateRange.start?.trim()
+        && String(wideTable.businessDateRange.end ?? "").trim(),
+      );
+      const hasConfiguredParameterRows = Boolean(wideTable.parameterRows?.length);
+      const previewMissingReason = !hasConfiguredTimeRange
+        ? "当前时间范围为空，无法生成预览行。请先回到【需求】完善数据范围。"
+        : !hasConfiguredParameterRows
+          ? "当前采集参数表为空，无法生成预览行。请先回到【需求】完善数据范围。"
+          : "当前数据范围配置不足，无法生成预览行。请先回到【需求】完善数据范围。";
+      throw new Error(previewMissingReason);
+    }
     if (totalCount === 0) {
       throw new Error(
         usesBusinessDateAxis

@@ -18,6 +18,16 @@ export function generateWideTablePreviewRecords(
   existingRecords: WideTableRecord[] = [],
   allExistingRecords: WideTableRecord[] = existingRecords,
 ): { records: WideTableRecord[]; totalCount: number } {
+  const parameterRows = wideTable.parameterRows ?? [];
+  if (parameterRows.length > 0) {
+    return generateWideTablePreviewRecordsFromDimensionRows(
+      wideTable,
+      buildDimensionRowsFromParameterRows(wideTable),
+      existingRecords,
+      allExistingRecords,
+    );
+  }
+
   const usesBusinessDateAxis = hasWideTableBusinessDateDimension(wideTable);
   const businessDates: Array<string | null> = usesBusinessDateAxis
     ? buildBusinessDateSlots(wideTable.businessDateRange)
@@ -170,6 +180,16 @@ export function generateWideTablePreviewRecordsFromDimensionRows(
   }
 
   return { records, totalCount: records.length };
+}
+
+function buildDimensionRowsFromParameterRows(
+  wideTable: WideTable,
+): Array<Record<string, string>> {
+  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "biz_date";
+  return (wideTable.parameterRows ?? []).map((row) => ({
+    ...row.values,
+    ...(row.businessDate ? { [businessDateFieldName]: row.businessDate } : {}),
+  }));
 }
 
 function buildExistingRowIdsByBinding(
