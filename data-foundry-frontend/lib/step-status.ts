@@ -174,13 +174,26 @@ export function isStepCComplete(wideTable: WideTable): boolean {
     return false;
   }
 
+  const hasPersistedDimensionRows = wideTable.recordCount > 0;
+  const hasSqlParameterSource = wideTable.parameterSource?.mode === "sql"
+    && Boolean(wideTable.parameterSource.sql?.trim());
+
+  if (hasPersistedDimensionRows || hasSqlParameterSource) {
+    return true;
+  }
+
   if (regularDimensionColumns.length === 0) {
     return true;
   }
 
   const parameterRows = wideTable.parameterRows ?? [];
   if (parameterRows.length === 0) {
-    return false;
+    return regularDimensionColumns.every((col) => {
+      const range = wideTable.dimensionRanges.find(
+        (r) => r.dimensionName === col.name,
+      );
+      return Boolean(range && range.values.length > 0);
+    });
   }
 
   return parameterRows.every((row) =>

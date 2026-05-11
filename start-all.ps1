@@ -121,7 +121,6 @@ if (-not $SkipBackend) {
     -Url "http://localhost:8000" `
     -Command @"
 $javaHomeLine
-`$env:DATAFOUNDRY_DB_AUTO_MIGRATE = if (`$env:DATAFOUNDRY_DB_AUTO_MIGRATE) { `$env:DATAFOUNDRY_DB_AUTO_MIGRATE } else { 'true' }
 & '$mavenPath' -pl data-foundry-backend-service -am -DskipTests spring-boot:run
 "@
 }

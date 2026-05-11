@@ -14,6 +14,7 @@ import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.ParameterRow;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.PlanFetchTasksInput;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.Scope;
+import com.huatai.datafoundry.backend.targettable.application.query.service.TargetTableQueryService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -22,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -32,18 +34,37 @@ public class TaskPlanAppService {
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
   private final TaskPlanDomainService taskPlanDomainService;
+  private final TargetTableQueryService targetTableQueryService;
   private final ObjectMapper objectMapper;
 
-  public TaskPlanAppService(
+  TaskPlanAppService(
       WideTableReadRepository wideTableReadRepository,
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       TaskPlanDomainService taskPlanDomainService,
       ObjectMapper objectMapper) {
+    this(
+        wideTableReadRepository,
+        taskGroupRepository,
+        fetchTaskRepository,
+        taskPlanDomainService,
+        null,
+        objectMapper);
+  }
+
+  @Autowired
+  public TaskPlanAppService(
+      WideTableReadRepository wideTableReadRepository,
+      TaskGroupRepository taskGroupRepository,
+      FetchTaskRepository fetchTaskRepository,
+      TaskPlanDomainService taskPlanDomainService,
+      TargetTableQueryService targetTableQueryService,
+      ObjectMapper objectMapper) {
     this.wideTableReadRepository = wideTableReadRepository;
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.taskPlanDomainService = taskPlanDomainService;
+    this.targetTableQueryService = targetTableQueryService;
     this.objectMapper = objectMapper;
   }
 
@@ -62,7 +83,8 @@ public class TaskPlanAppService {
       return;
     }
 
-    int dimensionCombinationCount = Math.max(1, scope.parameterRows.isEmpty() ? scope.dimensionCombinationCount : scope.parameterRows.size());
+    List<ParameterRow> parameterRows = resolveScopeParameterRows(scope);
+    int dimensionCombinationCount = Math.max(1, parameterRows.isEmpty() ? scope.dimensionCombinationCount : parameterRows.size());
     int planVersion = 1;
     List<String> businessDates = taskPlanDomainService.buildBusinessDates(scope);
     int sortOrder = 0;
@@ -258,7 +280,7 @@ public class TaskPlanAppService {
     input.schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion() : 1;
     input.partitionKey = taskGroup.getPartitionKey();
     input.dimensions = scope.dimensions;
-    input.parameterRows = resolveParameterRowsForTaskGroup(scope.parameterRows, taskGroup.getBusinessDate());
+    input.parameterRows = resolveParameterRowsForTaskGroup(resolveScopeParameterRows(scope), taskGroup.getBusinessDate());
     input.indicatorGroups = indicatorGroups;
 
     List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
@@ -327,9 +349,17 @@ public class TaskPlanAppService {
       Object businessDate = raw.get("business_date");
       if (businessDate instanceof Map) {
         Map<?, ?> biz = (Map<?, ?>) businessDate;
+        scope.businessDateColumnKey = asString(biz.get("column_key"));
         scope.businessDateStart = asString(biz.get("start"));
         scope.businessDateEnd = asString(biz.get("end"));
         scope.frequency = asString(biz.get("frequency"));
+      }
+      Object parameterSourceObj = raw.get("parameter_source");
+      if (parameterSourceObj instanceof Map) {
+        Map<?, ?> parameterSource = (Map<?, ?>) parameterSourceObj;
+        scope.parameterSourceMode = asString(parameterSource.get("mode"));
+        scope.parameterSourceSql = asString(parameterSource.get("sql"));
+        scope.parameterSourceMaxRows = asIntOr(parameterSource.get("max_rows"), 1000);
       }
       Object dims = raw.get("dimensions");
       if (dims instanceof List) {
@@ -382,6 +412,57 @@ public class TaskPlanAppService {
     } catch (Exception ex) {
       return scope;
     }
+  }
+
+  private List<ParameterRow> resolveScopeParameterRows(Scope scope) {
+    if (scope == null) {
+      return Collections.emptyList();
+    }
+    if (!"sql".equalsIgnoreCase(asString(scope.parameterSourceMode))) {
+      return scope.parameterRows != null ? scope.parameterRows : Collections.<ParameterRow>emptyList();
+    }
+    if (scope.parameterSourceSql == null || scope.parameterSourceSql.trim().isEmpty()) {
+      return Collections.emptyList();
+    }
+    if (targetTableQueryService == null) {
+      return Collections.emptyList();
+    }
+    Map<String, Object> preview =
+        targetTableQueryService.previewSelectSql(scope.parameterSourceSql, Integer.valueOf(scope.parameterSourceMaxRows));
+    Object rowsObj = preview.get("rows");
+    if (!(rowsObj instanceof List)) {
+      return Collections.emptyList();
+    }
+    List<ParameterRow> out = new ArrayList<ParameterRow>();
+    int rowId = 1;
+    String businessDateKey = scope.businessDateColumnKey != null && !scope.businessDateColumnKey.trim().isEmpty()
+        ? scope.businessDateColumnKey.trim()
+        : "business_date";
+    for (Object item : (List<?>) rowsObj) {
+      if (!(item instanceof Map)) {
+        continue;
+      }
+      Map<?, ?> raw = (Map<?, ?>) item;
+      ParameterRow row = new ParameterRow();
+      row.rowId = rowId++;
+      for (Map.Entry<?, ?> entry : raw.entrySet()) {
+        if (entry.getKey() == null) {
+          continue;
+        }
+        String key = String.valueOf(entry.getKey()).trim();
+        if (key.isEmpty()) {
+          continue;
+        }
+        String value = entry.getValue() == null ? "" : String.valueOf(entry.getValue());
+        if (key.equalsIgnoreCase(businessDateKey) || "business_date".equalsIgnoreCase(key)) {
+          row.businessDate = value;
+        } else {
+          row.values.put(key, value);
+        }
+      }
+      out.add(row);
+    }
+    return out;
   }
 
   private List<ParameterRow> resolveParameterRowsForTaskGroup(List<ParameterRow> rows, String taskGroupBusinessDate) {

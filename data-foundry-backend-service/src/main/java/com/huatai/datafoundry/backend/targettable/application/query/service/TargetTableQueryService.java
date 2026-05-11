@@ -113,26 +113,33 @@ public class TargetTableQueryService {
     List<String> headers = new ArrayList<String>();
     List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
     try (Connection conn = dataSource.getConnection()) {
+      String originalCatalog = conn.getCatalog();
+      boolean originalReadOnly = conn.isReadOnly();
       conn.setReadOnly(true);
       if (targetSchema != null && !targetSchema.trim().isEmpty()) {
         conn.setCatalog(targetSchema);
       }
-      try (PreparedStatement ps = conn.prepareStatement(previewSql)) {
-        ps.setInt(1, limit);
-      try (ResultSet rs = ps.executeQuery()) {
-        ResultSetMetaData metaData = rs.getMetaData();
-        int columnCount = metaData.getColumnCount();
-        for (int i = 1; i <= columnCount; i++) {
-          headers.add(metaData.getColumnLabel(i));
-        }
-        while (rs.next()) {
-          Map<String, Object> row = new LinkedHashMap<String, Object>();
-          for (int i = 1; i <= columnCount; i++) {
-            row.put(headers.get(i - 1), rs.getObject(i));
+      try {
+        try (PreparedStatement ps = conn.prepareStatement(previewSql)) {
+          ps.setInt(1, limit);
+          try (ResultSet rs = ps.executeQuery()) {
+            ResultSetMetaData metaData = rs.getMetaData();
+            int columnCount = metaData.getColumnCount();
+            for (int i = 1; i <= columnCount; i++) {
+              headers.add(metaData.getColumnLabel(i));
+            }
+            while (rs.next()) {
+              Map<String, Object> row = new LinkedHashMap<String, Object>();
+              for (int i = 1; i <= columnCount; i++) {
+                row.put(headers.get(i - 1), rs.getObject(i));
+              }
+              rows.add(row);
+            }
           }
-          rows.add(row);
         }
-      }
+      } finally {
+        conn.setCatalog(originalCatalog);
+        conn.setReadOnly(originalReadOnly);
       }
     } catch (IllegalArgumentException ex) {
       throw ex;

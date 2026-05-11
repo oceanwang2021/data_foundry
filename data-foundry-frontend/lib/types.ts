@@ -146,6 +146,12 @@ export type ParameterRow = {
   businessDate?: string;
 };
 
+export type ParameterSource = {
+  mode: "manual_file" | "sql";
+  sql?: string;
+  maxRows?: number;
+};
+
 export type WideTable = {
   id: string;
   requirementId: string;
@@ -155,6 +161,7 @@ export type WideTable = {
   schemaVersion?: number;
   dimensionRanges: DimensionRange[];
   parameterRows?: ParameterRow[];
+  parameterSource?: ParameterSource;
   businessDateRange: BusinessDateRange;
   scopeImport?: WideTableScopeImport;
   semanticTimeAxis?: "business_date" | "none";

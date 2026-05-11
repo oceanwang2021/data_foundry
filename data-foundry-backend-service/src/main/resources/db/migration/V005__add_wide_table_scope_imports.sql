@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS wide_table_scope_imports (
   requirement_id VARCHAR(64) NOT NULL,
   import_mode VARCHAR(64) NOT NULL,
   file_name VARCHAR(255) NOT NULL,
-  file_type VARCHAR(64) NOT NULL,
+  file_type VARCHAR(128) NOT NULL,
   content_hash VARCHAR(64) NULL,
   row_count INT NOT NULL DEFAULT 0,
   header_json JSON NULL,

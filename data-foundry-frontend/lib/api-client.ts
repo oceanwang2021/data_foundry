@@ -271,6 +271,7 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
   const bizDate = scope.business_date ?? {};
   const dimensions = scope.dimensions ?? [];
   const parameterRows = scope.parameter_rows ?? [];
+  const parameterSource = scope.parameter_source ?? {};
 
   const indicatorGroups = (raw.indicator_groups ?? []).map((ig: any) =>
     mapIndicatorGroup(ig, raw.id),
@@ -297,6 +298,13 @@ function mapWideTable(raw: any, requirementId: string): WideTable {
       values: row.values ?? row.parameter_values ?? {},
       businessDate: row.business_date ?? undefined,
     })),
+    parameterSource: parameterSource?.mode
+      ? {
+          mode: parameterSource.mode === "sql" ? "sql" : "manual_file",
+          sql: parameterSource.sql ?? undefined,
+          maxRows: parameterSource.max_rows ?? parameterSource.maxRows ?? undefined,
+        }
+      : undefined,
     businessDateRange: {
       start: normalizeApiBusinessDate(bizDate.start),
       end: bizDate.end === "never" ? "never" : normalizeApiBusinessDate(bizDate.end),
@@ -871,11 +879,22 @@ function toBackendWideTableScope(wideTable: WideTable) {
       column_key: range.dimensionName,
       values: range.values,
     })),
-    parameter_rows: (wideTable.parameterRows ?? []).map((row, index) => ({
-      row_id: Number(row.rowId ?? index + 1),
-      values: row.values ?? {},
-      business_date: row.businessDate ?? null,
-    })),
+    parameter_rows: wideTable.parameterSource?.mode === "sql"
+      ? []
+      : (wideTable.parameterRows ?? []).map((row, index) => ({
+          row_id: Number(row.rowId ?? index + 1),
+          values: row.values ?? {},
+          business_date: row.businessDate ?? null,
+        })),
+    parameter_source: wideTable.parameterSource
+      ? {
+          mode: wideTable.parameterSource.mode,
+          sql: wideTable.parameterSource.sql ?? null,
+          max_rows: wideTable.parameterSource.maxRows ?? null,
+        }
+      : {
+          mode: "manual_file",
+        },
   };
 }
 
