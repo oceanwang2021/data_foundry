@@ -24,8 +24,10 @@ type DimensionDraft = {
 };
 
 type Props = {
-  project: Project;
-  projectId: string;
+  project?: Project;
+  projectId?: string;
+  projects?: Project[];
+  defaultProjectId?: string;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (requirement: Requirement) => void;
@@ -200,18 +202,22 @@ function BusinessDateInput({
 export default function CreateRequirementModal({
   project,
   projectId,
+  projects = [],
+  defaultProjectId,
   isOpen,
   onClose,
   onSaved,
 }: Props) {
   const runtimeSettings = useMemo(() => loadRuntimeSettings() ?? DEFAULT_RUNTIME_SETTINGS, []);
   const defaultSearchEngines = runtimeSettings.searchConfig.enabledSearchEngines;
+  const isProjectSelectable = !project;
 
   const [title, setTitle] = useState("");
   const [owner, setOwner] = useState("");
   const [assignee, setAssignee] = useState("");
   const [businessGoal, setBusinessGoal] = useState("");
   const [backgroundKnowledge, setBackgroundKnowledge] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState(projectId ?? defaultProjectId ?? project?.id ?? "");
 
   const [enabledSearchEngines, setEnabledSearchEngines] = useState<SearchEngineProvider[]>(defaultSearchEngines);
   const [preferredSitesText, setPreferredSitesText] = useState("");
@@ -233,6 +239,15 @@ export default function CreateRequirementModal({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
+  const activeProject = useMemo(() => {
+    if (project) {
+      return project;
+    }
+    return projects.find((item) => item.id === selectedProjectId) ?? null;
+  }, [project, projects, selectedProjectId]);
+
+  const activeProjectId = projectId ?? activeProject?.id ?? "";
+
   useEffect(() => {
     if (!isOpen) return;
     setTitle("");
@@ -240,8 +255,9 @@ export default function CreateRequirementModal({
     setAssignee("");
     setBusinessGoal("");
     setBackgroundKnowledge("");
+    setSelectedProjectId(projectId ?? defaultProjectId ?? project?.id ?? projects[0]?.id ?? "");
     setEnabledSearchEngines(defaultSearchEngines);
-    setPreferredSitesText(project.dataSource?.search?.sites?.join("\n") ?? "");
+    setPreferredSitesText("");
     setWideTableTitle("");
     setWideTableName("");
     setWideTableSchema(DEFAULT_SCHEMA);
@@ -255,7 +271,22 @@ export default function CreateRequirementModal({
     setSaving(false);
     setMessage("");
     setIsSchemaSelectorOpen(false);
-  }, [isOpen, defaultSearchEngines, project.dataSource]);
+  }, [isOpen, defaultSearchEngines, project, projectId, defaultProjectId, projects]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setPreferredSitesText(activeProject?.dataSource?.search?.sites?.join("\n") ?? "");
+  }, [isOpen, activeProject]);
+
+  useEffect(() => {
+    if (!isOpen || !isProjectSelectable) return;
+    if (selectedProjectId && projects.some((item) => item.id === selectedProjectId)) {
+      return;
+    }
+    if (projects.length > 0) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [isOpen, isProjectSelectable, projects, selectedProjectId]);
 
   useEffect(() => {
     if (bizFrequency === "daily" || bizFrequency === "weekly") {
@@ -267,7 +298,7 @@ export default function CreateRequirementModal({
 
   if (!isOpen) return null;
 
-  const canSave = title.trim() !== "" && !saving;
+  const canSave = title.trim() !== "" && activeProject != null && activeProjectId !== "" && !saving;
 
   const toggleSearchEngine = (engine: SearchEngineProvider) => {
     setEnabledSearchEngines((prev) => {
@@ -302,16 +333,16 @@ export default function CreateRequirementModal({
   };
 
   const handleSave = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || activeProject == null || activeProjectId === "") return;
     setSaving(true);
     setMessage("");
     try {
       const preferredSites = parseCommaLines(preferredSitesText);
-      const projectDataSource = project.dataSource
+      const projectDataSource = activeProject.dataSource
         ? {
-            ...project.dataSource,
+            ...activeProject.dataSource,
             search: {
-              ...(project.dataSource.search ?? { engines: [], sites: [], sitePolicy: "preferred" as const }),
+              ...(activeProject.dataSource.search ?? { engines: [], sites: [], sitePolicy: "preferred" as const }),
               sites: preferredSites,
             },
           }
@@ -340,7 +371,7 @@ export default function CreateRequirementModal({
           }]
         : [];
 
-      const created = await createRequirement(projectId, {
+      const created = await createRequirement(activeProjectId, {
         title: title.trim(),
         owner: owner.trim(),
         assignee: assignee.trim(),
@@ -412,11 +443,26 @@ export default function CreateRequirementModal({
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">关联项目</label>
-                <input
-                  value={project.name}
-                  readOnly
-                  className="w-full rounded-md border px-3 py-2 text-sm bg-muted/20 text-muted-foreground"
-                />
+                {isProjectSelectable ? (
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="w-full rounded-md border px-3 py-2 text-sm bg-background"
+                  >
+                    {projects.length === 0 ? <option value="">请选择项目</option> : null}
+                    {projects.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={activeProject?.name ?? ""}
+                    readOnly
+                    className="w-full rounded-md border px-3 py-2 text-sm bg-muted/20 text-muted-foreground"
+                  />
+                )}
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">业务负责人</label>
