@@ -168,9 +168,12 @@ export function isStepCComplete(wideTable: WideTable): boolean {
     (col) => col.category === "dimension" && !col.isBusinessDate,
   );
   const hasPersistedDimensionRows = wideTable.recordCount > 0;
+  const hasParameterRows = (wideTable.parameterRows ?? []).length > 0;
+  const hasSqlParameterSource = wideTable.parameterSource?.mode === "sql"
+    && Boolean(wideTable.parameterSource.sql?.trim());
 
   // Check dimension enum values (auto-satisfied if no regular dimension columns)
-  if (!hasPersistedDimensionRows && regularDimensionColumns.length > 0) {
+  if (!hasPersistedDimensionRows && !hasParameterRows && !hasSqlParameterSource && regularDimensionColumns.length > 0) {
     for (const col of regularDimensionColumns) {
       const range = wideTable.dimensionRanges.find(
         (r) => r.dimensionName === col.name,

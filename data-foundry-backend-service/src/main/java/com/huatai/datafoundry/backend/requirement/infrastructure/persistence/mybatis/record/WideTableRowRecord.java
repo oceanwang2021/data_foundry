@@ -10,8 +10,6 @@ public class WideTableRowRecord {
   private String rowStatus;
   /** Stored as JSON in DB. */
   private String dimensionValuesJson;
-  /** Stored as JSON in DB. */
-  private String parameterValuesJson;
   private String businessDate;
   private String rowBindingKey;
   /** Stored as JSON in DB. */
@@ -81,14 +79,6 @@ public class WideTableRowRecord {
 
   public void setDimensionValuesJson(String dimensionValuesJson) {
     this.dimensionValuesJson = dimensionValuesJson;
-  }
-
-  public String getParameterValuesJson() {
-    return parameterValuesJson;
-  }
-
-  public void setParameterValuesJson(String parameterValuesJson) {
-    this.parameterValuesJson = parameterValuesJson;
   }
 
   public String getBusinessDate() {

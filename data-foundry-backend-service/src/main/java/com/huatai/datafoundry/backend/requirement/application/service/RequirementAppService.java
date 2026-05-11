@@ -287,7 +287,6 @@ public class RequirementAppService {
           dimensionValues = parameterValues;
         }
         String dimensionValuesJson = dimensionValues != null ? writeJson(dimensionValues) : null;
-        String parameterValuesJson = parameterValues != null ? writeJson(parameterValues) : null;
         String businessDate = asString(row.get("business_date"));
         String rowStatus = asString(row.get("row_status"));
         if (rowStatus == null || rowStatus.isEmpty()) {
@@ -309,7 +308,6 @@ public class RequirementAppService {
         record.setPlanVersion(planVersion);
         record.setRowStatus(rowStatus);
         record.setDimensionValuesJson(dimensionValuesJson);
-        record.setParameterValuesJson(parameterValuesJson);
         record.setBusinessDate(businessDate);
         record.setRowBindingKey(rowBindingKey);
         toUpsert.add(record);

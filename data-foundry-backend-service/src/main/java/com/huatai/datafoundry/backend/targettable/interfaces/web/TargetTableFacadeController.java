@@ -47,7 +47,18 @@ public class TargetTableFacadeController {
       return targetTableQueryService.previewSelectSql(sql, limit);
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+    } catch (IllegalStateException ex) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, rootMessage(ex), ex);
     }
+  }
+
+  private static String rootMessage(Throwable error) {
+    Throwable cursor = error;
+    while (cursor.getCause() != null) {
+      cursor = cursor.getCause();
+    }
+    String message = cursor.getMessage();
+    return message != null && !message.trim().isEmpty() ? message : error.getMessage();
   }
 }
 

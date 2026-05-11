@@ -290,6 +290,28 @@ export default function RequirementDefinitionForm({
         (record) => resolveRecordPlanVersion(record, currentPlanVersion) === currentPlanVersion,
       );
 
+      if (wideTable.parameterSource?.mode === "sql") {
+        await updateRequirementWideTable(requirement.id, {
+          ...wideTable,
+          parameterRows: [],
+          recordCount: 0,
+        });
+
+        await persistWideTablePreview(
+          requirement.id,
+          { ...wideTable, parameterRows: [], recordCount: 0 },
+          [],
+          null,
+        );
+
+        setScopePreviewDirtyByWideTableId((prev) => ({
+          ...prev,
+          [wideTable.id]: false,
+        }));
+        handleReplaceWideTableRecords(wideTable.id, []);
+        return;
+      }
+
       const excelImport = dimensionExcelImports[wideTable.id];
       const excelRows = excelImport?.rows ?? [];
       const hasUnsavedScopePreviewChanges = scopePreviewDirtyByWideTableId[wideTable.id] ?? false;
@@ -2623,9 +2645,9 @@ function ScopeAndGroupSection({
     setPreviewTotalCount(0);
     setSelectedPreviewBusinessDate("");
     setSelectedPreviewYear("");
-    setParameterInputMode("manual");
-    setParameterSqlText("");
-  }, [selectedWtId]);
+    setParameterInputMode(selectedWt?.parameterSource?.mode === "sql" ? "sql" : "manual");
+    setParameterSqlText(selectedWt?.parameterSource?.sql ?? "");
+  }, [selectedWtId, selectedWt?.parameterSource?.mode, selectedWt?.parameterSource?.sql]);
 
   useEffect(() => {
     if (visiblePreviewBusinessDates.length === 0) {
@@ -2683,9 +2705,20 @@ function ScopeAndGroupSection({
     if (mode === "sql") {
       clearDraftParameterFileImport();
     }
+    updateSelectedWideTable((wideTable) => ({
+      ...wideTable,
+      parameterSource: mode === "sql"
+        ? { mode: "sql", sql: parameterSqlText, maxRows: 1000 }
+        : { mode: "manual_file" },
+      updatedAt: new Date().toISOString(),
+    }));
   };
 
-  const applyParameterRows = (rows: ParameterRow[], message: string) => {
+  const applyParameterRows = (
+    rows: ParameterRow[],
+    message: string,
+    source: WideTable["parameterSource"] = { mode: "manual_file" },
+  ) => {
     markSelectedScopePreviewDirty();
     updateSelectedWideTable((wideTable) => {
       const currentPlanVersion = wideTable.currentPlanVersion ?? resolveCurrentPlanVersion(wideTable, selectedWideTableRecords, taskGroups ?? []);
@@ -2696,6 +2729,7 @@ function ScopeAndGroupSection({
           businessDate: row.businessDate,
           values: { ...row.values },
         })),
+        parameterSource: source,
         dimensionRanges: [],
         currentPlanVersion: currentPlanVersion + 1,
         currentPlanFingerprint: undefined,
@@ -2784,6 +2818,19 @@ function ScopeAndGroupSection({
     applyParameterRows(nextRows, `已粘贴 ${nextRows.length} 行采集参数。`);
   };
 
+  const handleParameterSqlTextChange = (value: string) => {
+    setParameterSqlText(value);
+    updateSelectedWideTable((wideTable) => ({
+      ...wideTable,
+      parameterSource: {
+        mode: "sql",
+        sql: value,
+        maxRows: 1000,
+      },
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
   const handleImportParameterRowsFromSql = async () => {
     const sql = parameterSqlText.trim();
     if (!sql) {
@@ -2825,7 +2872,11 @@ function ScopeAndGroupSection({
         return { rowId: index + 1, values, businessDate };
       });
       clearDraftParameterFileImport();
-      applyParameterRows(nextRows, `已通过 SQL 导入 ${nextRows.length} 行采集参数。`);
+      applyParameterRows(
+        nextRows,
+        `已通过 SQL 导入 ${nextRows.length} 行采集参数。`,
+        { mode: "sql", sql, maxRows: 1000 },
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "SQL 导入失败";
       setRangeMessage(message);
@@ -3199,13 +3250,29 @@ function ScopeAndGroupSection({
     );
   };
 
-  const handleOpenPreview = () => {
+  const handleOpenPreview = async () => {
     if (!selectedWt) {
       return;
     }
 
     const businessDateKey = businessDateColumn?.name ?? "business_date";
-    const importedRows = draftDimensionExcelImport?.rows ?? [];
+    let sqlRows: Array<Record<string, string>> = [];
+    if (selectedWt.parameterSource?.mode === "sql" && selectedWt.parameterSource.sql?.trim()) {
+      try {
+        const sqlResult = await previewParameterRowsSql(
+          selectedWt.parameterSource.sql,
+          selectedWt.parameterSource.maxRows ?? 1000,
+        );
+        sqlRows = sqlResult.rows.map((row) => Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [key, value == null ? "" : String(value)]),
+        ));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "SQL 查询失败";
+        setRangeMessage(message);
+        return;
+      }
+    }
+    const importedRows = sqlRows.length > 0 ? sqlRows : (draftDimensionExcelImport?.rows ?? []);
     const savedParameterRows = parameterRows.map((row) => ({
       ...row.values,
       ...(usesBusinessDateAxis && row.businessDate ? { [businessDateKey]: row.businessDate } : {}),
@@ -3477,7 +3544,7 @@ function ScopeAndGroupSection({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h4 className="text-sm font-semibold">采集参数表</h4>
-                    <p className="mt-1 text-xs text-muted-foreground">手动/文件导入与 SQL 导入互斥，最终都会生成同一份参数行。</p>
+                    <p className="mt-1 text-xs text-muted-foreground">请选择一种参数来源：手动/文件用于固定参数行，SQL 导入会在任务生成前动态查询最新参数。</p>
                   </div>
                   {isRangeEditable && isCEditable ? (
                     <div className="inline-flex rounded-md border bg-background p-1 text-xs">
@@ -3544,7 +3611,7 @@ function ScopeAndGroupSection({
                     </div>
                     <textarea
                       value={parameterSqlText}
-                      onChange={(event) => setParameterSqlText(event.target.value)}
+                      onChange={(event) => handleParameterSqlTextChange(event.target.value)}
                       rows={3}
                       className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs"
                       placeholder="select distinct COMNAME as COMNAME, COMCODE as COMCODE from IR_ADAS_COMPUTE_CONFIG"
