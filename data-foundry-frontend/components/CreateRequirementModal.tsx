@@ -46,6 +46,7 @@ function parseCommaLines(text: string): string[] {
 }
 
 const DEFAULT_SCHEMA: WideTableSchema = { columns: [] };
+const EMPTY_PROJECTS: Project[] = [];
 
 function resolveWideTableColumnType(
   dataType: string,
@@ -202,7 +203,7 @@ function BusinessDateInput({
 export default function CreateRequirementModal({
   project,
   projectId,
-  projects = [],
+  projects: incomingProjects,
   defaultProjectId,
   isOpen,
   onClose,
@@ -211,6 +212,8 @@ export default function CreateRequirementModal({
   const runtimeSettings = useMemo(() => loadRuntimeSettings() ?? DEFAULT_RUNTIME_SETTINGS, []);
   const defaultSearchEngines = runtimeSettings.searchConfig.enabledSearchEngines;
   const isProjectSelectable = !project;
+  const projectOptions = incomingProjects ?? EMPTY_PROJECTS;
+  const projects = projectOptions;
 
   const [title, setTitle] = useState("");
   const [owner, setOwner] = useState("");
@@ -243,8 +246,8 @@ export default function CreateRequirementModal({
     if (project) {
       return project;
     }
-    return projects.find((item) => item.id === selectedProjectId) ?? null;
-  }, [project, projects, selectedProjectId]);
+    return projectOptions.find((item) => item.id === selectedProjectId) ?? null;
+  }, [project, projectOptions, selectedProjectId]);
 
   const activeProjectId = projectId ?? activeProject?.id ?? "";
 
@@ -255,7 +258,7 @@ export default function CreateRequirementModal({
     setAssignee("");
     setBusinessGoal("");
     setBackgroundKnowledge("");
-    setSelectedProjectId(projectId ?? defaultProjectId ?? project?.id ?? projects[0]?.id ?? "");
+    setSelectedProjectId(projectId ?? defaultProjectId ?? project?.id ?? projectOptions[0]?.id ?? "");
     setEnabledSearchEngines(defaultSearchEngines);
     setPreferredSitesText("");
     setWideTableTitle("");
@@ -271,7 +274,7 @@ export default function CreateRequirementModal({
     setSaving(false);
     setMessage("");
     setIsSchemaSelectorOpen(false);
-  }, [isOpen, defaultSearchEngines, project, projectId, defaultProjectId, projects]);
+  }, [isOpen, defaultSearchEngines, project, projectId, defaultProjectId, projectOptions]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -280,13 +283,13 @@ export default function CreateRequirementModal({
 
   useEffect(() => {
     if (!isOpen || !isProjectSelectable) return;
-    if (selectedProjectId && projects.some((item) => item.id === selectedProjectId)) {
+    if (selectedProjectId && projectOptions.some((item) => item.id === selectedProjectId)) {
       return;
     }
-    if (projects.length > 0) {
-      setSelectedProjectId(projects[0].id);
+    if (projectOptions.length > 0) {
+      setSelectedProjectId(projectOptions[0].id);
     }
-  }, [isOpen, isProjectSelectable, projects, selectedProjectId]);
+  }, [isOpen, isProjectSelectable, projectOptions, selectedProjectId]);
 
   useEffect(() => {
     if (bizFrequency === "daily" || bizFrequency === "weekly") {
