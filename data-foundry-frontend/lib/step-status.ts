@@ -166,28 +166,20 @@ export function isStepCComplete(wideTable: WideTable): boolean {
   const regularDimensionColumns = wideTable.schema.columns.filter(
     (col) => col.category === "dimension" && !col.isBusinessDate,
   );
-<<<<<<< HEAD
-  const hasPersistedDimensionRows = wideTable.recordCount > 0;
-  const hasParameterRows = (wideTable.parameterRows ?? []).length > 0;
-  const hasSqlParameterSource = wideTable.parameterSource?.mode === "sql"
-    && Boolean(wideTable.parameterSource.sql?.trim());
-
-  // Check dimension enum values (auto-satisfied if no regular dimension columns)
-  if (!hasPersistedDimensionRows && !hasParameterRows && !hasSqlParameterSource && regularDimensionColumns.length > 0) {
-    for (const col of regularDimensionColumns) {
-      const range = wideTable.dimensionRanges.find(
-        (r) => r.dimensionName === col.name,
-      );
-      if (!range || range.values.length === 0) return false;
-    }
-=======
   const hasTimeRange =
     Boolean(wideTable.businessDateRange.start?.trim())
     && Boolean(String(wideTable.businessDateRange.end ?? "").trim());
 
   if (!hasTimeRange) {
     return false;
->>>>>>> d96d701aac56769c6603c90e955d216c90be466c
+  }
+
+  const hasPersistedDimensionRows = wideTable.recordCount > 0;
+  const hasSqlParameterSource = wideTable.parameterSource?.mode === "sql"
+    && Boolean(wideTable.parameterSource.sql?.trim());
+
+  if (hasPersistedDimensionRows || hasSqlParameterSource) {
+    return true;
   }
 
   if (regularDimensionColumns.length === 0) {
@@ -196,7 +188,12 @@ export function isStepCComplete(wideTable: WideTable): boolean {
 
   const parameterRows = wideTable.parameterRows ?? [];
   if (parameterRows.length === 0) {
-    return false;
+    return regularDimensionColumns.every((col) => {
+      const range = wideTable.dimensionRanges.find(
+        (r) => r.dimensionName === col.name,
+      );
+      return Boolean(range && range.values.length > 0);
+    });
   }
 
   return parameterRows.every((row) =>
