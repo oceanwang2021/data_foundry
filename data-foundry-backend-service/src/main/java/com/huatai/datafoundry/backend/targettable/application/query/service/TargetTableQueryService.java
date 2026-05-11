@@ -3,11 +3,15 @@ package com.huatai.datafoundry.backend.targettable.application.query.service;
 import com.huatai.datafoundry.backend.targettable.application.query.dto.TargetTableColumnReadDto;
 import com.huatai.datafoundry.backend.targettable.application.query.dto.TargetTableReadDto;
 import java.sql.Connection;
+import java.sql.ResultSetMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Locale;
 import java.util.regex.Pattern;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +20,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class TargetTableQueryService {
   private static final Pattern SAFE_TABLE_NAME = Pattern.compile("^[A-Za-z0-9_]+$");
+  private static final int DEFAULT_QUERY_LIMIT = 500;
+  private static final int MAX_QUERY_LIMIT = 1000;
 
   private final DataSource dataSource;
   private final String targetSchema;
@@ -97,5 +103,76 @@ public class TargetTableQueryService {
           "Failed to list columns for target table: " + targetSchema + "." + tableName, ex);
     }
     return result;
+  }
+
+  public Map<String, Object> previewSelectSql(String sqlText, Integer requestedLimit) {
+    String sql = normalizeSelectSql(sqlText);
+    int limit = normalizeLimit(requestedLimit);
+    String previewSql = "SELECT * FROM (" + sql + ") parameter_rows_preview LIMIT ?";
+
+    List<String> headers = new ArrayList<String>();
+    List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+    try (Connection conn = dataSource.getConnection()) {
+      conn.setReadOnly(true);
+      if (targetSchema != null && !targetSchema.trim().isEmpty()) {
+        conn.setCatalog(targetSchema);
+      }
+      try (PreparedStatement ps = conn.prepareStatement(previewSql)) {
+        ps.setInt(1, limit);
+      try (ResultSet rs = ps.executeQuery()) {
+        ResultSetMetaData metaData = rs.getMetaData();
+        int columnCount = metaData.getColumnCount();
+        for (int i = 1; i <= columnCount; i++) {
+          headers.add(metaData.getColumnLabel(i));
+        }
+        while (rs.next()) {
+          Map<String, Object> row = new LinkedHashMap<String, Object>();
+          for (int i = 1; i <= columnCount; i++) {
+            row.put(headers.get(i - 1), rs.getObject(i));
+          }
+          rows.add(row);
+        }
+      }
+      }
+    } catch (IllegalArgumentException ex) {
+      throw ex;
+    } catch (Exception ex) {
+      throw new IllegalStateException("Failed to preview parameter rows SQL", ex);
+    }
+
+    Map<String, Object> out = new LinkedHashMap<String, Object>();
+    out.put("headers", headers);
+    out.put("rows", rows);
+    out.put("row_count", rows.size());
+    out.put("limit", limit);
+    return out;
+  }
+
+  private static String normalizeSelectSql(String sqlText) {
+    String sql = sqlText == null ? "" : sqlText.trim();
+    if (sql.endsWith(";")) {
+      sql = sql.substring(0, sql.length() - 1).trim();
+    }
+    if (sql.isEmpty()) {
+      throw new IllegalArgumentException("SQL cannot be empty");
+    }
+    String lower = sql.toLowerCase(Locale.ROOT);
+    if (!lower.startsWith("select ")) {
+      throw new IllegalArgumentException("Only SELECT SQL is allowed");
+    }
+    if (sql.indexOf(';') >= 0) {
+      throw new IllegalArgumentException("Only a single SELECT statement is allowed");
+    }
+    if (lower.contains(" for update")) {
+      throw new IllegalArgumentException("SELECT ... FOR UPDATE is not allowed");
+    }
+    return sql;
+  }
+
+  private static int normalizeLimit(Integer requestedLimit) {
+    if (requestedLimit == null || requestedLimit.intValue() <= 0) {
+      return DEFAULT_QUERY_LIMIT;
+    }
+    return Math.min(requestedLimit.intValue(), MAX_QUERY_LIMIT);
   }
 }

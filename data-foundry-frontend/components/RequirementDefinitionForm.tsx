@@ -7,6 +7,7 @@ import {
   fetchRuntimeSettings,
   listTargetTableColumns,
   persistWideTablePreview,
+  previewParameterRowsSql,
   updateRequirementWideTable,
 } from "@/lib/api-client";
 import KnowledgeBaseSelectorModal from "@/components/KnowledgeBaseSelectorModal";
@@ -2447,6 +2448,9 @@ function ScopeAndGroupSection({
 }) {
   const [pendingDimensionValues, setPendingDimensionValues] = useState<Record<string, string>>({});
   const [rangeMessage, setRangeMessage] = useState("");
+  const [parameterInputMode, setParameterInputMode] = useState<"manual" | "sql">("manual");
+  const [parameterSqlText, setParameterSqlText] = useState("");
+  const [isParameterSqlImporting, setIsParameterSqlImporting] = useState(false);
   const [previewRecords, setPreviewRecords] = useState<WideTableRecord[]>([]);
   const [previewTotalCount, setPreviewTotalCount] = useState(0);
   const [selectedPreviewBusinessDate, setSelectedPreviewBusinessDate] = useState("");
@@ -2596,6 +2600,8 @@ function ScopeAndGroupSection({
   );
   const isRangeEditable = Boolean(onUpdateWideTable && onReplaceWideTableRecords && selectedWt);
   const isCEditable = isStepEditable(stepStatuses, "C");
+  const canUseManualParameterInput = isRangeEditable && isCEditable && parameterInputMode === "manual";
+  const canUseSqlParameterInput = isRangeEditable && isCEditable && parameterInputMode === "sql";
   const hasConfirmedDataUpdateEnabled = requirement.dataUpdateEnabled != null;
   const dataUpdateEnabled = resolveRequirementDataUpdateEnabled(requirement);
   const isOpenEnded = selectedWt && usesBusinessDateAxis
@@ -2617,6 +2623,8 @@ function ScopeAndGroupSection({
     setPreviewTotalCount(0);
     setSelectedPreviewBusinessDate("");
     setSelectedPreviewYear("");
+    setParameterInputMode("manual");
+    setParameterSqlText("");
   }, [selectedWtId]);
 
   useEffect(() => {
@@ -2650,6 +2658,32 @@ function ScopeAndGroupSection({
   };
 
   const normalizeParameterHeaderKey = (value: string) => value.trim().toLowerCase();
+
+  const clearDraftParameterFileImport = () => {
+    if (!selectedWt) {
+      return;
+    }
+    onDimensionExcelImportsChange((prev) => {
+      const next = { ...prev };
+      delete next[selectedWt.id];
+      return next;
+    });
+  };
+
+  const handleParameterInputModeChange = (mode: "manual" | "sql") => {
+    if (mode === parameterInputMode) {
+      return;
+    }
+    setParameterInputMode(mode);
+    setRangeMessage(
+      mode === "manual"
+        ? "已切换为手动/文件导入方式。"
+        : "已切换为 SQL 导入方式，执行 SQL 后会覆盖当前参数行。",
+    );
+    if (mode === "sql") {
+      clearDraftParameterFileImport();
+    }
+  };
 
   const applyParameterRows = (rows: ParameterRow[], message: string) => {
     markSelectedScopePreviewDirty();
@@ -2748,6 +2782,56 @@ function ScopeAndGroupSection({
       return { rowId: index + 1, values, businessDate };
     });
     applyParameterRows(nextRows, `已粘贴 ${nextRows.length} 行采集参数。`);
+  };
+
+  const handleImportParameterRowsFromSql = async () => {
+    const sql = parameterSqlText.trim();
+    if (!sql) {
+      setRangeMessage("请输入用于导入采集参数的 SELECT SQL。");
+      return;
+    }
+    setIsParameterSqlImporting(true);
+    try {
+      const result = await previewParameterRowsSql(sql, 1000);
+      if (result.rows.length === 0) {
+        setRangeMessage("SQL 查询没有返回数据。");
+        return;
+      }
+      const returnedHeaders = new Set(result.headers.map((header) => normalizeParameterHeaderKey(header)));
+      const missingColumns = dimensionColumns
+        .filter((column) => !returnedHeaders.has(normalizeParameterHeaderKey(column.name)))
+        .map((column) => column.name);
+      if (missingColumns.length > 0) {
+        setRangeMessage(`SQL 返回字段缺少参数列：${missingColumns.join("、")}。请使用 as 别名与参数字段保持一致。`);
+        return;
+      }
+      const businessDateKey = businessDateColumn?.name ?? "business_date";
+      const nextRows = result.rows.map((rawRow, index) => {
+        const normalizedRow = new Map<string, unknown>();
+        Object.entries(rawRow).forEach(([key, value]) => {
+          normalizedRow.set(normalizeParameterHeaderKey(key), value);
+        });
+        const values: Record<string, string> = {};
+        let businessDate: string | undefined;
+        parameterTableColumns.forEach((column) => {
+          const rawValue = normalizedRow.get(normalizeParameterHeaderKey(column.key));
+          const value = rawValue == null ? "" : String(rawValue).trim();
+          if (usesBusinessDateAxis && column.key === businessDateKey) {
+            businessDate = value || undefined;
+          } else {
+            values[column.key] = value;
+          }
+        });
+        return { rowId: index + 1, values, businessDate };
+      });
+      clearDraftParameterFileImport();
+      applyParameterRows(nextRows, `已通过 SQL 导入 ${nextRows.length} 行采集参数。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "SQL 导入失败";
+      setRangeMessage(message);
+    } finally {
+      setIsParameterSqlImporting(false);
+    }
   };
 
   const handleBusinessDateRangeChange = (
@@ -3393,22 +3477,40 @@ function ScopeAndGroupSection({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h4 className="text-sm font-semibold">采集参数表</h4>
-                    <p className="mt-1 text-xs text-muted-foreground">每一行是一组提示词变量，预览与任务生成都会按行替换占位符。</p>
+                    <p className="mt-1 text-xs text-muted-foreground">手动/文件导入与 SQL 导入互斥，最终都会生成同一份参数行。</p>
                   </div>
                   {isRangeEditable && isCEditable ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={handleAddParameterRow} className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5">新增行</button>
-                      <button type="button" onClick={() => dimensionExcelImportInputRef.current?.click()} className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5">导入 CSV/XLSX</button>
+                    <div className="inline-flex rounded-md border bg-background p-1 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => handleParameterInputModeChange("manual")}
+                        className={cn("rounded px-3 py-1.5", parameterInputMode === "manual" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+                      >
+                        手动/文件
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleParameterInputModeChange("sql")}
+                        className={cn("rounded px-3 py-1.5", parameterInputMode === "sql" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+                      >
+                        SQL 导入
+                      </button>
                     </div>
                   ) : null}
                 </div>
-                {displayedDimensionScopeImport ? (
+                {canUseManualParameterInput ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={handleAddParameterRow} className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5">新增行</button>
+                    <button type="button" onClick={() => dimensionExcelImportInputRef.current?.click()} className="rounded-md border px-3 py-2 text-xs text-primary hover:bg-primary/5">导入 CSV/XLSX</button>
+                  </div>
+                ) : null}
+                {parameterInputMode === "manual" && displayedDimensionScopeImport ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
                     <div className="text-muted-foreground">
                       {displayedDimensionScopeImport.isPersisted ? "已保存导入：" : "已导入："}
                       {displayedDimensionScopeImport.fileName}（{displayedDimensionScopeImport.rowCount} 行）
                     </div>
-                    {isRangeEditable && isCEditable ? (
+                    {canUseManualParameterInput ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -3427,13 +3529,35 @@ function ScopeAndGroupSection({
                     ) : null}
                   </div>
                 ) : null}
+                {canUseSqlParameterInput && parameterTableColumns.length > 0 ? (
+                  <div className="rounded-md border bg-background p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-medium">SQL 导入</div>
+                      <button
+                        type="button"
+                        onClick={handleImportParameterRowsFromSql}
+                        disabled={isParameterSqlImporting}
+                        className="rounded-md border px-3 py-1.5 text-xs text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isParameterSqlImporting ? "执行中..." : "执行导入"}
+                      </button>
+                    </div>
+                    <textarea
+                      value={parameterSqlText}
+                      onChange={(event) => setParameterSqlText(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs"
+                      placeholder="select distinct COMNAME as COMNAME, COMCODE as COMCODE from IR_ADAS_COMPUTE_CONFIG"
+                    />
+                  </div>
+                ) : null}
                 {parameterTableColumns.length === 0 ? (
                   <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">当前 Schema 没有可填写的参数列。</div>
                 ) : (
                   <div
                     className="overflow-x-auto rounded-md border bg-background"
                     onPaste={(event) => {
-                      if (!isRangeEditable || !isCEditable) return;
+                      if (!canUseManualParameterInput) return;
                       const pastedText = event.clipboardData.getData("text/plain");
                       if (!pastedText.trim()) return;
                       event.preventDefault();
@@ -3447,14 +3571,14 @@ function ScopeAndGroupSection({
                           {parameterTableColumns.map((column) => (
                             <th key={column.key} className="px-2 py-2 text-left font-medium">{column.label}</th>
                           ))}
-                          {isRangeEditable && isCEditable ? <th className="w-20 px-2 py-2 text-right font-medium">操作</th> : null}
+                          {canUseManualParameterInput ? <th className="w-20 px-2 py-2 text-right font-medium">操作</th> : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {parameterRows.length === 0 ? (
                           <tr>
-                            <td colSpan={parameterTableColumns.length + (isRangeEditable && isCEditable ? 2 : 1)} className="px-3 py-6 text-center text-muted-foreground">
-                              暂无参数行，可新增一行或直接粘贴 Excel 表格。
+                            <td colSpan={parameterTableColumns.length + (canUseManualParameterInput ? 2 : 1)} className="px-3 py-6 text-center text-muted-foreground">
+                              {parameterInputMode === "sql" ? "暂无参数行，请先执行 SQL 导入。" : "暂无参数行，可新增一行或直接粘贴 Excel 表格。"}
                             </td>
                           </tr>
                         ) : (
@@ -3469,14 +3593,14 @@ function ScopeAndGroupSection({
                                     <td key={column.key} className="px-2 py-2">
                                       <input
                                         value={value}
-                                        disabled={!isRangeEditable || !isCEditable}
+                                        disabled={!canUseManualParameterInput}
                                         onChange={(event) => handleUpdateParameterCell(rowIndex, column.key, event.target.value)}
                                         className="w-full rounded-md border bg-background px-2 py-1.5 text-xs disabled:bg-muted/30"
                                       />
                                     </td>
                                   );
                                 })}
-                                {isRangeEditable && isCEditable ? (
+                                {canUseManualParameterInput ? (
                                   <td className="px-2 py-2 text-right">
                                     <button type="button" onClick={() => handleRemoveParameterRow(rowIndex)} className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-red-600">删除</button>
                                   </td>

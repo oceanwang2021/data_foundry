@@ -1557,6 +1557,19 @@ export async function downloadWideTableScopeImport(
   URL.revokeObjectURL(objectUrl);
 }
 
+export async function previewParameterRowsSql(
+  sql: string,
+  limit = 500,
+): Promise<{ headers: string[]; rows: Array<Record<string, unknown>>; rowCount: number; limit: number }> {
+  const raw = await apiPost<any>("/api/target-tables/query-preview", { sql, limit });
+  return {
+    headers: Array.isArray(raw.headers) ? raw.headers.map((item: unknown) => String(item)) : [],
+    rows: Array.isArray(raw.rows) ? raw.rows : [],
+    rowCount: Number(raw.row_count ?? raw.rowCount ?? 0),
+    limit: Number(raw.limit ?? limit),
+  };
+}
+
 // ---- Task Groups ----
 
 export async function fetchTaskGroups(

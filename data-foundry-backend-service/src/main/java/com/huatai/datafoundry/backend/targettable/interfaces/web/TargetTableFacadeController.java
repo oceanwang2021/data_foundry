@@ -4,11 +4,16 @@ import com.huatai.datafoundry.backend.targettable.application.query.dto.TargetTa
 import com.huatai.datafoundry.backend.targettable.application.query.dto.TargetTableReadDto;
 import com.huatai.datafoundry.backend.targettable.application.query.service.TargetTableQueryService;
 import java.util.List;
+import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/target-tables")
@@ -29,6 +34,20 @@ public class TargetTableFacadeController {
   public List<TargetTableColumnReadDto> listTargetTableColumns(
       @PathVariable("tableName") String tableName) {
     return targetTableQueryService.listColumns(tableName);
+  }
+
+  @PostMapping("/query-preview")
+  public Map<String, Object> previewParameterRowsSql(@RequestBody Map<String, Object> body) {
+    String sql = body != null && body.get("sql") != null ? String.valueOf(body.get("sql")) : "";
+    Integer limit = null;
+    if (body != null && body.get("limit") instanceof Number) {
+      limit = Integer.valueOf(((Number) body.get("limit")).intValue());
+    }
+    try {
+      return targetTableQueryService.previewSelectSql(sql, limit);
+    } catch (IllegalArgumentException ex) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+    }
   }
 }
 
