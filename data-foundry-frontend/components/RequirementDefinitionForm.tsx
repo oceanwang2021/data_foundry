@@ -36,8 +36,6 @@ import {
 } from "@/lib/requirement-definition-navigation";
 import {
   formatRequirementDataUpdateMode,
-  inferRequirementDataUpdateMode,
-  resolveRequirementDataUpdateEnabled,
   resolveRequirementDataUpdateMode,
 } from "@/lib/requirement-data-update";
 import {
@@ -240,7 +238,6 @@ export default function RequirementDefinitionForm({
   >({});
   const [scopePreviewDirtyByWideTableId, setScopePreviewDirtyByWideTableId] = useState<Record<string, boolean>>({});
   const usesBusinessDateAxis = Boolean(selectedWt && hasWideTableBusinessDateDimension(selectedWt));
-  const isOpenEndedRange = Boolean(selectedWt && usesBusinessDateAxis && isOpenEndedBusinessDateRange(selectedWt.businessDateRange));
   const canSubmit = !requirement.schemaLocked && (requirement.status === "draft" || requirement.status === "aligning");
   const submitBlockerMessage = useMemo(() => {
     if (!selectedWt) {
@@ -261,21 +258,13 @@ export default function RequirementDefinitionForm({
     if (dataUpdateStatus !== "completed") {
       return "数据更新配置尚未完成或存在冲突，请先修正后再提交。";
     }
-    if (usesBusinessDateAxis && requirement.dataUpdateEnabled === true && !isOpenEndedRange) {
-      return "持续更新需求需要把结束方式设为“永不”。请先到【数据范围】调整时间范围后再提交。";
-    }
-    if (usesBusinessDateAxis && requirement.dataUpdateEnabled === false && isOpenEndedRange) {
-      return "一次性交付需求需要给出固定结束时间。请先到【数据范围】调整时间范围后再提交。";
-    }
     return "";
   }, [
     dataUpdateStatus,
-    isOpenEndedRange,
     requirement.dataUpdateEnabled,
     selectedWt,
     stepStatuses.A,
     stepStatuses.C,
-    usesBusinessDateAxis,
   ]);
 
   const persistDefinition = async () => {
@@ -307,7 +296,7 @@ export default function RequirementDefinitionForm({
           : generateWideTablePreviewRecords(wideTable, currentPlanRecords, wideTableRecords);
 
       if (preview.totalCount > MAX_PERSISTED_DIMENSION_ROWS) {
-        throw new Error(`采集参数行数过大（${preview.totalCount}），请缩小业务日期范围或参数行数量后再保存。`);
+        throw new Error(`采集参数行数过大（${preview.totalCount}），请缩小时间范围或参数行数量后再保存。`);
       }
 
       const reconcile = reconcileTaskPlanChange({
@@ -328,18 +317,14 @@ export default function RequirementDefinitionForm({
         },
       }));
 
-      const businessDateColumnName =
-        wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "biz_date";
       const parameterRows = recordsWithPlanVersion.map((record, index) => ({
         rowId: Number((record as any).ROW_ID ?? record.id ?? index + 1),
-        businessDate: String((record as Record<string, unknown>)[businessDateColumnName] ?? (record as any).BIZ_DATE ?? "").trim() || undefined,
-        values: record._metadata?.parameterValues
-          ? { ...record._metadata.parameterValues }
-          : Object.fromEntries(
-              wideTable.schema.columns
-                .filter((column) => column.category === "dimension" && !column.isBusinessDate)
-                .map((column) => [column.name, String((record as Record<string, unknown>)[column.name] ?? "")]),
-            ),
+        businessDate: undefined,
+        values: Object.fromEntries(
+          wideTable.schema.columns
+            .filter((column) => column.category === "dimension" && !column.isBusinessDate)
+            .map((column) => [column.name, String((record as Record<string, unknown>)[column.name] ?? "")]),
+        ),
       }));
 
       await updateRequirementWideTable(requirement.id, {
@@ -940,11 +925,7 @@ function deriveDataUpdateSectionStatus(
     return "pending";
   }
 
-  if (
-    resolvedMode === "incremental"
-    && hasWideTableBusinessDateDimension(wideTable)
-    && !isOpenEndedBusinessDateRange(wideTable.businessDateRange)
-  ) {
+  if (resolvedMode === "incremental" && !hasWideTableBusinessDateDimension(wideTable)) {
     return "invalidated";
   }
 
@@ -1155,11 +1136,6 @@ function DataUpdateSection({
   const effectiveMode = resolveRequirementDataUpdateMode(requirement, selectedWt);
   const hasConfirmedDataUpdateEnabled = requirement.dataUpdateEnabled != null;
   const dataUpdateEnabled = requirement.dataUpdateEnabled === true;
-  const isRangeOpenEnded = Boolean(
-    selectedWt
-    && usesBusinessDateAxis
-    && isOpenEndedBusinessDateRange(selectedWt.businessDateRange),
-  );
 
   useEffect(() => {
     setUpdateMessage("");
@@ -1185,6 +1161,12 @@ function DataUpdateSection({
       dataUpdateEnabled: nextEnabled,
       dataUpdateMode: nextEnabled ? (requirement.dataUpdateMode ?? null) : null,
     });
+    if (!nextEnabled) {
+      updateSelectedWideTable((wideTable) => ({
+        ...wideTable,
+        collectionCoverageMode: "full_snapshot",
+      }));
+    }
     setUpdateMessage(
       nextEnabled
         ? "已标记为持续更新需求，请继续确认更新方式；如需调整正式范围，请回到上方的数据范围节。"
@@ -1192,92 +1174,23 @@ function DataUpdateSection({
     );
   };
 
-  const promoteBusinessDateToDimension = (wideTable: WideTable) => {
-    const now = new Date().toISOString();
-    const nextColumns = wideTable.schema.columns.map((col) => ({ ...col }));
-    let found = false;
-
-    for (const col of nextColumns) {
-      // Ensure there is exactly one business date dimension.
-      if (col.isBusinessDate) {
-        col.isBusinessDate = false;
-      }
-    }
-
-    // Prefer an existing biz_date column if present.
-    const candidate = nextColumns.find((col) => col.name.toLowerCase() === "biz_date")
-      ?? nextColumns.find((col) => col.name.toLowerCase() === "business_date");
-    if (candidate) {
-      candidate.category = "dimension";
-      candidate.type = "DATE";
-      candidate.isBusinessDate = true;
-      candidate.chineseName = candidate.chineseName ?? "业务日期";
-      candidate.description = candidate.description || "业务日期维度";
-      found = true;
-    }
-
-    if (!found) {
-      nextColumns.push({
-        id: "biz_date",
-        name: "biz_date",
-        chineseName: "业务日期",
-        type: "DATE",
-        category: "dimension",
-        description: "业务日期维度",
-        required: true,
-        isBusinessDate: true,
-      });
-    }
-
-    return {
-      ...wideTable,
-      schema: { columns: nextColumns },
-      // Ensure scope dimensions won't accidentally include biz_date.
-      dimensionRanges: wideTable.dimensionRanges.filter((range) => range.dimensionName.toLowerCase() !== "biz_date"),
-      recordCount: 0,
-      currentPlanFingerprint: undefined,
-      currentPlanVersion: Math.max(wideTable.currentPlanVersion ?? 0, 0) + 1,
-      status: "draft" as const,
-      updatedAt: now,
-    };
-  };
-
-  const demoteBusinessDateToAttribute = (wideTable: WideTable) => {
-    const now = new Date().toISOString();
-    const nextColumns = wideTable.schema.columns.map((col) => ({ ...col }));
-    const bizDateDimension = nextColumns.find((col) => col.category === "dimension" && col.isBusinessDate);
-    if (bizDateDimension) {
-      bizDateDimension.category = "attribute";
-      bizDateDimension.isBusinessDate = false;
-      bizDateDimension.type = "DATE";
-      bizDateDimension.chineseName = bizDateDimension.chineseName ?? "业务日期";
-      bizDateDimension.description = bizDateDimension.description || "业务日期（属性列）";
-    }
-
-    return {
-      ...wideTable,
-      schema: { columns: nextColumns },
-      dimensionRanges: wideTable.dimensionRanges.filter((range) => range.dimensionName.toLowerCase() !== "biz_date"),
-      recordCount: 0,
-      currentPlanFingerprint: undefined,
-      currentPlanVersion: Math.max(wideTable.currentPlanVersion ?? 0, 0) + 1,
-      status: "draft" as const,
-      updatedAt: now,
-    };
-  };
-
   const handleDataUpdateModeChange = (mode: NonNullable<Requirement["dataUpdateMode"]>) => {
     if (!selectedWt) {
       setUpdateMessage("请先关联数据表，再选择更新方式。");
+      return;
+    }
+    if (mode === "incremental" && !usesBusinessDateAxis) {
+      setUpdateMessage("目前无业务日期字段定义，无法进行增量更新配置，请先在表结构内确认业务日期");
       return;
     }
     updateRequirement({
       dataUpdateEnabled: true,
       dataUpdateMode: mode,
     });
-    updateSelectedWideTable((wideTable) => (
-      mode === "incremental" ? promoteBusinessDateToDimension(wideTable) : demoteBusinessDateToAttribute(wideTable)
-    ));
+    updateSelectedWideTable((wideTable) => ({
+      ...wideTable,
+      collectionCoverageMode: mode === "incremental" ? "incremental_by_business_date" : "full_snapshot",
+    }));
     setUpdateMessage(`已切换为${formatRequirementDataUpdateMode(mode)}。`);
   };
 
@@ -1317,6 +1230,10 @@ function DataUpdateSection({
     mode: "business_date" | "full_snapshot",
   ) => {
     if (!selectedWt) {
+      return;
+    }
+    if (mode === "business_date" && !usesBusinessDateAxis) {
+      setUpdateMessage("目前无业务日期字段定义，无法进行增量更新配置，请先在表结构内确认业务日期");
       return;
     }
 
@@ -1373,7 +1290,10 @@ function DataUpdateSection({
         <div className="grid gap-3 md:grid-cols-3">
           <CompactInfoItem label="当前数据表" value={selectedWt.name} />
           <CompactInfoItem label="当前更新方式" value={formatRequirementDataUpdateMode(effectiveMode)} />
-          <CompactInfoItem label="业务日期语义轴" value={usesBusinessDateAxis ? "已启用" : "未启用"} />
+          <CompactInfoItem
+            label="时间列定义"
+            value={usesBusinessDateAxis ? (selectedWt.schema.columns.find((col) => col.isBusinessDate)?.name ?? "已定义") : "未定义"}
+          />
         </div>
       ) : (
         <div className="rounded-md border border-dashed px-3 py-4 text-xs text-muted-foreground">
@@ -1422,7 +1342,7 @@ function DataUpdateSection({
                 <div>
                   <h4 className="text-sm font-semibold">更新方式</h4>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    更新方式由你选择。选择“增量更新”会启用业务日期语义轴；选择“全量更新”会把业务日期列降级为属性列。
+                    更新方式由你选择。若需配置增量更新，请先在“表结构定义”中明确时间列。
                   </p>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2">
@@ -1456,10 +1376,10 @@ function DataUpdateSection({
                     <>
                       {!usesBusinessDateAxis ? (
                         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                          增量更新需要启用业务日期语义轴。请先在上方选择“增量更新”（系统会自动把业务日期列升级为维度列）。
+                          目前无业务日期字段定义，无法进行增量更新配置，请先在表结构内确认业务日期
                         </div>
                       ) : null}
-                      {!selectedWt.scheduleRule ? (
+                      {usesBusinessDateAxis && !selectedWt.scheduleRule ? (
                         <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
                           <div>当前还未配置增量更新调度规则，请先应用一条默认规则。</div>
                           <button
@@ -1471,35 +1391,34 @@ function DataUpdateSection({
                           </button>
                         </div>
                       ) : null}
-                      <p className="text-xs text-muted-foreground">
-                        参照现有方案，增量更新任务组按业务日期拆分，并通过“业务日期后偏移多少天”决定每个业务日期对应任务组的启动时间。
-                      </p>
-                      {!isRangeOpenEnded ? (
-                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                          你已选择“定期更新”，如需持续增量更新，请回到上方“数据范围”里把结束方式改为“永不”。
-                        </div>
-                      ) : null}
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <EditableField
-                          label="时间偏移量"
-                          control={(
-                            <input
-                              type="number"
-                              min={0}
-                              step={1}
-                              value={selectedWt.scheduleRule?.businessDateOffsetDays ?? 1}
-                              onChange={(event) =>
-                                handleScheduleRuleChange(Math.max(0, Number(event.target.value) || 0))
-                              }
-                              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                      {usesBusinessDateAxis ? (
+                        <>
+                          <p className="text-xs text-muted-foreground">
+                            增量更新任务组按业务日期拆分，并通过“业务日期后偏移多少天”决定每个业务日期对应任务组的启动时间。
+                          </p>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <EditableField
+                              label="时间偏移量"
+                              control={(
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  value={selectedWt.scheduleRule?.businessDateOffsetDays ?? 1}
+                                  onChange={(event) =>
+                                    handleScheduleRuleChange(Math.max(0, Number(event.target.value) || 0))
+                                  }
+                                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                                />
+                              )}
                             />
-                          )}
-                        />
-                        <ReadOnlyField
-                          label="规则说明"
-                          value={`业务日期后 +${selectedWt.scheduleRule?.businessDateOffsetDays ?? 1} 天`}
-                        />
-                      </div>
+                            <ReadOnlyField
+                              label="规则说明"
+                              value={`业务日期后 +${selectedWt.scheduleRule?.businessDateOffsetDays ?? 1} 天`}
+                            />
+                          </div>
+                        </>
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -1512,11 +1431,6 @@ function DataUpdateSection({
                     </div>
                   ) : (
                     <>
-                      {usesBusinessDateAxis ? (
-                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                          全量更新不使用业务日期语义轴。选择“全量更新”后，业务日期列会降级为属性列，不参与维度拆分。
-                        </div>
-                      ) : null}
                       {!selectedWt.scheduleRule ? (
                         <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
                           <div>当前还未配置全量更新调度规则，请先应用一条默认规则。</div>
@@ -2504,18 +2418,11 @@ function ScopeAndGroupSection({
       )
     : undefined;
   const parameterTableColumns = useMemo(
-    () => {
-      const cols = dimensionColumns.map((column) => ({
-        key: column.name,
-        label: column.chineseName ? `${column.name} / ${column.chineseName}` : column.name,
-      }));
-      if (usesBusinessDateAxis) {
-        const key = businessDateColumn?.name ?? "business_date";
-        return [{ key, label: key }, ...cols];
-      }
-      return cols;
-    },
-    [businessDateColumn?.name, dimensionColumns, usesBusinessDateAxis],
+    () => dimensionColumns.map((column) => ({
+      key: column.name,
+      label: column.chineseName ? `${column.name} / ${column.chineseName}` : column.name,
+    })),
+    [dimensionColumns],
   );
   const parameterRows = selectedWt?.parameterRows ?? [];
   const previewBusinessDates = useMemo(
@@ -2602,8 +2509,6 @@ function ScopeAndGroupSection({
   const isCEditable = isStepEditable(stepStatuses, "C");
   const canUseManualParameterInput = isRangeEditable && isCEditable && parameterInputMode === "manual";
   const canUseSqlParameterInput = isRangeEditable && isCEditable && parameterInputMode === "sql";
-  const hasConfirmedDataUpdateEnabled = requirement.dataUpdateEnabled != null;
-  const dataUpdateEnabled = resolveRequirementDataUpdateEnabled(requirement);
   const isOpenEnded = selectedWt && usesBusinessDateAxis
     ? isOpenEndedBusinessDateRange(selectedWt.businessDateRange)
     : false;
@@ -2639,7 +2544,7 @@ function ScopeAndGroupSection({
     }
   }, [visiblePreviewBusinessDates, selectedPreviewBusinessDate]);
 
-  // Re-evaluate step C completion when dimension ranges or business date range change
+  // Re-evaluate step C completion when the time range or parameter table changes.
   useEffect(() => {
     if (!selectedWt) return;
     // Step C only requires schema (Step A) to be completed.
@@ -2648,7 +2553,7 @@ function ScopeAndGroupSection({
     if (cComplete && stepStatuses.C !== "completed") {
       onStepStatusesChange(completeStep(stepStatuses, "C"));
     }
-  }, [selectedWt?.dimensionRanges, selectedWt?.businessDateRange, stepStatuses.A, stepStatuses.C]);
+  }, [selectedWt, stepStatuses.A, stepStatuses.C]);
 
   const updateSelectedWideTable = (updater: (wideTable: WideTable) => WideTable) => {
     if (!selectedWt || !onUpdateWideTable) {
@@ -2728,13 +2633,9 @@ function ScopeAndGroupSection({
   };
 
   const handleUpdateParameterCell = (rowIndex: number, columnKey: string, value: string) => {
-    const businessDateKey = businessDateColumn?.name ?? "business_date";
     const nextRows = parameterRows.map((row, index) => {
       if (index !== rowIndex) {
         return row;
-      }
-      if (usesBusinessDateAxis && columnKey === businessDateKey) {
-        return { ...row, businessDate: value.trim() || undefined };
       }
       return {
         ...row,
@@ -2766,20 +2667,14 @@ function ScopeAndGroupSection({
     }
     const headers = rows[0];
     const normalizedHeaders = headers.map((header) => normalizeParameterHeaderKey(header));
-    const businessDateKey = businessDateColumn?.name ?? "business_date";
     const nextRows = rows.slice(1).map((cells, index) => {
       const values: Record<string, string> = {};
-      let businessDate: string | undefined;
       parameterTableColumns.forEach((column) => {
         const headerIndex = normalizedHeaders.indexOf(normalizeParameterHeaderKey(column.key));
         const value = headerIndex >= 0 ? String(cells[headerIndex] ?? "").trim() : "";
-        if (usesBusinessDateAxis && column.key === businessDateKey) {
-          businessDate = value || undefined;
-        } else {
-          values[column.key] = value;
-        }
+        values[column.key] = value;
       });
-      return { rowId: index + 1, values, businessDate };
+      return { rowId: index + 1, values };
     });
     applyParameterRows(nextRows, `已粘贴 ${nextRows.length} 行采集参数。`);
   };
@@ -2805,24 +2700,18 @@ function ScopeAndGroupSection({
         setRangeMessage(`SQL 返回字段缺少参数列：${missingColumns.join("、")}。请使用 as 别名与参数字段保持一致。`);
         return;
       }
-      const businessDateKey = businessDateColumn?.name ?? "business_date";
       const nextRows = result.rows.map((rawRow, index) => {
         const normalizedRow = new Map<string, unknown>();
         Object.entries(rawRow).forEach(([key, value]) => {
           normalizedRow.set(normalizeParameterHeaderKey(key), value);
         });
         const values: Record<string, string> = {};
-        let businessDate: string | undefined;
         parameterTableColumns.forEach((column) => {
           const rawValue = normalizedRow.get(normalizeParameterHeaderKey(column.key));
           const value = rawValue == null ? "" : String(rawValue).trim();
-          if (usesBusinessDateAxis && column.key === businessDateKey) {
-            businessDate = value || undefined;
-          } else {
-            values[column.key] = value;
-          }
+          values[column.key] = value;
         });
-        return { rowId: index + 1, values, businessDate };
+        return { rowId: index + 1, values };
       });
       clearDraftParameterFileImport();
       applyParameterRows(nextRows, `已通过 SQL 导入 ${nextRows.length} 行采集参数。`);
@@ -2857,9 +2746,6 @@ function ScopeAndGroupSection({
       return {
         ...wideTable,
         businessDateRange: merged,
-        scheduleRule: isOpenEndedBusinessDateRange(merged)
-          ? wideTable.scheduleRule
-          : undefined,
         // Artifact handling: when C change causes D invalidation, reset WideTable
         status: "draft" as const,
         currentPlanFingerprint: undefined,
@@ -3120,11 +3006,6 @@ function ScopeAndGroupSection({
       return;
     }
 
-    const businessDateFieldName = businessDateColumn?.name;
-    const businessDateIndex = businessDateFieldName
-      ? headerIndex.get(normalizeExcelHeaderKey(businessDateFieldName))
-      : undefined;
-
     const seenKeys = new Set<string>();
     const rows: Array<Record<string, string>> = [];
     let skipped = 0;
@@ -3140,10 +3021,6 @@ function ScopeAndGroupSection({
         if (!value) {
           hasEmptyRequired = true;
         }
-      }
-
-      if (businessDateFieldName && businessDateIndex != null) {
-        rowObject[businessDateFieldName] = String(dataRow[businessDateIndex] ?? "").trim();
       }
 
       if (requiredDimensionNames.every((name) => !rowObject[name])) {
@@ -3168,10 +3045,8 @@ function ScopeAndGroupSection({
       return;
     }
 
-    const businessDateKey = businessDateColumn?.name ?? "business_date";
     const importedParameterRows = rows.map((row, index) => ({
       rowId: index + 1,
-      businessDate: usesBusinessDateAxis ? (String(row[businessDateKey] ?? "").trim() || undefined) : undefined,
       values: Object.fromEntries(
         dimensionColumns.map((column) => [column.name, String(row[column.name] ?? "").trim()]),
       ),
@@ -3204,12 +3079,8 @@ function ScopeAndGroupSection({
       return;
     }
 
-    const businessDateKey = businessDateColumn?.name ?? "business_date";
     const importedRows = draftDimensionExcelImport?.rows ?? [];
-    const savedParameterRows = parameterRows.map((row) => ({
-      ...row.values,
-      ...(usesBusinessDateAxis && row.businessDate ? { [businessDateKey]: row.businessDate } : {}),
-    }));
+    const savedParameterRows = parameterRows.map((row) => ({ ...row.values }));
     const excelRows = importedRows.length > 0 ? importedRows : savedParameterRows;
     const useExcelRows = excelRows.length > 0;
     const shouldUsePersistedImportedRows = Boolean(
@@ -3243,11 +3114,7 @@ function ScopeAndGroupSection({
       ? generateWideTablePreviewRecordsFromDimensionRows(selectedWt, excelRows, selectedWideTableRecords, wideTableRecords)
       : generateWideTablePreviewRecords(selectedWt, selectedWideTableRecords, wideTableRecords);
     if (totalCount === 0) {
-      setRangeMessage(
-        usesBusinessDateAxis
-          ? "当前业务日期范围或采集参数表为空，无法生成预览数据。"
-          : "当前采集参数表为空，无法生成预览数据。",
-      );
+      setRangeMessage("当前时间范围或采集参数表为空，无法生成预览数据。");
       return;
     }
 
@@ -3256,9 +3123,7 @@ function ScopeAndGroupSection({
     setIsPreviewModalOpen(true);
     setRangeMessage(
       [
-        usesBusinessDateAxis
-          ? `已生成预览数据（不保存），预计 ${totalCount} 行，当前展示 ${records.length} 行。`
-          : `已生成快照预览（不保存），预计 ${totalCount} 行，当前展示 ${records.length} 行。`,
+        `已生成预览数据（不保存），预计 ${totalCount} 行，当前展示 ${records.length} 行。`,
         isOpenEnded ? `open-ended 范围仅预览截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期。` : "",
       ].filter(Boolean).join(" "),
     );
@@ -3313,164 +3178,64 @@ function ScopeAndGroupSection({
             ) : (
             <div className="space-y-6">
               {/* 涓氬姟鏃ユ湡鑼冨洿 */}
-              {usesBusinessDateAxis ? (
-                <div className={cn("rounded-lg bg-muted/10 p-4 space-y-2", !isCEditable ? "opacity-60" : "")}>
-                  <h4 className="text-sm font-semibold">业务日期</h4>
-                  <p className="text-xs text-muted-foreground">
-                    {businessDateColumn
-                      ? `${businessDateColumn.name}${businessDateColumn.chineseName ? `（${businessDateColumn.chineseName}）` : ""}`
-                      : "未识别到业务日期维度"}
-                    。月频、季频、年频会自动对齐到周期末尾。
-                    {!hasConfirmedDataUpdateEnabled
-                      ? " 请先在下方确认是否定期更新，再决定结束方式。"
-                      : dataUpdateEnabled
-                        ? " 若需要持续增量更新，请把结束方式设为“永不”。"
-                        : " 当前按一次性交付处理，需要给出固定结束日期。"}
-                  </p>
-                  <div className={cn("grid gap-3 text-xs", "md:grid-cols-4")}>
-                    {isRangeEditable && isCEditable ? (
-                      <>
-                        <EditableField
-                          label="频率"
-                          control={(
-                            <select
-                              value={selectedWt.businessDateRange.frequency}
-                              onChange={(event) =>
-                                handleBusinessDateRangeChange({
-                                  frequency: event.target.value as WideTable["businessDateRange"]["frequency"],
-                                })
-                              }
-                              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                            >
-                              <option value="daily">日频</option>
-                              <option value="weekly">周频</option>
-                              <option value="monthly">月频</option>
-                              <option value="quarterly">季频</option>
-                              <option value="yearly">年频</option>
-                            </select>
-                          )}
-                        />
-                        <EditableField
-                          label="开始日期"
-                          control={(
-                            <BusinessDateInput
-                              frequency={selectedWt.businessDateRange.frequency}
-                              value={selectedWt.businessDateRange.start}
-                              onChange={(v) => handleBusinessDateRangeChange({ start: v })}
-                            />
-                          )}
-                        />
-                        <EditableField
-                          label="结束方式"
-                          control={(
-                            <select
-                              value={isOpenEnded ? "never" : "fixed"}
-                              onChange={(event) =>
-                                handleBusinessDateRangeChange({
-                                  end: event.target.value === "never" ? "never" : fallbackBusinessDateEnd(selectedWt.businessDateRange.start),
-                                })
-                              }
-                              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                            >
-                              <option value="fixed">具体日期</option>
-                              <option value="never">永不</option>
-                            </select>
-                          )}
-                        />
-                        <EditableField
-                          label="结束日期"
-                          control={isOpenEnded ? (
-                            <div className="rounded-md border bg-muted/10 p-3 text-xs text-muted-foreground">
-                              永不（持续生成未来任务）
-                            </div>
-                          ) : (
-                            <BusinessDateInput
-                              frequency={selectedWt.businessDateRange.frequency}
-                              value={selectedWt.businessDateRange.end === "never" ? "" : selectedWt.businessDateRange.end}
-                              onChange={(v) => handleBusinessDateRangeChange({ end: v })}
-                            />
-                          )}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <ReadOnlyField label="开始日期" value={selectedWt.businessDateRange.start} />
-                        <ReadOnlyField label="结束日期" value={formatBusinessDateEnd(selectedWt.businessDateRange.end)} />
-                        <ReadOnlyField label="频率" value={frequencyLabel(selectedWt.businessDateRange.frequency)} />
-                      </>
-                    )}
-                  </div>
+              <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
+                <h4 className="text-sm font-semibold">时间范围</h4>
+                <p className="text-xs text-muted-foreground">请选择时间粒度，并设置对应的起止时间。</p>
+                <div className="grid gap-3 text-xs md:grid-cols-3">
+                  {isRangeEditable && isCEditable ? (
+                    <>
+                      <EditableField
+                        label="时间粒度"
+                        control={(
+                          <select
+                            value={selectedWt.businessDateRange.frequency}
+                            onChange={(event) =>
+                              handleBusinessDateRangeChange({
+                                frequency: event.target.value as WideTable["businessDateRange"]["frequency"],
+                              })
+                            }
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                          >
+                            <option value="daily">日</option>
+                            <option value="weekly">周</option>
+                            <option value="monthly">月</option>
+                            <option value="quarterly">季</option>
+                            <option value="yearly">年</option>
+                          </select>
+                        )}
+                      />
+                      <EditableField
+                        label="开始时间"
+                        control={(
+                          <BusinessDateInput
+                            frequency={selectedWt.businessDateRange.frequency}
+                            value={selectedWt.businessDateRange.start}
+                            onChange={(v) => handleBusinessDateRangeChange({ start: v })}
+                          />
+                        )}
+                      />
+                      <EditableField
+                        label="结束时间"
+                        control={(
+                          <BusinessDateInput
+                            frequency={selectedWt.businessDateRange.frequency}
+                            value={selectedWt.businessDateRange.end === "never"
+                              ? fallbackBusinessDateEnd(selectedWt.businessDateRange.start)
+                              : selectedWt.businessDateRange.end}
+                            onChange={(v) => handleBusinessDateRangeChange({ end: v })}
+                          />
+                        )}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <ReadOnlyField label="时间粒度" value={frequencyLabel(selectedWt.businessDateRange.frequency)} />
+                      <ReadOnlyField label="开始时间" value={selectedWt.businessDateRange.start} />
+                      <ReadOnlyField label="结束时间" value={formatBusinessDateEnd(selectedWt.businessDateRange.end)} />
+                    </>
+                  )}
                 </div>
-              ) : (
-                <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
-                  <h4 className="text-sm font-semibold">时间范围</h4>
-                  <p className="text-xs text-muted-foreground">请选择时间粒度，并设置对应的起止时间。</p>
-                  <div className="grid gap-3 text-xs md:grid-cols-3">
-                    {isRangeEditable && isCEditable ? (
-                      <>
-                        <EditableField
-                          label="时间粒度"
-                          control={(
-                            <select
-                              value={selectedWt.businessDateRange.frequency}
-                              onChange={(event) =>
-                                handleBusinessDateRangeChange({
-                                  frequency: event.target.value as WideTable["businessDateRange"]["frequency"],
-                                })
-                              }
-                              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                            >
-                              <option value="daily">日</option>
-                              <option value="weekly">周</option>
-                              <option value="monthly">月</option>
-                              <option value="quarterly">季</option>
-                              <option value="yearly">年</option>
-                            </select>
-                          )}
-                        />
-                        <EditableField
-                          label="开始时间"
-                          control={(
-                            <BusinessDateInput
-                              frequency={selectedWt.businessDateRange.frequency}
-                              value={selectedWt.businessDateRange.start}
-                              onChange={(v) => handleBusinessDateRangeChange({ start: v })}
-                            />
-                          )}
-                        />
-                        <EditableField
-                          label="结束时间"
-                          control={(
-                            <BusinessDateInput
-                              frequency={selectedWt.businessDateRange.frequency}
-                              value={selectedWt.businessDateRange.end === "never"
-                                ? fallbackBusinessDateEnd(selectedWt.businessDateRange.start)
-                                : selectedWt.businessDateRange.end}
-                              onChange={(v) => handleBusinessDateRangeChange({ end: v })}
-                            />
-                          )}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <ReadOnlyField label="时间粒度" value={frequencyLabel(selectedWt.businessDateRange.frequency)} />
-                        <ReadOnlyField label="开始时间" value={selectedWt.businessDateRange.start} />
-                        <ReadOnlyField label="结束时间" value={formatBusinessDateEnd(selectedWt.businessDateRange.end)} />
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {usesBusinessDateAxis && !hasConfirmedDataUpdateEnabled ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前尚未确认是否定期更新。提交前需要在下方“数据更新”里完成选择。                </div>
-              ) : null}
-
-              {usesBusinessDateAxis && hasConfirmedDataUpdateEnabled && !dataUpdateEnabled && isOpenEnded ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前已标记为一次性交付，但业务日期结束方式仍为“永不”。提交前请将结束方式改为“具体日期”。                </div>
-              ) : null}
+              </div>
 
               {/* 采集参数表 */}
               <div className={cn("rounded-lg bg-muted/10 p-4 space-y-3", !isCEditable ? "opacity-60" : "")}>
@@ -3583,12 +3348,11 @@ function ScopeAndGroupSection({
                           </tr>
                         ) : (
                           parameterRows.map((row, rowIndex) => {
-                            const businessDateKey = businessDateColumn?.name ?? "business_date";
                             return (
                               <tr key={row.rowId || rowIndex}>
                                 <td className="px-2 py-2 text-muted-foreground">{rowIndex + 1}</td>
                                 {parameterTableColumns.map((column) => {
-                                  const value = usesBusinessDateAxis && column.key === businessDateKey ? row.businessDate ?? "" : row.values[column.key] ?? "";
+                                  const value = row.values[column.key] ?? "";
                                   return (
                                     <td key={column.key} className="px-2 py-2">
                                       <input
@@ -3665,7 +3429,7 @@ function ScopeAndGroupSection({
                       </div>
                       {previewRecords.length === 0 ? (
                         <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                          {usesBusinessDateAxis ? "还没有可展示的预览数据，请先补齐业务日期和采集参数表。" : "还没有可展示的预览数据，请先补齐采集参数表。"}
+                          还没有可展示的预览数据，请先补齐时间范围和采集参数表。
                           {isOpenEnded ? ` open-ended 范围仅会生成截至当前与未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期的预览。` : ""}
                         </div>
                       ) : (

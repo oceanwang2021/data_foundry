@@ -40,3 +40,6 @@ CREATE TABLE IR_ADAS_COMPUTE_CONFIG (
     COMPUTEPOWERDESC VARCHAR(4000)         COMMENT '算力描述',
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='IR_ADAS算力/算法配置表';
+
+
+ALTER TABLE data_foundry_backend.wide_table_scope_imports MODIFY COLUMN file_type varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL;

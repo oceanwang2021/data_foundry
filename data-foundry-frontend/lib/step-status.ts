@@ -4,7 +4,6 @@ import type {
   TaskGroup,
   FetchTask,
 } from "./types";
-import { hasWideTableBusinessDateDimension } from "./wide-table-mode";
 
 // ==================== 类型定义 ====================
 
@@ -167,26 +166,29 @@ export function isStepCComplete(wideTable: WideTable): boolean {
   const regularDimensionColumns = wideTable.schema.columns.filter(
     (col) => col.category === "dimension" && !col.isBusinessDate,
   );
-  const hasPersistedDimensionRows = wideTable.recordCount > 0;
+  const hasTimeRange =
+    Boolean(wideTable.businessDateRange.start?.trim())
+    && Boolean(String(wideTable.businessDateRange.end ?? "").trim());
 
-  // Check dimension enum values (auto-satisfied if no regular dimension columns)
-  if (!hasPersistedDimensionRows && regularDimensionColumns.length > 0) {
-    for (const col of regularDimensionColumns) {
-      const range = wideTable.dimensionRanges.find(
-        (r) => r.dimensionName === col.name,
-      );
-      if (!range || range.values.length === 0) return false;
-    }
+  if (!hasTimeRange) {
+    return false;
   }
 
-  if (!hasWideTableBusinessDateDimension(wideTable)) {
+  if (regularDimensionColumns.length === 0) {
     return true;
   }
 
-  // Check business date range start is valid
-  if (!wideTable.businessDateRange.start) return false;
+  const parameterRows = wideTable.parameterRows ?? [];
+  if (parameterRows.length === 0) {
+    return false;
+  }
 
-  return true;
+  return parameterRows.every((row) =>
+    regularDimensionColumns.every((column) => {
+      const value = row.values?.[column.name];
+      return String(value ?? "").trim() !== "";
+    }),
+  );
 }
 
 /** 步骤 D 完成条件：status 为 initialized/active 且 planFingerprint 存在 */
