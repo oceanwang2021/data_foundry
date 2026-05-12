@@ -105,6 +105,12 @@ const triggerLabel: Record<string, string> = {
 
 type TaskSubTabKey = "prompts" | "tasks" | "output";
 
+type TrialParameterRowView = {
+  rowKey: string;
+  rowId: number;
+  values: Record<string, string>;
+};
+
 const taskSubTabs: Array<{ key: TaskSubTabKey; label: string; description: string }> = [
   { key: "prompts", label: "采集提示词管理", description: "按指标组配置采集提示词。" },
   { key: "tasks", label: "采集任务", description: "查看任务实例与子任务状态。" },
@@ -160,7 +166,7 @@ export default function RequirementTasksPanel({
   const [promptEditorModes, setPromptEditorModes] = useState<Record<string, "sections" | "markdown">>({});
   const [promptMarkdownDrafts, setPromptMarkdownDrafts] = useState<Record<string, string>>({});
   const [trialBusinessDates, setTrialBusinessDates] = useState<string[]>([]);
-  const [trialDimensionValues, setTrialDimensionValues] = useState<Record<string, string[]>>({});
+  const [selectedTrialParameterRowKeys, setSelectedTrialParameterRowKeys] = useState<string[]>([]);
   const [trialMaxRows, setTrialMaxRows] = useState(20);
   const [trialRunMessage, setTrialRunMessage] = useState("");
   const [isStartingTrialRun, setIsStartingTrialRun] = useState(false);
@@ -268,7 +274,7 @@ export default function RequirementTasksPanel({
     () => selectedWt?.schema.columns.filter((column) => column.category === "indicator") ?? [],
     [selectedWt],
   );
-  const trialDimensionColumns = useMemo(
+  const trialParameterColumns = useMemo(
     () => selectedWt?.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate) ?? [],
     [selectedWt],
   );
@@ -282,40 +288,53 @@ export default function RequirementTasksPanel({
     ).sort((a, b) => b.localeCompare(a)),
     [currentWideTableRecords, selectedWt],
   );
-  const trialAvailableDimensionValues = useMemo(() => {
-    const values: Record<string, string[]> = {};
-    for (const column of trialDimensionColumns) {
-      values[column.name] = Array.from(
-        new Set(
-          currentWideTableRecords
-            .map((record) => record[column.name])
-            .filter((value): value is string | number => value !== undefined && value !== null && String(value).trim() !== "")
-            .map(String),
-        ),
-      ).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const trialParameterRows = useMemo(() => {
+    const sourceRows = selectedWt?.parameterRows ?? [];
+    const dedupedRows = new Map<string, TrialParameterRowView>();
+
+    for (const row of sourceRows) {
+      const values = Object.fromEntries(
+        trialParameterColumns.map((column) => [column.name, String(row.values[column.name] ?? "").trim()]),
+      );
+      const rowKey = buildTrialParameterRowKey(trialParameterColumns, values);
+      if (!rowKey || dedupedRows.has(rowKey)) {
+        continue;
+      }
+      dedupedRows.set(rowKey, {
+        rowKey,
+        rowId: row.rowId,
+        values,
+      });
     }
-    return values;
-  }, [currentWideTableRecords, trialDimensionColumns]);
+
+    return Array.from(dedupedRows.values());
+  }, [selectedWt?.parameterRows, trialParameterColumns]);
+  const trialDimensionColumns = trialParameterColumns;
+  const trialAvailableDimensionValues: Record<string, string[]> = {};
+  const trialDimensionValues: Record<string, string[]> = {};
+  const setTrialDimensionValues: React.Dispatch<React.SetStateAction<Record<string, string[]>>> = () => {};
   const trialFilteredRecords = useMemo(() => {
     if (!selectedWt) {
       return [] as WideTableRecord[];
     }
+    const selectedRowKeys = new Set(selectedTrialParameterRowKeys);
     return currentWideTableRecords.filter((record) => {
       const businessDate = resolveTaskRecordBusinessDate(selectedWt, record);
       if (usesBusinessDateAxis && trialBusinessDates.length > 0 && !trialBusinessDates.includes(businessDate)) {
         return false;
       }
-      return trialDimensionColumns.every((column) => {
-        const selectedValues = trialDimensionValues[column.name] ?? [];
-        return selectedValues.length === 0 || selectedValues.includes(String(record[column.name] ?? ""));
-      });
+      if (selectedRowKeys.size === 0) {
+        return true;
+      }
+      const rowKey = buildTrialParameterRowKey(trialParameterColumns, record);
+      return rowKey !== "" && selectedRowKeys.has(rowKey);
     });
   }, [
     currentWideTableRecords,
     selectedWt,
     trialBusinessDates,
-    trialDimensionColumns,
-    trialDimensionValues,
+    trialParameterColumns,
+    selectedTrialParameterRowKeys,
     usesBusinessDateAxis,
   ]);
   const defaultIndicatorGroupId = selectedWt ? buildDefaultIndicatorGroupId(selectedWt.id) : "";
@@ -370,7 +389,7 @@ export default function RequirementTasksPanel({
   }, [userDefinedIndicatorGroups]);
   const hasIndicatorColumns = indicatorColumns.length > 0;
   const isDefinitionSubmitted = requirement.status !== "draft";
-  const isPromptEditable = !requirement.schemaLocked;
+  const isPromptEditable = isDefinitionSubmitted;
   const isIndicatorGroupingComplete = useMemo(() => {
     if (!selectedWt) {
       return false;
@@ -626,7 +645,7 @@ export default function RequirementTasksPanel({
     setPromptEditorModes({});
     setPromptMarkdownDrafts({});
     setTrialRunMessage("");
-    setTrialDimensionValues({});
+    setSelectedTrialParameterRowKeys([]);
   }, [selectedWtId]);
 
   useEffect(() => {
@@ -642,6 +661,11 @@ export default function RequirementTasksPanel({
       return trialAvailableBusinessDates[0] ? [trialAvailableBusinessDates[0]] : [];
     });
   }, [trialAvailableBusinessDates, usesBusinessDateAxis]);
+
+  useEffect(() => {
+    const availableRowKeys = new Set(trialParameterRows.map((row) => row.rowKey));
+    setSelectedTrialParameterRowKeys((current) => current.filter((rowKey) => availableRowKeys.has(rowKey)));
+  }, [trialParameterRows]);
 
   useEffect(() => {
     if (!selectedWt) {
@@ -833,11 +857,6 @@ export default function RequirementTasksPanel({
 
     if (!isDefinitionSubmitted) {
       setPromptSaveMessage("请先在【需求】Tab 提交需求后再配置采集提示词。");
-      return;
-    }
-
-    if (!isPromptEditable) {
-      setPromptSaveMessage("提示词已锁定为只读；如需调整，请先回到需求侧修改并重新生成计划。");
       return;
     }
 
@@ -1087,17 +1106,15 @@ export default function RequirementTasksPanel({
     ));
   };
 
-  const handleToggleTrialDimensionValue = (columnName: string, value: string) => {
-    setTrialDimensionValues((current) => {
-      const existing = current[columnName] ?? [];
-      return {
-        ...current,
-        [columnName]: existing.includes(value)
-          ? existing.filter((item) => item !== value)
-          : [...existing, value],
-      };
-    });
+  const handleToggleTrialParameterRow = (rowKey: string) => {
+    setSelectedTrialParameterRowKeys((current) => (
+      current.includes(rowKey)
+        ? current.filter((item) => item !== rowKey)
+        : [...current, rowKey]
+    ));
   };
+
+  const handleToggleTrialDimensionValue = (_columnName: string, _value: string) => {};
 
   const handleStartTrialRun = async () => {
     if (!selectedWt || !canStartTrialRun) {
@@ -1107,16 +1124,25 @@ export default function RequirementTasksPanel({
       return;
     }
 
-    const scopedDimensions = Object.fromEntries(
-      Object.entries(trialDimensionValues).filter(([, values]) => values.length > 0),
+    const rowBindingKeys = Array.from(
+      new Set(
+        trialFilteredRecords
+          .slice(0, trialMaxRows)
+          .map((record) => String(record.rowBindingKey ?? "").trim())
+          .filter(Boolean),
+      ),
     );
+    if (rowBindingKeys.length === 0) {
+      setTrialRunMessage("请先选择可匹配到预览行的采集参数后再试运行。");
+      return;
+    }
     setIsStartingTrialRun(true);
     setTrialRunMessage("正在创建试运行任务，并发起小范围采集。");
     try {
       const result = await createTrialRun(requirement.id, {
         wideTableId: selectedWt.id,
         businessDates: usesBusinessDateAxis ? trialBusinessDates : [],
-        dimensionValues: scopedDimensions,
+        rowBindingKeys,
         maxRows: trialMaxRows,
         operator: "当前用户",
       });
@@ -1580,9 +1606,9 @@ export default function RequirementTasksPanel({
 
             <div className="max-h-[80vh] space-y-4 overflow-y-auto px-5 py-4">
                 <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
-                  {isPromptEditable
-                    ? "提示词支持分段编辑和整体 Markdown 编辑。默认内容来自需求定义，可在弹窗内直接改写。"
-                    : "提示词已锁定为只读展示；如需调整，请先回到需求侧修改并重新生成计划。"}
+                  {isDefinitionSubmitted
+                    ? "提示词支持分段编辑和整体 Markdown 编辑。默认内容来自需求定义，可在当前页面直接修改并保存。"
+                    : "请先在【需求】Tab 提交需求后，再配置采集提示词。"}
                 </div>
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full text-xs">
@@ -1759,8 +1785,79 @@ export default function RequirementTasksPanel({
               ) : null}
 
               <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-medium text-muted-foreground">选择采集参数</div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTrialParameterRowKeys([])}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    全部
+                  </button>
+                </div>
+                {trialParameterColumns.length === 0 ? (
+                  <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
+                    当前宽表没有可展示的采集参数列，将按当前预览范围抽样试运行。
+                  </div>
+                ) : trialParameterRows.length === 0 ? (
+                  <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
+                    当前需求暂无可选择的采集参数，请先回到【需求】页完善采集参数表并保存。
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    <div className="max-h-72 overflow-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-muted/40">
+                          <tr className="border-b">
+                            <th className="w-12 px-3 py-2 text-left">选择</th>
+                            <th className="w-12 px-3 py-2 text-left">#</th>
+                            {trialParameterColumns.map((column) => (
+                              <th key={column.id} className="px-3 py-2 text-left font-medium">
+                                <div>{column.chineseName ?? column.name}</div>
+                                <div className="font-normal text-[11px] text-muted-foreground">{column.name}</div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {trialParameterRows.map((row, index) => {
+                            const checked = selectedTrialParameterRowKeys.includes(row.rowKey);
+                            return (
+                              <tr
+                                key={row.rowKey}
+                                className={cn(
+                                  "border-b last:border-b-0 cursor-pointer hover:bg-muted/20",
+                                  checked && "bg-primary/5",
+                                )}
+                                onClick={() => handleToggleTrialParameterRow(row.rowKey)}
+                              >
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => handleToggleTrialParameterRow(row.rowKey)}
+                                    onClick={(event) => event.stopPropagation()}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-muted-foreground">{index + 1}</td>
+                                {trialParameterColumns.map((column) => (
+                                  <td key={`${row.rowKey}-${column.name}`} className="px-3 py-2">
+                                    {row.values[column.name] || "-"}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {false ? (
+              <div className="space-y-3">
                 <div className="text-xs font-medium text-muted-foreground">选择维度值</div>
-                {trialDimensionColumns.length === 0 ? (
+                {trialParameterColumns.length === 0 ? (
                   <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
                     当前宽表没有可筛选维度，将按单次快照范围抽样试运行。
                   </div>
@@ -1809,6 +1906,7 @@ export default function RequirementTasksPanel({
                   </div>
                 )}
               </div>
+              ) : null}
 
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 px-4 py-3">
                 <div className="text-xs text-muted-foreground">
@@ -1864,10 +1962,10 @@ export default function RequirementTasksPanel({
             <button
               type="button"
               onClick={() => void handlePersistPromptTemplates()}
-              disabled={!isDefinitionSubmitted || !isPromptEditable || isPersistingPrompts}
+              disabled={!isDefinitionSubmitted || isPersistingPrompts}
               className={cn(
                 "rounded-md px-3 py-1.5 text-xs font-medium",
-                !isDefinitionSubmitted || !isPromptEditable || isPersistingPrompts
+                !isDefinitionSubmitted || isPersistingPrompts
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
                   : "bg-primary text-primary-foreground hover:opacity-90",
               )}
@@ -1879,12 +1977,6 @@ export default function RequirementTasksPanel({
           {promptSaveMessage ? (
             <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
               {promptSaveMessage}
-            </div>
-          ) : null}
-
-          {!isPromptEditable ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              提示词已锁定为只读展示；如需调整，请先回到需求侧修改并重新生成计划。
             </div>
           ) : null}
 
@@ -1931,7 +2023,7 @@ export default function RequirementTasksPanel({
                           <div>
                             <div className="text-sm font-medium">Agent 提示词</div>
                             <div className="text-[11px] text-muted-foreground">
-                              未锁定前可编辑核心查询需求、业务知识和输出限制；指标与维度信息始终由需求定义生成。
+                              可编辑核心查询需求、业务知识和输出限制；指标与维度信息始终由需求定义生成。
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -3373,6 +3465,15 @@ function resolveIndicatorGroupLabels(wideTable: WideTable): string[] {
   }
 
   return [];
+}
+
+function buildTrialParameterRowKey(
+  columns: Array<WideTable["schema"]["columns"][number]>,
+  valueSource: Record<string, unknown>,
+): string {
+  return columns
+    .map((column) => String(valueSource[column.name] ?? "").trim())
+    .join("\u0001");
 }
 
 function summarizeDimensions(wideTable: WideTable, dimensionColumns: Array<WideTable["schema"]["columns"][number]>): string {

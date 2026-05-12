@@ -1,6 +1,8 @@
 package com.huatai.datafoundry.backend.task.application.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableRowReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.service.WideTableRowQueryService;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
@@ -23,6 +25,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.LocalDateTime;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
@@ -35,6 +38,7 @@ public class TaskPlanAppService {
   private final FetchTaskRepository fetchTaskRepository;
   private final TaskPlanDomainService taskPlanDomainService;
   private final TargetTableQueryService targetTableQueryService;
+  private final WideTableRowQueryService wideTableRowQueryService;
   private final ObjectMapper objectMapper;
 
   TaskPlanAppService(
@@ -49,6 +53,7 @@ public class TaskPlanAppService {
         fetchTaskRepository,
         taskPlanDomainService,
         null,
+        null,
         objectMapper);
   }
 
@@ -59,13 +64,203 @@ public class TaskPlanAppService {
       FetchTaskRepository fetchTaskRepository,
       TaskPlanDomainService taskPlanDomainService,
       TargetTableQueryService targetTableQueryService,
+      WideTableRowQueryService wideTableRowQueryService,
       ObjectMapper objectMapper) {
     this.wideTableReadRepository = wideTableReadRepository;
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.taskPlanDomainService = taskPlanDomainService;
     this.targetTableQueryService = targetTableQueryService;
+    this.wideTableRowQueryService = wideTableRowQueryService;
     this.objectMapper = objectMapper;
+  }
+
+  public TrialRunResult createTrialRun(
+      String requirementId,
+      String wideTableId,
+      List<String> businessDates,
+      List<String> rowBindingKeys,
+      Integer maxRows,
+      String operator) {
+    if (wideTableId == null || wideTableId.trim().isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "wideTableId is required");
+    }
+
+    WideTablePlanSource wideTable =
+        wideTableReadRepository.getByIdForRequirement(requirementId, wideTableId);
+    if (wideTable == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Wide table not found");
+    }
+    if (wideTableRowQueryService == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED, "Wide table rows are unavailable");
+    }
+
+    List<WideTableRowReadDto> allRows = wideTableRowQueryService.listByWideTableId(wideTableId);
+    if (allRows == null || allRows.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No preview rows available for trial run");
+    }
+
+    int currentPlanVersion = 0;
+    for (WideTableRowReadDto row : allRows) {
+      if (row != null && row.getPlanVersion() != null) {
+        currentPlanVersion = Math.max(currentPlanVersion, row.getPlanVersion().intValue());
+      }
+    }
+
+    List<WideTableRowReadDto> scopedRows = new ArrayList<WideTableRowReadDto>();
+    for (WideTableRowReadDto row : allRows) {
+      if (row == null) {
+        continue;
+      }
+      if (currentPlanVersion > 0 && row.getPlanVersion() != null && row.getPlanVersion().intValue() != currentPlanVersion) {
+        continue;
+      }
+      scopedRows.add(row);
+    }
+
+    Set<String> selectedBusinessDates = normalizeNonEmptySet(businessDates);
+    Set<String> selectedRowBindingKeys = normalizeNonEmptySet(rowBindingKeys);
+    List<WideTableRowReadDto> matchedRows = new ArrayList<WideTableRowReadDto>();
+    for (WideTableRowReadDto row : scopedRows) {
+      if (!selectedRowBindingKeys.isEmpty()) {
+        String rowBindingKey = row.getRowBindingKey() != null ? row.getRowBindingKey().trim() : "";
+        if (rowBindingKey.isEmpty() || !selectedRowBindingKeys.contains(rowBindingKey)) {
+          continue;
+        }
+      }
+      if (!selectedBusinessDates.isEmpty()) {
+        String businessDate = row.getBusinessDate() != null ? row.getBusinessDate().trim() : "";
+        if (businessDate.isEmpty() || !selectedBusinessDates.contains(businessDate)) {
+          continue;
+        }
+      }
+      matchedRows.add(row);
+    }
+
+    if (matchedRows.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No rows matched the selected trial scope");
+    }
+
+    int effectiveMaxRows = maxRows != null && maxRows.intValue() > 0 ? maxRows.intValue() : 20;
+    if (matchedRows.size() > effectiveMaxRows) {
+      matchedRows = new ArrayList<WideTableRowReadDto>(matchedRows.subList(0, effectiveMaxRows));
+    }
+
+    List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTable.getId());
+    if (indicatorGroups == null || indicatorGroups.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No indicator groups available for trial run");
+    }
+
+    int planVersion = currentPlanVersion > 0 ? currentPlanVersion : 1;
+    int schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion().intValue() : 1;
+    LocalDateTime now = LocalDateTime.now();
+    String batchId = buildTrialBatchId(wideTableId, now);
+    String effectiveOperator = operator != null && !operator.trim().isEmpty() ? operator.trim() : "system";
+
+    LinkedHashMap<String, List<WideTableRowReadDto>> rowsByBusinessDate = new LinkedHashMap<String, List<WideTableRowReadDto>>();
+    for (WideTableRowReadDto row : matchedRows) {
+      String businessDate = row.getBusinessDate() != null ? row.getBusinessDate().trim() : "";
+      if (!rowsByBusinessDate.containsKey(businessDate)) {
+        rowsByBusinessDate.put(businessDate, new ArrayList<WideTableRowReadDto>());
+      }
+      rowsByBusinessDate.get(businessDate).add(row);
+    }
+
+    List<TaskGroup> taskGroups = new ArrayList<TaskGroup>();
+    List<FetchTask> fetchTasks = new ArrayList<FetchTask>();
+    int sortOrder = 0;
+    for (Map.Entry<String, List<WideTableRowReadDto>> entry : rowsByBusinessDate.entrySet()) {
+      String businessDate = entry.getKey();
+      List<ParameterRow> parameterRows = buildTrialParameterRows(entry.getValue());
+      if (parameterRows.isEmpty()) {
+        continue;
+      }
+      for (IndicatorGroup indicatorGroup : indicatorGroups) {
+        TaskGroup taskGroup = new TaskGroup();
+        taskGroup.setId(buildTrialTaskGroupId(wideTableId, businessDate, indicatorGroup.id, now, sortOrder));
+        taskGroup.setSortOrder(sortOrder++);
+        taskGroup.setRequirementId(requirementId);
+        taskGroup.setWideTableId(wideTableId);
+        taskGroup.setBatchId(batchId);
+        taskGroup.setBusinessDate(businessDate);
+        taskGroup.setSourceType("manual");
+        taskGroup.setStatus("pending");
+        taskGroup.setPlanVersion(planVersion);
+        taskGroup.setGroupKind("baseline");
+        taskGroup.setPartitionType(indicatorGroups.size() > 1 ? "indicator_group" : "trial");
+        taskGroup.setPartitionKey(indicatorGroups.size() > 1 ? indicatorGroup.id : null);
+        taskGroup.setPartitionLabel(indicatorGroups.size() > 1 ? indicatorGroup.name : null);
+        taskGroup.setCompletedTasks(0);
+        taskGroup.setFailedTasks(0);
+        taskGroup.setTriggeredBy("trial");
+        taskGroup.setCreatedAt(now);
+        taskGroup.setUpdatedAt(now);
+
+        PlanFetchTasksInput input = new PlanFetchTasksInput();
+        input.taskGroupId = taskGroup.getId();
+        input.businessDate = businessDate;
+        input.planVersion = planVersion;
+        input.schemaVersion = schemaVersion;
+        input.partitionKey = taskGroup.getPartitionKey();
+        input.parameterRows = parameterRows;
+        input.indicatorGroups = indicatorGroups;
+
+        List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
+        taskGroup.setTotalTasks(drafts.size());
+        taskGroups.add(taskGroup);
+
+        for (FetchTaskDraft draft : drafts) {
+          FetchTask ft = new FetchTask();
+          ft.setId(draft.id);
+          ft.setSortOrder(draft.sortOrder);
+          ft.setRequirementId(requirementId);
+          ft.setWideTableId(wideTableId);
+          ft.setTaskGroupId(taskGroup.getId());
+          ft.setBatchId(batchId);
+          ft.setRowId(draft.rowId);
+          ft.setIndicatorGroupId(draft.indicatorGroupId);
+          ft.setIndicatorGroupName(draft.indicatorGroupName);
+          ft.setName(draft.name);
+          ft.setSchemaVersion(draft.schemaVersion);
+          ft.setExecutionMode(draft.executionMode);
+          ft.setIndicatorKeysJson(writeJson(draft.indicatorKeys));
+          ft.setDimensionValuesJson(writeJson(draft.dimensionValues));
+          ft.setBusinessDate(draft.businessDate);
+          ft.setStatus("pending");
+          ft.setCanRerun(Boolean.TRUE);
+          ft.setOwner(effectiveOperator);
+          ft.setPlanVersion(draft.planVersion);
+          ft.setRowBindingKey(draft.rowBindingKey);
+          ft.setCreatedAt(now);
+          ft.setUpdatedAt(now);
+          fetchTasks.add(ft);
+        }
+      }
+    }
+
+    if (taskGroups.isEmpty() || fetchTasks.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No trial tasks generated");
+    }
+
+    taskGroupRepository.upsertBatch(taskGroups);
+    fetchTaskRepository.upsertBatch(fetchTasks);
+
+    TrialRunResult result = new TrialRunResult();
+    result.batchId = batchId;
+    result.wideTableId = wideTableId;
+    result.planVersion = planVersion;
+    result.semanticTimeAxis = wideTable.getSemanticTimeAxis();
+    result.coverageMode = wideTable.getCollectionCoverageMode();
+    result.triggeredBy = "trial";
+    result.operator = effectiveOperator;
+    result.createdAt = now;
+    result.startBusinessDate = taskGroups.get(0).getBusinessDate();
+    result.endBusinessDate = taskGroups.get(taskGroups.size() - 1).getBusinessDate();
+    result.rowCount = matchedRows.size();
+    result.taskCount = fetchTasks.size();
+    result.taskGroups = taskGroups;
+    result.fetchTasks = fetchTasks;
+    return result;
   }
 
   public void ensureDefaultTaskGroupsOnSubmit(String requirementId) {
@@ -341,6 +536,74 @@ public class TaskPlanAppService {
     return tg;
   }
 
+  private List<ParameterRow> buildTrialParameterRows(List<WideTableRowReadDto> rows) {
+    List<ParameterRow> parameterRows = new ArrayList<ParameterRow>();
+    if (rows == null) {
+      return parameterRows;
+    }
+    for (WideTableRowReadDto row : rows) {
+      if (row == null || row.getDimensionValues() == null || row.getDimensionValues().isEmpty()) {
+        continue;
+      }
+      ParameterRow parameterRow = new ParameterRow();
+      parameterRow.rowId = row.getRowId() != null ? row.getRowId().intValue() : (parameterRows.size() + 1);
+      parameterRow.businessDate = row.getBusinessDate();
+      for (Map.Entry<String, Object> entry : row.getDimensionValues().entrySet()) {
+        if (entry.getKey() == null) {
+          continue;
+        }
+        String key = entry.getKey().trim();
+        if (key.isEmpty()) {
+          continue;
+        }
+        parameterRow.values.put(key, entry.getValue() == null ? "" : String.valueOf(entry.getValue()));
+      }
+      if (!parameterRow.values.isEmpty()) {
+        parameterRows.add(parameterRow);
+      }
+    }
+    return parameterRows;
+  }
+
+  private Set<String> normalizeNonEmptySet(List<String> rawValues) {
+    if (rawValues == null || rawValues.isEmpty()) {
+      return Collections.emptySet();
+    }
+    Set<String> normalized = new LinkedHashSet<String>();
+    for (String rawValue : rawValues) {
+      if (rawValue == null) {
+        continue;
+      }
+      String value = rawValue.trim();
+      if (!value.isEmpty()) {
+        normalized.add(value);
+      }
+    }
+    return normalized;
+  }
+
+  private String buildTrialBatchId(String wideTableId, LocalDateTime now) {
+    String timeToken = now.toString().replace("-", "").replace(":", "").replace("T", "").replace(".", "");
+    return String.format("CB-TRIAL-%s-%s", wideTableId, timeToken);
+  }
+
+  private String buildTrialTaskGroupId(
+      String wideTableId,
+      String businessDate,
+      String indicatorGroupId,
+      LocalDateTime now,
+      int index) {
+    String dateToken = (businessDate != null && !businessDate.trim().isEmpty())
+        ? businessDate.replace("-", "")
+        : "snapshot";
+    String groupToken = indicatorGroupId != null && !indicatorGroupId.trim().isEmpty()
+        ? indicatorGroupId.trim()
+        : "default";
+    String timeToken = now.toString().replace("-", "").replace(":", "").replace("T", "").replace(".", "");
+    return String.format("TG-TRIAL-%s-%s-%s-%d", wideTableId, dateToken, groupToken, index + 1)
+        + "-" + timeToken;
+  }
+
   private Scope parseScope(String scopeJson) {
     Scope scope = new Scope();
     if (scopeJson == null || scopeJson.trim().isEmpty()) return scope;
@@ -571,5 +834,22 @@ public class TaskPlanAppService {
       java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM");
       return fmt.format(java.time.LocalDate.now());
     }
+  }
+
+  public static class TrialRunResult {
+    public String batchId;
+    public String wideTableId;
+    public Integer planVersion;
+    public String semanticTimeAxis;
+    public String coverageMode;
+    public String triggeredBy;
+    public String operator;
+    public String startBusinessDate;
+    public String endBusinessDate;
+    public Integer rowCount;
+    public Integer taskCount;
+    public LocalDateTime createdAt;
+    public List<TaskGroup> taskGroups = new ArrayList<TaskGroup>();
+    public List<FetchTask> fetchTasks = new ArrayList<FetchTask>();
   }
 }

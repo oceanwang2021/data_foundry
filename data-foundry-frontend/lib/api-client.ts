@@ -399,6 +399,7 @@ function mapWideTableRow(raw: any, businessDateFieldName = "biz_date"): WideTabl
   const record: WideTableRecord = {
     id: raw.row_id,
     wideTableId: raw.wide_table_id,
+    rowBindingKey: raw.row_binding_key ?? undefined,
   };
 
   // 展开 dimension_values 为平铺字段
@@ -1670,7 +1671,7 @@ export async function createTrialRun(
   data: {
     wideTableId: string;
     businessDates?: string[];
-    dimensionValues?: Record<string, string[]>;
+    rowBindingKeys?: string[];
     maxRows?: number;
     operator?: string;
   },
@@ -1686,7 +1687,7 @@ export async function createTrialRun(
     {
       wideTableId: data.wideTableId,
       businessDates: data.businessDates ?? [],
-      dimensionValues: data.dimensionValues ?? {},
+      rowBindingKeys: data.rowBindingKeys ?? [],
       maxRows: data.maxRows ?? 20,
       operator: data.operator ?? "system",
     },

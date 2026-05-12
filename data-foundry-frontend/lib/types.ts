@@ -181,6 +181,7 @@ export type WideTable = {
 export type WideTableRecord = {
   id: number;
   wideTableId: string;
+  rowBindingKey?: string;
   [key: string]: any;
   _metadata?: {
     confidence?: number;
