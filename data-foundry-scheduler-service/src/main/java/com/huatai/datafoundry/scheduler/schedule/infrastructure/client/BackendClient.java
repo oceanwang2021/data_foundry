@@ -2,6 +2,7 @@ package com.huatai.datafoundry.scheduler.schedule.infrastructure.client;
 
 import com.huatai.datafoundry.scheduler.schedule.domain.gateway.BackendGateway;
 import java.net.URI;
+import java.util.HashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,6 +58,45 @@ public class BackendClient implements BackendGateway {
       }
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "Backend callback rejected: " + response.getStatusCode());
+    } catch (HttpStatusCodeException ex) {
+      throw translateDownstream(ex);
+    } catch (RestClientException ex) {
+      throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable", ex);
+    }
+  }
+
+  @Override
+  public Map<String, Object> getFetchTaskPrompt(String taskId, String idempotencyKey) {
+    if (taskId == null || taskId.trim().length() == 0) {
+      return new HashMap<String, Object>();
+    }
+
+    HttpHeaders headers = new HttpHeaders();
+    if (idempotencyKey != null && idempotencyKey.trim().length() > 0) {
+      headers.add("X-Idempotency-Key", idempotencyKey.trim());
+    }
+    if (callbackToken != null && callbackToken.trim().length() > 0) {
+      headers.add("X-Internal-Token", callbackToken.trim());
+    }
+
+    try {
+      ResponseEntity<Object> response =
+          restTemplate.exchange(
+              URI.create(backendBaseUrl + "/internal/scheduler/fetch-tasks/" + taskId.trim() + "/prompt"),
+              HttpMethod.GET,
+              new HttpEntity<Object>(null, headers),
+              Object.class);
+      if (!response.getStatusCode().is2xxSuccessful()) {
+        throw new ResponseStatusException(
+            HttpStatus.SERVICE_UNAVAILABLE, "Backend prompt lookup rejected: " + response.getStatusCode());
+      }
+      Object body = response.getBody();
+      if (body instanceof Map) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> out = (Map<String, Object>) body;
+        return out;
+      }
+      return new HashMap<String, Object>();
     } catch (HttpStatusCodeException ex) {
       throw translateDownstream(ex);
     } catch (RestClientException ex) {

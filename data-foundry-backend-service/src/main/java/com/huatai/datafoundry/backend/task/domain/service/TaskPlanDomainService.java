@@ -245,6 +245,7 @@ public static class Scope {
     public String id;
     public String name;
     public List<String> indicatorColumns = new ArrayList<String>();
+    public String promptTemplate;
   }
 
   public static class PlanFetchTasksInput {

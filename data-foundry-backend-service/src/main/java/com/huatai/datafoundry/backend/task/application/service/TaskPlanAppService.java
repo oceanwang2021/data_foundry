@@ -23,8 +23,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.time.LocalDateTime;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -40,6 +43,8 @@ public class TaskPlanAppService {
   private final TargetTableQueryService targetTableQueryService;
   private final WideTableRowQueryService wideTableRowQueryService;
   private final ObjectMapper objectMapper;
+
+  private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([^{}]+)\\}");
 
   TaskPlanAppService(
       WideTableReadRepository wideTableReadRepository,
@@ -150,6 +155,12 @@ public class TaskPlanAppService {
     if (indicatorGroups == null || indicatorGroups.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No indicator groups available for trial run");
     }
+    Map<String, IndicatorGroup> indicatorGroupById = new HashMap<String, IndicatorGroup>();
+    for (IndicatorGroup group : indicatorGroups) {
+      if (group != null && group.id != null && !group.id.trim().isEmpty()) {
+        indicatorGroupById.put(group.id, group);
+      }
+    }
 
     int planVersion = currentPlanVersion > 0 ? currentPlanVersion : 1;
     int schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion().intValue() : 1;
@@ -225,6 +236,10 @@ public class TaskPlanAppService {
           ft.setExecutionMode(draft.executionMode);
           ft.setIndicatorKeysJson(writeJson(draft.indicatorKeys));
           ft.setDimensionValuesJson(writeJson(draft.dimensionValues));
+          IndicatorGroup promptGroup = indicatorGroupById.get(draft.indicatorGroupId);
+          String templateSnapshot = promptGroup != null ? promptGroup.promptTemplate : null;
+          ft.setPromptTemplateSnapshot(templateSnapshot);
+          ft.setRenderedPromptText(renderPromptTemplate(templateSnapshot, draft.dimensionValues));
           ft.setBusinessDate(draft.businessDate);
           ft.setStatus("pending");
           ft.setCanRerun(Boolean.TRUE);
@@ -467,6 +482,12 @@ public class TaskPlanAppService {
     if (indicatorGroup == null) {
       return;
     }
+    Map<String, IndicatorGroup> indicatorGroupById = new HashMap<String, IndicatorGroup>();
+    for (IndicatorGroup group : indicatorGroups) {
+      if (group != null && group.id != null && !group.id.trim().isEmpty()) {
+        indicatorGroupById.put(group.id, group);
+      }
+    }
 
     PlanFetchTasksInput input = new PlanFetchTasksInput();
     input.taskGroupId = taskGroup.getId();
@@ -500,6 +521,10 @@ public class TaskPlanAppService {
       ft.setExecutionMode(draft.executionMode);
       ft.setIndicatorKeysJson(writeJson(draft.indicatorKeys));
       ft.setDimensionValuesJson(writeJson(draft.dimensionValues));
+      IndicatorGroup promptGroup = indicatorGroupById.get(draft.indicatorGroupId);
+      String templateSnapshot = promptGroup != null ? promptGroup.promptTemplate : null;
+      ft.setPromptTemplateSnapshot(templateSnapshot);
+      ft.setRenderedPromptText(renderPromptTemplate(templateSnapshot, draft.dimensionValues));
       ft.setBusinessDate(draft.businessDate);
       ft.setStatus(draft.status);
       ft.setCanRerun(draft.canRerun);
@@ -760,7 +785,18 @@ public class TaskPlanAppService {
         IndicatorGroup group = new IndicatorGroup();
         group.id = asString(raw.get("id"));
         group.name = asString(raw.get("name"));
-        Object cols = raw.get("indicator_columns");
+        group.promptTemplate = asString(raw.get("prompt_template"));
+        if (group.promptTemplate == null) {
+          group.promptTemplate = asString(raw.get("promptTemplate"));
+        }
+
+        Object cols = raw.get("indicator_keys");
+        if (!(cols instanceof List)) {
+          cols = raw.get("indicator_columns");
+        }
+        if (!(cols instanceof List)) {
+          cols = raw.get("indicatorColumns");
+        }
         if (cols instanceof List) {
           for (Object c : (List<?>) cols) {
             if (c != null) group.indicatorColumns.add(String.valueOf(c));
@@ -795,6 +831,46 @@ public class TaskPlanAppService {
       }
     }
     return groups.get(0);
+  }
+
+  private String renderPromptTemplate(String promptTemplate, Map<String, String> parameterValues) {
+    if (promptTemplate == null) {
+      return null;
+    }
+    if (parameterValues == null || parameterValues.isEmpty()) {
+      return promptTemplate;
+    }
+
+    Matcher matcher = PLACEHOLDER_PATTERN.matcher(promptTemplate);
+    if (!matcher.find()) {
+      return promptTemplate;
+    }
+
+    Map<String, String> normalized = new HashMap<String, String>();
+    for (Map.Entry<String, String> entry : parameterValues.entrySet()) {
+      if (entry == null || entry.getKey() == null) {
+        continue;
+      }
+      String key = entry.getKey().trim();
+      if (key.isEmpty()) {
+        continue;
+      }
+      normalized.put(key.toLowerCase(Locale.ROOT), entry.getValue() == null ? "" : entry.getValue());
+    }
+
+    StringBuffer sb = new StringBuffer();
+    do {
+      String rawKey = matcher.group(1);
+      String lookupKey = rawKey != null ? rawKey.trim().toLowerCase(Locale.ROOT) : "";
+      String value = normalized.get(lookupKey);
+      if (value == null) {
+        matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(0)));
+      } else {
+        matcher.appendReplacement(sb, Matcher.quoteReplacement(value));
+      }
+    } while (matcher.find());
+    matcher.appendTail(sb);
+    return sb.toString();
   }
 
   private String writeJson(Object value) {

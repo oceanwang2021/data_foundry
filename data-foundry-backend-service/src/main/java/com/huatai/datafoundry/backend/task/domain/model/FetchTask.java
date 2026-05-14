@@ -18,6 +18,8 @@ public class FetchTask {
   private String executionMode;
   private String indicatorKeysJson;
   private String dimensionValuesJson;
+  private String renderedPromptText;
+  private String promptTemplateSnapshot;
   private String businessDate;
   private String status;
   private Boolean canRerun;
@@ -141,6 +143,22 @@ public class FetchTask {
     this.dimensionValuesJson = dimensionValuesJson;
   }
 
+  public String getRenderedPromptText() {
+    return renderedPromptText;
+  }
+
+  public void setRenderedPromptText(String renderedPromptText) {
+    this.renderedPromptText = renderedPromptText;
+  }
+
+  public String getPromptTemplateSnapshot() {
+    return promptTemplateSnapshot;
+  }
+
+  public void setPromptTemplateSnapshot(String promptTemplateSnapshot) {
+    this.promptTemplateSnapshot = promptTemplateSnapshot;
+  }
+
   public String getBusinessDate() {
     return businessDate;
   }
@@ -221,4 +239,3 @@ public class FetchTask {
     this.updatedAt = updatedAt;
   }
 }
-

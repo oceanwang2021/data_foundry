@@ -234,6 +234,8 @@ CREATE TABLE fetch_tasks (
   execution_mode        VARCHAR(32)  NULL,
   indicator_keys_json   JSON         NULL,
   dimension_values_json JSON         NULL,
+  rendered_prompt_text  LONGTEXT     NULL,
+  prompt_template_snapshot LONGTEXT  NULL,
   -- Legacy seed uses mixed formats: YYYY-MM-DD / YYYY / YYYY-Q4
   business_date         VARCHAR(32)  NULL,
   status                VARCHAR(32)  NOT NULL DEFAULT 'pending',
