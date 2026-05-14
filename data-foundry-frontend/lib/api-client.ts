@@ -603,6 +603,7 @@ export function mapTaskGroupStatus(status: string): TaskGroup["status"] {
   const mapping: Record<string, TaskGroup["status"]> = {
     pending: "pending",
     running: "running",
+    failed: "failed",
     partial: "partial",
     completed: "completed",
     invalidated: "invalidated",
@@ -1669,14 +1670,15 @@ export async function createTrialRun(
   fetchTasks: FetchTask[];
   rowCount: number;
   taskCount: number;
+  collectionCallStatus?: string;
 }> {
   const raw = await apiPost<any>(
     `/api/requirements/${requirementId}/trial-run`,
     {
-      wideTableId: data.wideTableId,
-      businessDates: data.businessDates ?? [],
-      rowBindingKeys: data.rowBindingKeys ?? [],
-      maxRows: data.maxRows ?? 20,
+      wide_table_id: data.wideTableId,
+      business_dates: data.businessDates ?? [],
+      row_binding_keys: data.rowBindingKeys ?? [],
+      max_rows: data.maxRows ?? 20,
       operator: data.operator ?? "system",
     },
   );
@@ -1686,6 +1688,7 @@ export async function createTrialRun(
     fetchTasks: (raw.fetch_tasks ?? []).map(mapFetchTask),
     rowCount: raw.row_count ?? 0,
     taskCount: raw.task_count ?? 0,
+    collectionCallStatus: raw.collection_call_status,
   };
 }
 

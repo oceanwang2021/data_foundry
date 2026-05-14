@@ -13,4 +13,6 @@ public interface FetchTaskRepository {
   int upsertBatch(List<FetchTask> tasks);
 
   int updateStatus(String taskId, String status);
+
+  int updateStatus(String taskId, String status, String collectionTaskId);
 }

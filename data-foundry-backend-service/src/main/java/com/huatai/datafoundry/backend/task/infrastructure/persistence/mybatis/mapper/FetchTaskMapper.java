@@ -15,7 +15,7 @@ public interface FetchTaskMapper {
       "select "
           + "id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id, "
           + "indicator_group_id, indicator_group_name, name, schema_version, execution_mode, "
-          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, business_date, status, can_rerun, "
+          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
           + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
           + "from fetch_tasks "
           + "where requirement_id = #{requirementId} "
@@ -26,7 +26,7 @@ public interface FetchTaskMapper {
       "select "
           + "id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id, "
           + "indicator_group_id, indicator_group_name, name, schema_version, execution_mode, "
-          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, business_date, status, can_rerun, "
+          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
           + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
           + "from fetch_tasks "
           + "where task_group_id = #{taskGroupId} "
@@ -37,7 +37,7 @@ public interface FetchTaskMapper {
       "select "
           + "id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id, "
           + "indicator_group_id, indicator_group_name, name, schema_version, execution_mode, "
-          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, business_date, status, can_rerun, "
+          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
           + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
           + "from fetch_tasks "
           + "where id = #{id} "
@@ -52,17 +52,18 @@ public interface FetchTaskMapper {
       "insert into fetch_tasks (",
       "  id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id,",
       "  indicator_group_id, indicator_group_name, name, schema_version, execution_mode,",
-      "  indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, business_date, status, can_rerun,",
+      "  indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun,",
       "  invalidated_reason, owner, confidence, plan_version, row_binding_key",
       ") values ",
       "  <foreach collection='records' item='r' separator=','>",
       "    (#{r.id}, #{r.sortOrder}, #{r.requirementId}, #{r.wideTableId}, #{r.taskGroupId}, #{r.batchId}, #{r.rowId},",
       "     #{r.indicatorGroupId}, #{r.indicatorGroupName}, #{r.name}, #{r.schemaVersion}, #{r.executionMode},",
-      "     #{r.indicatorKeysJson}, #{r.dimensionValuesJson}, #{r.renderedPromptText}, #{r.promptTemplateSnapshot}, #{r.businessDate}, #{r.status}, #{r.canRerun},",
+      "     #{r.indicatorKeysJson}, #{r.dimensionValuesJson}, #{r.renderedPromptText}, #{r.promptTemplateSnapshot}, #{r.collectionTaskId}, #{r.businessDate}, #{r.status}, #{r.canRerun},",
       "     #{r.invalidatedReason}, #{r.owner}, #{r.confidence}, #{r.planVersion}, #{r.rowBindingKey})",
       "  </foreach>",
       "on duplicate key update ",
       "  status = values(status),",
+      "  collection_task_id = coalesce(values(collection_task_id), collection_task_id),",
       "  confidence = values(confidence),",
       "  can_rerun = values(can_rerun),",
       "  invalidated_reason = values(invalidated_reason),",
@@ -73,4 +74,11 @@ public interface FetchTaskMapper {
 
   @Update("update fetch_tasks set status = #{status}, updated_at = current_timestamp where id = #{id}")
   int updateStatus(@Param("id") String id, @Param("status") String status);
+
+  @Update(
+      "update fetch_tasks "
+          + "set status = #{status}, collection_task_id = #{collectionTaskId}, updated_at = current_timestamp "
+          + "where id = #{id}")
+  int updateStatusAndCollectionTaskId(
+      @Param("id") String id, @Param("status") String status, @Param("collectionTaskId") String collectionTaskId);
 }

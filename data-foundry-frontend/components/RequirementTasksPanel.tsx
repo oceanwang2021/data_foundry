@@ -1133,6 +1133,9 @@ export default function RequirementTasksPanel({
         maxRows: trialMaxRows,
         operator: "当前用户",
       });
+      const collectionCallStatus = (result.collectionCallStatus ?? "failed") as
+        | "running"
+        | "failed";
       const createdTaskGroupIds = new Set(result.taskGroups.map((taskGroup) => taskGroup.id));
       const createdTaskIds = new Set(result.fetchTasks.map((task) => task.id));
       onTaskGroupsChange([
@@ -1150,34 +1153,18 @@ export default function RequirementTasksPanel({
           taskGroupId: taskGroup.id,
           wideTableId: taskGroup.wideTableId,
           triggerType: "trial" as const,
-          status: "running" as const,
+          status: collectionCallStatus,
           startedAt: formatRunTimestamp(new Date()),
           operator: "当前用户",
           logRef: `log://${taskGroup.id}/trial`,
         })),
       ]);
-      setRunningTaskGroupIds((current) => Array.from(new Set([
-        ...current,
-        ...result.taskGroups.map((taskGroup) => taskGroup.id),
-      ])));
-
-      await Promise.all(
-        result.taskGroups.map((taskGroup) =>
-          executeTaskGroup(taskGroup.id, { triggerType: "trial", operator: "当前用户" }),
-        ),
-      );
       setExpandedTgId(result.taskGroups[0]?.id ?? null);
-      setTrialRunMessage(
-        `已发起试运行：${result.rowCount} 行、${result.taskCount} 个采集任务。试运行数据会流转到数据产出和验收页面。`,
-      );
-      await refreshAfterExecution();
+      setTrialRunMessage(collectionCallStatus === "running" ? "采集接口已成功调用" : "采集接口不可用");
     } catch (error) {
       setTrialRunMessage(`试运行失败：${formatTaskActionError(error)}`);
     } finally {
       setIsStartingTrialRun(false);
-      setRunningTaskGroupIds((current) =>
-        current.filter((id) => !id.startsWith("TG-TRIAL-")),
-      );
     }
   };
 
@@ -3006,6 +2993,9 @@ function resolveTaskGroupDisplayStatus(
     return "running";
   }
   if (counts.failedTasks > 0 && counts.pendingTasks === 0) {
+    if (counts.completedTasks === 0 && counts.invalidatedTasks === 0) {
+      return "failed";
+    }
     return "partial";
   }
   if (counts.completedTasks > 0 && counts.pendingTasks > 0) {

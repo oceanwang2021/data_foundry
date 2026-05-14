@@ -20,6 +20,7 @@ public class FetchTask {
   private String dimensionValuesJson;
   private String renderedPromptText;
   private String promptTemplateSnapshot;
+  private String collectionTaskId;
   private String businessDate;
   private String status;
   private Boolean canRerun;
@@ -157,6 +158,14 @@ public class FetchTask {
 
   public void setPromptTemplateSnapshot(String promptTemplateSnapshot) {
     this.promptTemplateSnapshot = promptTemplateSnapshot;
+  }
+
+  public String getCollectionTaskId() {
+    return collectionTaskId;
+  }
+
+  public void setCollectionTaskId(String collectionTaskId) {
+    this.collectionTaskId = collectionTaskId;
   }
 
   public String getBusinessDate() {

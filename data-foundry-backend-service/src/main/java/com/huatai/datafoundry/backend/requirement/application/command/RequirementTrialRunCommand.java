@@ -1,12 +1,22 @@
 package com.huatai.datafoundry.backend.requirement.application.command;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import java.util.List;
 
 public class RequirementTrialRunCommand {
+  @JsonAlias("wideTableId")
   private String wideTableId;
+
+  @JsonAlias("businessDates")
   private List<String> businessDates;
+
+  @JsonAlias("rowBindingKeys")
   private List<String> rowBindingKeys;
+
+  @JsonAlias("maxRows")
   private Integer maxRows;
+
+  @JsonAlias("operator")
   private String operator;
 
   public String getWideTableId() {
