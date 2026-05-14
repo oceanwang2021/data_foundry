@@ -16,5 +16,6 @@ public interface FetchTaskRepository {
 
   int updateStatus(String taskId, String status);
 
-  int updateStatusAndConfidence(String taskId, String status, java.math.BigDecimal confidence);
+  int updateStatus(String taskId, String status, String collectionTaskId);
+
 }

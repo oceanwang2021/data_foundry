@@ -103,6 +103,10 @@ function resolveTaskGroupStatus(
   }
 
   if (counts.failedTasks > 0 && counts.pendingTasks === 0) {
+    // All tasks failed: show as failed; mixed results still treated as partial.
+    if (counts.completedTasks === 0 && counts.invalidatedTasks === 0) {
+      return "failed";
+    }
     return "partial";
   }
 

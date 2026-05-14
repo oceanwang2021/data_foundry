@@ -43,6 +43,7 @@ public class RequirementTrialRunFacadeController {
     response.put("fetch_tasks", result.fetchTasks.stream().map(this::buildFetchTask).collect(Collectors.toList()));
     response.put("row_count", result.rowCount);
     response.put("task_count", result.taskCount);
+    response.put("collection_call_status", result.collectionCallStatus);
     return response;
   }
 
@@ -112,6 +113,7 @@ public class RequirementTrialRunFacadeController {
     raw.put("confidence", fetchTask.getConfidence());
     raw.put("plan_version", fetchTask.getPlanVersion());
     raw.put("row_binding_key", fetchTask.getRowBindingKey());
+    raw.put("collection_task_id", fetchTask.getCollectionTaskId());
     raw.put("execution_records", Collections.emptyList());
     raw.put("created_at", fetchTask.getCreatedAt());
     raw.put("updated_at", fetchTask.getUpdatedAt());

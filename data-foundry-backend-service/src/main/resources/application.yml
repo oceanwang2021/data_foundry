@@ -45,3 +45,5 @@ mybatis:
 data-foundry:
   scheduler:
     base-url: http://127.0.0.1:8200
+  collection:
+    base-url: http://118.196.116.160:3000

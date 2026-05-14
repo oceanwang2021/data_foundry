@@ -56,8 +56,8 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   }
 
   @Override
-  public int updateStatusAndConfidence(String taskId, String status, java.math.BigDecimal confidence) {
-    return fetchTaskMapper.updateStatusAndConfidence(taskId, status, confidence);
+  public int updateStatus(String taskId, String status, String collectionTaskId) {
+    return fetchTaskMapper.updateStatusAndCollectionTaskId(taskId, status, collectionTaskId);
   }
 
   private static List<FetchTask> toDomainList(List<FetchTaskRecord> records) {
@@ -88,6 +88,7 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
     task.setDimensionValuesJson(record.getDimensionValuesJson());
     task.setRenderedPromptText(record.getRenderedPromptText());
     task.setPromptTemplateSnapshot(record.getPromptTemplateSnapshot());
+    task.setCollectionTaskId(record.getCollectionTaskId());
     task.setBusinessDate(record.getBusinessDate());
     task.setStatus(record.getStatus());
     task.setCanRerun(record.getCanRerun());
@@ -120,6 +121,7 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
     record.setDimensionValuesJson(task.getDimensionValuesJson());
     record.setRenderedPromptText(task.getRenderedPromptText());
     record.setPromptTemplateSnapshot(task.getPromptTemplateSnapshot());
+    record.setCollectionTaskId(task.getCollectionTaskId());
     record.setBusinessDate(task.getBusinessDate());
     record.setStatus(task.getStatus());
     record.setCanRerun(task.getCanRerun());

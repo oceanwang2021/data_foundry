@@ -6,6 +6,8 @@ import com.huatai.datafoundry.backend.requirement.application.query.service.Wide
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway.CollectionSearchResult;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.WideTableReadRepository;
@@ -26,9 +28,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
@@ -40,23 +44,29 @@ public class TaskPlanAppService {
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
   private final TaskPlanDomainService taskPlanDomainService;
+  private final CollectionSearchGateway collectionSearchGateway;
   private final TargetTableQueryService targetTableQueryService;
   private final WideTableRowQueryService wideTableRowQueryService;
   private final ObjectMapper objectMapper;
 
   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([^{}]+)\\}");
+  // Trial-run ids must fit into task_groups.id (VARCHAR(64)).
+  private static final DateTimeFormatter TRIAL_ID_TIME_FMT =
+      DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS", Locale.ROOT);
 
   TaskPlanAppService(
       WideTableReadRepository wideTableReadRepository,
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       TaskPlanDomainService taskPlanDomainService,
+      CollectionSearchGateway collectionSearchGateway,
       ObjectMapper objectMapper) {
     this(
         wideTableReadRepository,
         taskGroupRepository,
         fetchTaskRepository,
         taskPlanDomainService,
+        collectionSearchGateway,
         null,
         null,
         objectMapper);
@@ -68,6 +78,7 @@ public class TaskPlanAppService {
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       TaskPlanDomainService taskPlanDomainService,
+      CollectionSearchGateway collectionSearchGateway,
       TargetTableQueryService targetTableQueryService,
       WideTableRowQueryService wideTableRowQueryService,
       ObjectMapper objectMapper) {
@@ -75,6 +86,7 @@ public class TaskPlanAppService {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.taskPlanDomainService = taskPlanDomainService;
+    this.collectionSearchGateway = collectionSearchGateway;
     this.targetTableQueryService = targetTableQueryService;
     this.wideTableRowQueryService = wideTableRowQueryService;
     this.objectMapper = objectMapper;
@@ -260,6 +272,10 @@ public class TaskPlanAppService {
     taskGroupRepository.upsertBatch(taskGroups);
     fetchTaskRepository.upsertBatch(fetchTasks);
 
+    // After tasks are persisted, call collection API for each instance and bind status + downstream task_id.
+    String collectionCallStatus = applyTrialRunCollectionCalls(fetchTasks);
+    applyTrialRunGroupStatus(taskGroups, fetchTasks);
+
     TrialRunResult result = new TrialRunResult();
     result.batchId = batchId;
     result.wideTableId = wideTableId;
@@ -273,9 +289,83 @@ public class TaskPlanAppService {
     result.endBusinessDate = taskGroups.get(taskGroups.size() - 1).getBusinessDate();
     result.rowCount = matchedRows.size();
     result.taskCount = fetchTasks.size();
+    result.collectionCallStatus = collectionCallStatus;
     result.taskGroups = taskGroups;
     result.fetchTasks = fetchTasks;
     return result;
+  }
+
+  private String applyTrialRunCollectionCalls(List<FetchTask> fetchTasks) {
+    if (fetchTasks == null || fetchTasks.isEmpty()) {
+      return "failed";
+    }
+    if (collectionSearchGateway == null) {
+      // Conservative fallback: the gateway is unavailable in this deployment.
+      for (FetchTask task : fetchTasks) {
+        if (task == null || task.getId() == null) continue;
+        fetchTaskRepository.updateStatus(task.getId(), "failed", null);
+        task.setStatus("failed");
+        task.setCollectionTaskId(null);
+      }
+      return "failed";
+    }
+
+    boolean anyRunning = false;
+    for (FetchTask task : fetchTasks) {
+      if (task == null || task.getId() == null) continue;
+      String rendered = task.getRenderedPromptText();
+      Object body = null;
+      try {
+        // rendered_prompt_text is a full JSON request body containing query/background/etc.
+        body = rendered != null ? objectMapper.readValue(rendered, Object.class) : null;
+      } catch (Exception ex) {
+        body = null;
+      }
+
+      CollectionSearchResult resp =
+          body != null ? collectionSearchGateway.createSearch(body, "trial-run-search:" + task.getId()) : null;
+      if (resp != null && resp.isSuccess() && resp.getTaskId() != null && !resp.getTaskId().trim().isEmpty()) {
+        String downstreamTaskId = resp.getTaskId().trim();
+        fetchTaskRepository.updateStatus(task.getId(), "running", downstreamTaskId);
+        task.setStatus("running");
+        task.setCollectionTaskId(downstreamTaskId);
+        anyRunning = true;
+      } else {
+        fetchTaskRepository.updateStatus(task.getId(), "failed", null);
+        task.setStatus("failed");
+        task.setCollectionTaskId(null);
+      }
+    }
+
+    return anyRunning ? "running" : "failed";
+  }
+
+  private void applyTrialRunGroupStatus(List<TaskGroup> taskGroups, List<FetchTask> fetchTasks) {
+    if (taskGroups == null || taskGroups.isEmpty()) {
+      return;
+    }
+
+    Map<String, Boolean> groupHasRunning = new HashMap<String, Boolean>();
+    if (fetchTasks != null) {
+      for (FetchTask task : fetchTasks) {
+        if (task == null) continue;
+        if (task.getTaskGroupId() == null) continue;
+        boolean isRunning = "running".equalsIgnoreCase(asString(task.getStatus()));
+        if (isRunning) {
+          groupHasRunning.put(task.getTaskGroupId(), Boolean.TRUE);
+        } else if (!groupHasRunning.containsKey(task.getTaskGroupId())) {
+          groupHasRunning.put(task.getTaskGroupId(), Boolean.FALSE);
+        }
+      }
+    }
+
+    for (TaskGroup tg : taskGroups) {
+      if (tg == null || tg.getId() == null) continue;
+      boolean hasRunning = Boolean.TRUE.equals(groupHasRunning.get(tg.getId()));
+      String next = hasRunning ? "running" : "failed";
+      taskGroupRepository.updateStatus(tg.getId(), next);
+      tg.setStatus(next);
+    }
   }
 
   public void ensureDefaultTaskGroupsOnSubmit(String requirementId) {
@@ -608,8 +698,12 @@ public class TaskPlanAppService {
   }
 
   private String buildTrialBatchId(String wideTableId, LocalDateTime now) {
-    String timeToken = now.toString().replace("-", "").replace(":", "").replace("T", "").replace(".", "");
-    return String.format("CB-TRIAL-%s-%s", wideTableId, timeToken);
+    // Keep it short: batch_id is stored in VARCHAR(64) columns.
+    String timeToken = TRIAL_ID_TIME_FMT.format(now != null ? now : LocalDateTime.now());
+    String rand = UUID.randomUUID().toString().replace("-", "").substring(0, 6);
+    String id = String.format("CB-TRIAL-%s-%s", timeToken, rand);
+    // Defensive: never exceed VARCHAR(64).
+    return id.length() <= 64 ? id : id.substring(0, 64);
   }
 
   private String buildTrialTaskGroupId(
@@ -618,15 +712,38 @@ public class TaskPlanAppService {
       String indicatorGroupId,
       LocalDateTime now,
       int index) {
+    // Keep it short: task_groups.id is VARCHAR(64).
     String dateToken = (businessDate != null && !businessDate.trim().isEmpty())
         ? businessDate.replace("-", "")
         : "snapshot";
-    String groupToken = indicatorGroupId != null && !indicatorGroupId.trim().isEmpty()
-        ? indicatorGroupId.trim()
-        : "default";
-    String timeToken = now.toString().replace("-", "").replace(":", "").replace("T", "").replace(".", "");
-    return String.format("TG-TRIAL-%s-%s-%s-%d", wideTableId, dateToken, groupToken, index + 1)
-        + "-" + timeToken;
+    // Hash wideTableId/indicatorGroupId into small stable tokens to avoid over-long ids.
+    String wideToken = shortToken(wideTableId);
+    String groupToken = shortToken(indicatorGroupId);
+    String timeToken = TRIAL_ID_TIME_FMT.format(now != null ? now : LocalDateTime.now());
+
+    // Example: TG-TRIAL-20260514154633649-01-ab12cd34-20251231-ef56ab78
+    String id =
+        String.format(
+            "TG-TRIAL-%s-%02d-%s-%s-%s",
+            timeToken,
+            Math.max(0, index) + 1,
+            wideToken,
+            dateToken,
+            groupToken);
+    // Defensive: never exceed VARCHAR(64).
+    return id.length() <= 64 ? id : id.substring(0, 64);
+  }
+
+  private static String shortToken(String raw) {
+    if (raw == null) {
+      return "00000000";
+    }
+    String s = raw.trim();
+    if (s.isEmpty()) {
+      return "00000000";
+    }
+    // Use a stable 8-hex token (hashCode is deterministic for the same string).
+    return String.format("%08x", s.hashCode());
   }
 
   private Scope parseScope(String scopeJson) {
@@ -925,6 +1042,7 @@ public class TaskPlanAppService {
     public Integer rowCount;
     public Integer taskCount;
     public LocalDateTime createdAt;
+    public String collectionCallStatus;
     public List<TaskGroup> taskGroups = new ArrayList<TaskGroup>();
     public List<FetchTask> fetchTasks = new ArrayList<FetchTask>();
   }

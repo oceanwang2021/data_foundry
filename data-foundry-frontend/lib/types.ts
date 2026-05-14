@@ -240,7 +240,7 @@ export type ScheduleRule = {
 
 // ==================== 任务组 ====================
 
-export type TaskGroupStatus = "pending" | "running" | "completed" | "partial" | "invalidated";
+export type TaskGroupStatus = "pending" | "running" | "completed" | "failed" | "partial" | "invalidated";
 
 export type TaskGroup = {
   id: string;

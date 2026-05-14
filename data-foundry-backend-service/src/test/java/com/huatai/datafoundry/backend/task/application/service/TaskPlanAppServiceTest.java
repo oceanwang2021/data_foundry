@@ -36,6 +36,7 @@ public class TaskPlanAppServiceTest {
             taskGroupRepository,
             Mockito.mock(FetchTaskRepository.class),
             new TaskPlanDomainService(),
+            null,
             new ObjectMapper());
 
     TaskGroup existing = new TaskGroup();
@@ -81,6 +82,7 @@ public class TaskPlanAppServiceTest {
             taskGroupRepository,
             Mockito.mock(FetchTaskRepository.class),
             new TaskPlanDomainService(),
+            null,
             new ObjectMapper());
 
     TaskGroup existing = new TaskGroup();
@@ -110,6 +112,7 @@ public class TaskPlanAppServiceTest {
             taskGroupRepository,
             Mockito.mock(FetchTaskRepository.class),
             new TaskPlanDomainService(),
+            null,
             new ObjectMapper());
 
     when(taskGroupRepository.listByIds(anyList())).thenReturn(Collections.<TaskGroup>emptyList());
@@ -151,6 +154,7 @@ public class TaskPlanAppServiceTest {
             taskGroupRepository,
             Mockito.mock(FetchTaskRepository.class),
             new TaskPlanDomainService(),
+            null,
             new ObjectMapper());
 
     when(taskGroupRepository.listByIds(anyList())).thenReturn(Collections.<TaskGroup>emptyList());
