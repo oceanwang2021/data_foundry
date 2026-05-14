@@ -2,7 +2,7 @@
 
 ## 基本信息
 
-- 默认地址：`http://118.196.116.160:3005`
+- 默认地址：`http://118.196.116.160:3000`
 - 所有接口均返回 JSON，统一格式：
   ```json
   { "success": true, "data": { ... } }
@@ -525,7 +525,7 @@ async def run_search_async(query: str, background: str = "") -> dict:
         }) as resp:
             data = await resp.json()
             task_id = data["data"]["task_id"]
-      
+    
         # 2. SSE 流式执行
         async with session.get(
             f"{BASE_URL}/api/task/{task_id}/stream",
@@ -549,7 +549,7 @@ async def run_search_async(query: str, background: str = "") -> dict:
                             raise RuntimeError(event["message"])
                     except (json.JSONDecodeError, KeyError):
                         pass
-      
+    
         # 3. 获取结果
         async with session.get(f"{BASE_URL}/api/task/{task_id}/result") as resp:
             return (await resp.json())["data"]

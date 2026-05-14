@@ -410,14 +410,22 @@ function mapWideTableRow(raw: any, businessDateFieldName = "biz_date"): WideTabl
   }
 
   // 展开 indicator_values 为平铺字段，同时保留 Agent 来源信息
-  const agentRawValues: Record<string, { rawValue: string | number | null; dataSource?: string; sourceUrl?: string; confidence?: number }> = {};
+  const agentRawValues: Record<string, {
+    rawValue: string | number | null;
+    dataSource?: string;
+    sourceUrl?: string;
+    quoteText?: string;
+    confidence?: number;
+  }> = {};
   if (raw.indicator_values) {
     for (const [k, cell] of Object.entries(raw.indicator_values as Record<string, any>)) {
       record[k] = cell?.value ?? null;
       agentRawValues[k] = {
-        rawValue: cell?.value ?? null,
+        rawValue: cell?.raw_value ?? cell?.value ?? null,
         dataSource: cell?.data_source ?? undefined,
         sourceUrl: cell?.source_link ?? undefined,
+        quoteText: cell?.quote_text ?? undefined,
+        confidence: cell?.confidence ?? undefined,
       };
     }
   }
