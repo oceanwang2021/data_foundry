@@ -20,6 +20,7 @@ import {
   ensureTaskGroupTasks,
   persistWideTablePlan,
   persistWideTablePreview,
+  updateRequirementWideTable,
   retryTask,
 } from "@/lib/api-client";
 import { ChevronRight, ListTree, RotateCcw } from "lucide-react";
@@ -73,7 +74,6 @@ import {
 } from "@/lib/task-group-display";
 import {
   buildIndicatorGroupPrompt,
-  parseIndicatorGroupPromptMarkdown,
 } from "@/lib/indicator-group-prompt";
 
 type Props = {
@@ -676,7 +676,7 @@ export default function RequirementTasksPanel({
     setPromptEditorModes((current) => {
       const next = { ...current };
       for (const group of promptEditorGroups) {
-        next[group.id] = next[group.id] ?? "sections";
+        next[group.id] = next[group.id] ?? "markdown";
       }
       return next;
     });
@@ -684,7 +684,7 @@ export default function RequirementTasksPanel({
     setPromptMarkdownDrafts((current) => {
       const next = { ...current };
       for (const group of promptEditorGroups) {
-        next[group.id] = next[group.id] ?? buildIndicatorGroupPrompt(requirement, baseWideTable, group).markdown;
+        next[group.id] = next[group.id] ?? (group.promptTemplate ?? buildIndicatorGroupPrompt(requirement, baseWideTable, group).markdown);
       }
       return next;
     });
@@ -805,41 +805,26 @@ export default function RequirementTasksPanel({
         : [];
 
     const indicatorGroups = baseGroups.map((group) => {
-      const editMode = promptEditorModes[group.id] ?? "sections";
-      let nextGroup = group;
+      const editMode = promptEditorModes[group.id] ?? "markdown";
+      const markdownDraft = promptMarkdownDrafts[group.id];
 
       if (editMode === "markdown") {
-        const markdownDraft = promptMarkdownDrafts[group.id];
-        if (markdownDraft !== undefined) {
-          const parsedConfig = parseIndicatorGroupPromptMarkdown(markdownDraft) ?? {};
-          nextGroup = {
-            ...group,
-            promptConfig: {
-              ...(group.promptConfig ?? {}),
-              ...(parsedConfig.coreQueryRequirement !== undefined
-                ? { coreQueryRequirement: parsedConfig.coreQueryRequirement }
-                : {}),
-              ...(parsedConfig.businessKnowledge !== undefined
-                ? { businessKnowledge: parsedConfig.businessKnowledge }
-                : {}),
-              ...(parsedConfig.metricList !== undefined
-                ? { metricList: parsedConfig.metricList }
-                : {}),
-              ...(parsedConfig.dimensionColumns !== undefined
-                ? { dimensionColumns: parsedConfig.dimensionColumns }
-                : {}),
-              ...(parsedConfig.outputConstraints !== undefined
-                ? { outputConstraints: parsedConfig.outputConstraints }
-                : {}),
-              lastEditedAt: editedAt,
-            },
-          };
-        }
+        const nextTemplate = markdownDraft !== undefined
+          ? markdownDraft
+          : group.promptTemplate?.trim()
+            ? group.promptTemplate
+            : buildIndicatorGroupPrompt(requirement, wideTable, group).markdown;
+
+        return {
+          ...group,
+          promptTemplate: nextTemplate,
+        };
       }
 
+      // Legacy "sections" editor: keep deriving a full markdown template from promptConfig.
       return {
-        ...nextGroup,
-        promptTemplate: buildIndicatorGroupPrompt(requirement, wideTable, nextGroup).markdown,
+        ...group,
+        promptTemplate: buildIndicatorGroupPrompt(requirement, wideTable, group).markdown,
       };
     });
 
@@ -864,7 +849,7 @@ export default function RequirementTasksPanel({
     try {
       const now = new Date().toISOString();
       const nextWideTable = buildWideTableWithPromptDrafts(selectedWt, now);
-      await persistWideTablePreview(requirement.id, nextWideTable, currentWideTableRecords);
+      await updateRequirementWideTable(requirement.id, nextWideTable);
       updateSelectedWideTable(() => nextWideTable);
       setPromptSaveMessage("已保存采集提示词配置。");
       await onRefreshData?.();
@@ -1003,8 +988,10 @@ export default function RequirementTasksPanel({
 
     setIsPersistingIndicatorGroups(true);
     try {
+      // Persist indicator_groups_json (incl. prompt_template) via the official wide-table update path.
+      await updateRequirementWideTable(requirement.id, nextWideTable);
+
       if (!isIndicatorGroupingComplete) {
-        await persistWideTablePreview(requirement.id, nextWideTable, currentWideTableRecords);
         updateSelectedWideTable(() => nextWideTable);
         setIndicatorGroupMessage("已保存指标分组草稿。请把所有指标分配到分组后，再保存并生成任务组。");
         return;
@@ -1996,8 +1983,8 @@ export default function RequirementTasksPanel({
                 .map((group, index) => {
                   const promptBundle = indicatorGroupPromptMap.get(group.id)
                     ?? (effectiveWideTable ? buildIndicatorGroupPrompt(requirement, effectiveWideTable, group) : buildIndicatorGroupPrompt(requirement, selectedWt, group));
-                  const editMode = promptEditorModes[group.id] ?? "sections";
-                  const markdownDraft = promptMarkdownDrafts[group.id] ?? promptBundle.markdown;
+                  const editMode = promptEditorModes[group.id] ?? "markdown";
+                  const markdownDraft = promptMarkdownDrafts[group.id] ?? group.promptTemplate ?? promptBundle.markdown;
                   const shouldOpen = promptEditorGroups.length === 1 || index === 0;
 
                   return (
@@ -2029,12 +2016,10 @@ export default function RequirementTasksPanel({
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => setPromptEditorModes((current) => ({ ...current, [group.id]: "sections" }))}
+                              disabled
                               className={cn(
                                 "rounded-md border px-2.5 py-1 text-[11px]",
-                                editMode === "sections"
-                                  ? "border-primary bg-primary/10 text-primary"
-                                  : "text-muted-foreground hover:text-foreground",
+                                "cursor-not-allowed text-muted-foreground opacity-70",
                               )}
                             >
                               分段编辑
@@ -2045,7 +2030,7 @@ export default function RequirementTasksPanel({
                                 setPromptEditorModes((current) => ({ ...current, [group.id]: "markdown" }));
                                 setPromptMarkdownDrafts((current) => ({
                                   ...current,
-                                  [group.id]: current[group.id] ?? promptBundle.markdown,
+                                  [group.id]: current[group.id] ?? (group.promptTemplate ?? promptBundle.markdown),
                                 }));
                               }}
                               className={cn(

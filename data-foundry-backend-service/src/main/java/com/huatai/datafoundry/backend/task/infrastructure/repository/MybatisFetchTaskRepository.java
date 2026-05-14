@@ -75,6 +75,8 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
     task.setExecutionMode(record.getExecutionMode());
     task.setIndicatorKeysJson(record.getIndicatorKeysJson());
     task.setDimensionValuesJson(record.getDimensionValuesJson());
+    task.setRenderedPromptText(record.getRenderedPromptText());
+    task.setPromptTemplateSnapshot(record.getPromptTemplateSnapshot());
     task.setBusinessDate(record.getBusinessDate());
     task.setStatus(record.getStatus());
     task.setCanRerun(record.getCanRerun());
@@ -105,6 +107,8 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
     record.setExecutionMode(task.getExecutionMode());
     record.setIndicatorKeysJson(task.getIndicatorKeysJson());
     record.setDimensionValuesJson(task.getDimensionValuesJson());
+    record.setRenderedPromptText(task.getRenderedPromptText());
+    record.setPromptTemplateSnapshot(task.getPromptTemplateSnapshot());
     record.setBusinessDate(task.getBusinessDate());
     record.setStatus(task.getStatus());
     record.setCanRerun(task.getCanRerun());

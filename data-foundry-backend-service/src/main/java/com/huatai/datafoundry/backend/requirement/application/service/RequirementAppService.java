@@ -138,9 +138,6 @@ public class RequirementAppService {
     if (requirement == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Requirement not found");
     }
-    if (Boolean.TRUE.equals(requirement.getSchemaLocked())) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, "Requirement schema is locked");
-    }
     WideTable existing = requirementRepository.getWideTableByIdForRequirement(requirementId, wideTableId);
     if (existing == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Wide table not found");
@@ -150,20 +147,27 @@ public class RequirementAppService {
     toUpdate.setId(existing.getId());
     toUpdate.setRequirementId(existing.getRequirementId());
     if (command != null) {
-      toUpdate.setTitle(command.getTitle());
-      toUpdate.setDescription(command.getDescription());
-      toUpdate.setTableName(command.getTableName());
-      toUpdate.setSemanticTimeAxis(command.getSemanticTimeAxis());
-      toUpdate.setCollectionCoverageMode(command.getCollectionCoverageMode());
+      boolean schemaLocked = Boolean.TRUE.equals(requirement.getSchemaLocked());
+      if (schemaLocked) {
+        // Schema is locked after requirement submission, but indicator-group prompt templates
+        // still need to be editable (tasks are planned/executed based on them).
+        toUpdate.setIndicatorGroupsJson(writeJson(command.getIndicatorGroups()));
+      } else {
+        toUpdate.setTitle(command.getTitle());
+        toUpdate.setDescription(command.getDescription());
+        toUpdate.setTableName(command.getTableName());
+        toUpdate.setSemanticTimeAxis(command.getSemanticTimeAxis());
+        toUpdate.setCollectionCoverageMode(command.getCollectionCoverageMode());
 
-      toUpdate.setSchemaJson(writeJson(command.getSchema()));
-      toUpdate.setScopeJson(writeJson(command.getScope()));
-      toUpdate.setIndicatorGroupsJson(writeJson(command.getIndicatorGroups()));
-      toUpdate.setScheduleRulesJson(writeJson(command.getScheduleRules()));
+        toUpdate.setSchemaJson(writeJson(command.getSchema()));
+        toUpdate.setScopeJson(writeJson(command.getScope()));
+        toUpdate.setIndicatorGroupsJson(writeJson(command.getIndicatorGroups()));
+        toUpdate.setScheduleRulesJson(writeJson(command.getScheduleRules()));
 
-      Integer schemaVersion = command.inferSchemaVersion();
-      if (schemaVersion != null) {
-        toUpdate.setSchemaVersion(schemaVersion);
+        Integer schemaVersion = command.inferSchemaVersion();
+        if (schemaVersion != null) {
+          toUpdate.setSchemaVersion(schemaVersion);
+        }
       }
     }
 

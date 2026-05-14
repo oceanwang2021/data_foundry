@@ -1439,21 +1439,9 @@ function buildFallbackIndicatorGroup(wideTable: WideTable): BackendIndicatorGrou
 }
 
 function toBackendIndicatorGroupsForUpdate(wideTable: WideTable): BackendIndicatorGroup[] {
-  const indicatorColumns = wideTable.schema.columns.filter((col) => col.category === "indicator").map((col) => col.name);
-  const expected = new Set(indicatorColumns);
-  const flattened: string[] = [];
-  let allGroupsNonEmpty = true;
-  for (const group of wideTable.indicatorGroups) {
-    if (group.indicatorColumns.length === 0) {
-      allGroupsNonEmpty = false;
-    }
-    flattened.push(...group.indicatorColumns);
-  }
-  const hasDuplicates = flattened.length !== new Set(flattened).size;
-  const coversAll = flattened.length > 0 && flattened.every((key) => expected.has(key)) && expected.size === new Set(flattened).size;
-  const isValidGrouping = expected.size > 0 && allGroupsNonEmpty && !hasDuplicates && coversAll;
-
-  if (!isValidGrouping) {
+  // Keep indicator groups exactly as edited in the UI (drafts included).
+  // Completeness checks happen in the task-plan generation flow, not here.
+  if (!wideTable.indicatorGroups || wideTable.indicatorGroups.length === 0) {
     return [buildFallbackIndicatorGroup(wideTable)];
   }
 

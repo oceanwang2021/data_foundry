@@ -48,6 +48,21 @@ public class ScheduleJobCreatedHandler {
       req.setRunId(jobId);
       req.setTaskGroupId(record.getTaskGroupId());
       req.setExecutionMode("normal");
+      if (record.getTaskId() != null && record.getTaskId().trim().length() > 0) {
+        try {
+          Map<String, Object> prompt =
+              backendGateway.getFetchTaskPrompt(record.getTaskId().trim(), "schedule-job-prompt:" + jobId);
+          Object rendered = prompt != null ? prompt.get("rendered_prompt_text") : null;
+          if (rendered != null) {
+            String text = String.valueOf(rendered);
+            if (text != null && text.trim().length() > 0) {
+              req.setPromptTemplate(text);
+            }
+          }
+        } catch (Exception ex) {
+          log.debug("Backend prompt lookup failed for task {}: {}", record.getTaskId(), ex.getMessage());
+        }
+      }
 
       AgentExecutionResponse resp = agentGateway.execute(req, "schedule-job:" + jobId);
       String endedAt = Instant.now().toString();
