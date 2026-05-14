@@ -9,6 +9,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$processEnvironment = [Environment]::GetEnvironmentVariables("Process")
+if ($processEnvironment.Contains("Path") -and $processEnvironment.Contains("PATH")) {
+  $effectivePath = [string]$processEnvironment["Path"]
+  if (-not $effectivePath) {
+    $effectivePath = [string]$processEnvironment["PATH"]
+  }
+  [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+  [Environment]::SetEnvironmentVariable("Path", $effectivePath, "Process")
+}
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LogsDir = Join-Path $Root "logs"
 $FrontendDir = Join-Path $Root "data-foundry-frontend"
@@ -61,6 +71,7 @@ function Start-ServiceProcess {
 
   $outLog = Join-Path $LogsDir "$Name-$Timestamp.out.log"
   $errLog = Join-Path $LogsDir "$Name-$Timestamp.err.log"
+  $runner = Join-Path $LogsDir "$Name-$Timestamp.run.ps1"
   $windowStyle = if ($Visible) { "Normal" } else { "Hidden" }
 
   $wrappedCommand = @"
@@ -68,10 +79,11 @@ function Start-ServiceProcess {
 Set-Location '$WorkingDirectory'
 $Command
 "@
+  Set-Content -Path $runner -Value $wrappedCommand -Encoding UTF8
 
   $process = Start-Process `
     -FilePath "powershell.exe" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $wrappedCommand) `
+    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $runner) `
     -RedirectStandardOutput $outLog `
     -RedirectStandardError $errLog `
     -WindowStyle $windowStyle `
@@ -83,6 +95,7 @@ $Command
     Url = $Url
     OutLog = $outLog
     ErrLog = $errLog
+    Runner = $runner
   }
 }
 
@@ -108,6 +121,16 @@ $javaHomeLine = if (Test-Path $javaHomeCandidate) {
   ""
 }
 
+$mavenExtraArgs = @()
+$mavenLocalRepoCandidate = Join-Path $env:USERPROFILE ".m2\repository"
+if (Test-Path $mavenLocalRepoCandidate) {
+  $mavenExtraArgs += "-Dmaven.repo.local=$mavenLocalRepoCandidate"
+}
+if ($env:DATAFOUNDRY_MAVEN_OFFLINE -eq "1") {
+  $mavenExtraArgs = @("-o") + $mavenExtraArgs
+}
+$mavenExtraLine = ($mavenExtraArgs | ForEach-Object { "'$_'" }) -join " "
+
 if ($StopExistingPorts) {
   Stop-Listeners -Ports @(3000, 8000, 8100, 8200)
 }
@@ -121,7 +144,7 @@ if (-not $SkipBackend) {
     -Url "http://localhost:8000" `
     -Command @"
 $javaHomeLine
-& '$mavenPath' -pl data-foundry-backend-service -am -DskipTests spring-boot:run
+& '$mavenPath' $mavenExtraLine -pl data-foundry-backend-service -am -DskipTests spring-boot:run
 "@
 }
 
@@ -132,7 +155,7 @@ if (-not $SkipAgent) {
     -Url "http://localhost:8100" `
     -Command @"
 $javaHomeLine
-& '$mavenPath' -pl data-foundry-agent-service -am -DskipTests spring-boot:run
+& '$mavenPath' $mavenExtraLine -pl data-foundry-agent-service -am -DskipTests spring-boot:run
 "@
 }
 
@@ -143,7 +166,7 @@ if (-not $SkipScheduler) {
     -Url "http://localhost:8200" `
     -Command @"
 $javaHomeLine
-& '$mavenPath' -pl data-foundry-scheduler-service -am -DskipTests spring-boot:run
+& '$mavenPath' $mavenExtraLine -pl data-foundry-scheduler-service -am -DskipTests spring-boot:run
 "@
 }
 

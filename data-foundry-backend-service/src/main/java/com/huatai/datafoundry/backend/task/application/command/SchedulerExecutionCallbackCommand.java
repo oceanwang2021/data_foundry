@@ -1,11 +1,14 @@
 package com.huatai.datafoundry.backend.task.application.command;
 
+import com.huatai.datafoundry.contract.agent.AgentExecutionResponse;
+
 public class SchedulerExecutionCallbackCommand {
   private String scheduleJobId;
   private String taskGroupId;
   private String taskId;
   private String status;
   private String endedAt;
+  private AgentExecutionResponse agentResult;
 
   public String getScheduleJobId() {
     return scheduleJobId;
@@ -45,6 +48,14 @@ public class SchedulerExecutionCallbackCommand {
 
   public void setEndedAt(String endedAt) {
     this.endedAt = endedAt;
+  }
+
+  public AgentExecutionResponse getAgentResult() {
+    return agentResult;
+  }
+
+  public void setAgentResult(AgentExecutionResponse agentResult) {
+    this.agentResult = agentResult;
   }
 }
 

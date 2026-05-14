@@ -8,9 +8,13 @@ public interface FetchTaskRepository {
 
   List<FetchTask> listByRequirement(String requirementId);
 
+  List<FetchTask> listByTaskGroup(String taskGroupId);
+
   int countByTaskGroup(String taskGroupId);
 
   int upsertBatch(List<FetchTask> tasks);
 
   int updateStatus(String taskId, String status);
+
+  int updateStatusAndConfidence(String taskId, String status, java.math.BigDecimal confidence);
 }

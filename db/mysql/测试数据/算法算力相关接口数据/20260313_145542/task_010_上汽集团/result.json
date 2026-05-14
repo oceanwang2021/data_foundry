@@ -1,0 +1,13 @@
+{
+  "task_id": "252f3e2f-7b8f-4e6b-bdb2-cf83e46f8deb",
+  "subject": {
+    "comcode": "285755",
+    "company_name": "上汽集团"
+  },
+  "success": true,
+  "status": "completed",
+  "final_report": "### 表名: 智能驾驶企业技术布局表\n| comcode | 企业名称 | algodesc (算法路线，汇总为单个单元格，\\n分隔维度) | computepowerdesc (算力基础设施，汇总为单个单元格，\\n分隔维度) | Min_Value | Max_Value | Source_URL | Source_Evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 285755 | 上汽集团 | 模块化方案：核心感知决策算法由上汽人工智能实验室、零束自研，同时整合地平线、鸿蒙智行（华为）、卓驭（原大疆车载）、Momenta四大供应商方案，覆盖不同品牌车型需求<br>前沿演进：自研一段式端到端直觉式智驾大模型、多模态大模型（VLM/VLA）算法、BEV+Transformer+Occupancy网络技术，已实现量产上车<br>多路线并存：采用「单车智能+车路协同」双线并行，L2+级量产用BEV感知+占用网络方案，L4级高阶用多模大模型决策+冗余安全机制路径 | 车端芯片：主流搭载英伟达OrinX（500+TOPS）、地平线征程6（10-560TOPS）芯片，享道Robotaxi算力达600TOPS，支持全场景NOA等高阶智驾功能<br>自研算力配套：自有智驾算力集群峰值算力1.2EFLOPS（FP16精度），配套超100PB存储，联合阿里云搭建训练平台，支撑全集团智驾研发全流程 | - | - | [链接1](https://hao.m.yiche.com/wenzhang/105445653/)<br>[链接2](https://www.saicmotor.com/chinese/xwzx/xwk/2023/58474.shtml)<br>[链接3](https://www.saicmotor.com/chinese/xwzx/mtbd/60302.shtml)<br>[链接4](https://www.toutiao.com/article/)<br>[链接5](https://hao.m.yiche.com/wenzhang/88177141/)<br>[链接6](https://m.hexun.com/stock/2025-04-12/218453870.html)<br>[链接7](https://hao.yiche.com/wenzhang/107732423/)<br>[链接8](https://www.dongchedi.com/article/7491689524788085285)<br>[链接9](https://www.dongchedi.com/article/7491837773536657955)<br>[链接10](https://www.eet-china.com/mp/a455827.html)<br>[链接11](https://caifuhao.eastmoney.com/news/20260225194633346830940)<br>[链接12](https://m.cnfin.com/cmjj-lb/zixun/20241128/4147185_1.html)<br>[链接13](https://m.pcauto.com.cn/hj/article/1432969.html)<br>[链接14](https://www.dongchedi.com/article/7491903325210772004) | 1.算法路线相关证据：上汽自研端到端感知、在线建图、AI横纵向耦合算法；BEV算法；一段式端到端直觉式智驾大模型；多模态大模型（VLM/VLA）算法；零束自研智驾平台搭载高实时软件计算平台、BEV算法、全域闭环数据工场，提供端到端融合智驾功能；与Momenta联合开发D.L.P.人工智能模型、Transformer架构决策规划算法、基于Occupancy网络模型的DDOD/DDLD算法；与地平线、鸿蒙智行（华为）、卓驭（原大疆车载）、Momenta四大供应商合作，整合各方智驾算法方案。2023年以来实施「单车智能+车路协同」双线并行技术路径，L2+级量产算法采用「BEV感知+Transformer占用网络」技术方案，已落地飞凡、荣威、名爵多款量产车型；L4级高阶算法采用「多模大模型决策+冗余安全机制」路径，优先在Robotaxi、干线物流场景试点落地。<br>2.算力基础设施相关证据：地平线征程6车载智能计算方案算力达560TOPS，为荣威、MG品牌提供10-560TOPS的算力支持；主流搭载英伟达OrinX芯片（算力500TOPS+）；享道Robotaxi拥有600TOPS强大算力；自有智能驾驶算力集群峰值算力1.2EFLOPS（FP16精度下），配套超100PB存储，联合阿里云搭建国内车企规模领先的智驾训练算力平台，支持PB级智驾数据并行处理、百万级车载终端数据实时接入，可将智能驾驶模型训练效率提升3倍以上，为旗下智己、飞凡、荣威、名爵等品牌的高阶智驾方案研发、模型训练、仿真测试全业务流程提供算力支撑。 |",
+  "table_data": [],
+  "error": "",
+  "duration": 210.329968
+}

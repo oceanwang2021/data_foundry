@@ -38,6 +38,11 @@ GRANT SELECT ON target_tables.* TO 'data_foundry_backend'@'%';
 GRANT ALL PRIVILEGES ON data_foundry_scheduler.* TO 'data_foundry_scheduler'@'localhost';
 GRANT ALL PRIVILEGES ON data_foundry_scheduler.* TO 'data_foundry_scheduler'@'%';
 
+
+GRANT ALL PRIVILEGES ON target_tables.* TO 'data_foundry_backend'@'localhost';
+GRANT ALL PRIVILEGES ON target_tables.* TO 'data_foundry_backend'@'%';
+
+
 FLUSH PRIVILEGES;
 
 USE data_foundry_backend;

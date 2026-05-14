@@ -73,4 +73,11 @@ public interface FetchTaskMapper {
 
   @Update("update fetch_tasks set status = #{status}, updated_at = current_timestamp where id = #{id}")
   int updateStatus(@Param("id") String id, @Param("status") String status);
+
+  @Update(
+      "update fetch_tasks set status = #{status}, confidence = #{confidence}, updated_at = current_timestamp where id = #{id}")
+  int updateStatusAndConfidence(
+      @Param("id") String id,
+      @Param("status") String status,
+      @Param("confidence") java.math.BigDecimal confidence);
 }

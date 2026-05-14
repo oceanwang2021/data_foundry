@@ -17,6 +17,14 @@ public interface WideTableRowMapper {
           + "from wide_table_rows where wide_table_id = #{wideTableId} order by sort_order asc, row_id asc")
   List<WideTableRowRecord> listByWideTableId(@Param("wideTableId") String wideTableId);
 
+  @Select(
+      "select wide_table_id, row_id, sort_order, requirement_id, schema_version, plan_version, row_status, "
+          + "dimension_values_json, business_date, row_binding_key, indicator_values_json, system_values_json "
+          + "from wide_table_rows where wide_table_id = #{wideTableId} and row_id = #{rowId} limit 1")
+  WideTableRowRecord getById(
+      @Param("wideTableId") String wideTableId,
+      @Param("rowId") Integer rowId);
+
   @Delete("delete from wide_table_rows where wide_table_id = #{wideTableId} and plan_version != #{planVersion}")
   int deleteByWideTableIdNotPlanVersion(
       @Param("wideTableId") String wideTableId,

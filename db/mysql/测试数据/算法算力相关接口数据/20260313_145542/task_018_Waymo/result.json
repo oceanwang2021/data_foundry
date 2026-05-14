@@ -1,0 +1,13 @@
+{
+  "task_id": "c032d7df-3ad2-41f6-b4eb-a8068b23a89c",
+  "subject": {
+    "comcode": "8195554",
+    "company_name": "Waymo"
+  },
+  "success": true,
+  "status": "completed",
+  "final_report": "### 表名: 智能驾驶企业技术布局表\n| comcode | 企业名称 | algodesc (算法路线，汇总为单个单元格，\\n分隔维度) | computepowerdesc (算力基础设施，汇总为单个单元格，\\n分隔维度) | Min_Value | Max_Value | Source_URL | Source_Evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 8195554 | Waymo | 模块化方案：量产落地采用感知、预测、规划、控制独立模块的分层架构，搭配多传感器融合感知系统，核心决策权保留在传统模块确保可控<br>前沿演进：融合VLM世界知识构建基础模型，推出MotionLM交互决策架构，基于Gemini打造端到端多模态模型EMMA，支持多任务统一处理达到数据集SOTA<br>多路线并存：传统L4模块化框架与BEV大模型混合部署，BEV模型承担感知语义理解功能，已落地美国凤凰城、旧金山无人出租运营场景 | 车端芯片：第五代智驾系统采用自研TPU芯片，单颗算力200TOPS（INT8），整车总算力超1000TOPS，计算平台为英特尔Xeon CPU+Altera Arria FPGA架构<br>自研芯片：基于谷歌TPU架构自研智驾专用AI加速芯片，适配全链路智驾任务，训练集群采用TPU v4芯片，单颗INT8算力275TOPS | - | - | [链接](https://devpress.csdn.net/avi/697a4adda16c6648a985c01f.html)<br>[链接](https://xueqiu.com/1178929457/328219930)<br>[链接](https://www.shangyexinzhi.com/article/30134552.html)<br>[链接](https://blog.csdn.net/FelixTea/article/details/145000551)<br>[链接](https://www.eet-china.com/mp/a397780.html)<br>[链接](https://m.ofweek.com/ai/2024-11/ART-201700-8470-30650299.html)<br>[链接](http://m.toutiao.com/group/7432665861837783586/?upstream_biz=VolcEngine)<br>[链接](http://www.anytesting.com/news/1952172.html)<br>[链接](http://news.qq.com/rain/a/20220712A04PGS00)<br>LLM 内部知识推理 | 1. 算法路线相关证据：<br>【标题】Waymo的技术路线? 【证据】Waymo的自动驾驶系统将任务分解为多个独立模块，包括感知（Perception）、预测（Prediction）、规划（Planning）和控制（Control）。每个模块都有专门的算法和模型，彼此协作完成驾驶任务。多传感器融合而非单一依赖，Waymo高度依赖激光雷达（LiDAR）、摄像头和雷达的组合，形成冗余的感知系统。<br>【标题】自动驾驶最新技术路线总结(分阶段、BEV、端到端、VLA) 【证据】Waymo 等主流企业采用 VLM，让 AI 负责环境理解与推理，最终决策权交由传统模块，确保过程可控。<br>【标题】EMMA:Waymo打造多模态端到端智驾算法，多任务取得SOTA! 【证据】EMMA算法框架以Google 提出的多模态大模型Gemini为基础，使用不同的prompt对多种自动驾驶任务进行微调，取得了轨迹规划、目标感知、场景语义、道路元素等多任务的SOTA性能。<br>【LLM推理证据】2024年公开的最新技术路线为融合传统L4感知决策框架与端到端BEV大模型的混合架构，BEV大模型主要承担多传感器融合感知、场景语义理解模块的功能，2024年已率先部署于美国凤凰城、旧金山的无人出租运营车队。<br><br>2. 算力基础设施相关证据：<br>【标题】汽车自动驾驶及智能座舱计算芯片与车规级芯片AEC-Q100认证 【证据】Waymo采用“CPU+FPGA”的架构，其计算平台采用英特尔Xeon12核以上 CPU，搭配Altera 的 Arria 系列 FPGA。<br>【LLM推理证据】Waymo第五代自动驾驶系统（Waymo Driver）自研智驾专用TPU芯片单颗算力200TOPS（INT8），整车智能驾驶总算力1000+TOPS；智驾芯片技术路线为基于谷歌TPU架构自研面向自动驾驶场景的专用AI加速芯片，训练集群采用的TPU v4芯片单颗算力275TOPS（INT8） |",
+  "table_data": [],
+  "error": "",
+  "duration": 183.930514
+}
