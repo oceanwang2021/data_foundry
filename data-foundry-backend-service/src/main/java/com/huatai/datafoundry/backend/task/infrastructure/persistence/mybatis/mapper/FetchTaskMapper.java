@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.mapper;
 
 import com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.record.FetchTaskRecord;
+import java.math.BigDecimal;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Insert;
@@ -81,4 +82,11 @@ public interface FetchTaskMapper {
           + "where id = #{id}")
   int updateStatusAndCollectionTaskId(
       @Param("id") String id, @Param("status") String status, @Param("collectionTaskId") String collectionTaskId);
+
+  @Update(
+      "update fetch_tasks "
+          + "set status = #{status}, confidence = #{confidence}, updated_at = current_timestamp "
+          + "where id = #{id}")
+  int updateStatusAndConfidence(
+      @Param("id") String id, @Param("status") String status, @Param("confidence") BigDecimal confidence);
 }

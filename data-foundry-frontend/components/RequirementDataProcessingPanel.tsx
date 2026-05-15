@@ -1,9 +1,18 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchPreprocessRules } from "@/lib/api-client";
+import {
+  fetchPreprocessRules,
+  fetchTaskGroupResults,
+  fetchTaskResults,
+  fetchWideTableResults,
+  normalizeFinalReport,
+  normalizeTaskGroupFinalReports,
+  normalizeWideTableFinalReports,
+} from "@/lib/api-client";
 import type {
   ColumnDefinition,
+  CollectionResult,
   FetchTask,
   Requirement,
   TaskGroup,
@@ -190,9 +199,13 @@ function buildRequirementPreprocessRules(requirement: Requirement): PreprocessRu
   return [];
 }
 
-type DataSubTab = "narrow" | "wide";
+type DataSubTab = "raw" | "narrow" | "wide";
 
 const dataSubTabMeta: Record<DataSubTab, { title: string; description: string }> = {
+  raw: {
+    title: "采集原始结果",
+    description: "查看 Agent 原始回传，并将 final_report 第一张 Markdown 表转为 JSON。",
+  },
   narrow: {
     title: "采集明细",
     description: "查看任务回传、语义判断和填充结果。",
@@ -225,7 +238,7 @@ export default function RequirementDataProcessingPanel({
     }
   }, [rules.length]);
   const [selectedTaskModal, setSelectedTaskModal] = useState<SelectedTaskModalState | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<DataSubTab>("narrow");
+  const [activeSubTab, setActiveSubTab] = useState<DataSubTab>("raw");
 
   const enabledCategories = useMemo(
     () => new Set(rules.filter((item) => item.enabled).map((item) => item.category)),
@@ -285,8 +298,8 @@ export default function RequirementDataProcessingPanel({
   return (
     <div className="space-y-6">
       <section className="rounded-xl border bg-card/90 p-2">
-        <div className="grid grid-cols-2 gap-2">
-          {(["narrow", "wide"] as const).map((tab) => (
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          {(["raw", "narrow", "wide"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -306,6 +319,15 @@ export default function RequirementDataProcessingPanel({
           ))}
         </div>
       </section>
+
+      {activeSubTab === "raw" ? (
+        <RawCollectionResultsPanel
+          wideTables={requirementWideTables}
+          taskGroups={taskGroups}
+          fetchTasks={fetchTasks}
+          scheduleJobs={scheduleJobs}
+        />
+      ) : null}
 
       {activeSubTab === "narrow" ? (
         <div className="space-y-6">
@@ -390,6 +412,470 @@ export default function RequirementDataProcessingPanel({
 }
 
 // ==================== 填充规则 Tooltip ====================
+
+function RawCollectionResultsPanel({
+  wideTables,
+  taskGroups,
+  fetchTasks,
+  scheduleJobs,
+}: {
+  wideTables: WideTable[];
+  taskGroups: TaskGroup[];
+  fetchTasks: FetchTask[];
+  scheduleJobs: ScheduleJob[];
+}) {
+  if (wideTables.length === 0) {
+    return (
+      <section className="rounded-xl border bg-card p-6">
+        <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-xs text-muted-foreground">
+          当前需求暂无可展示的宽表。
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {wideTables.map((wideTable) => (
+        <RawCollectionResultsSection
+          key={wideTable.id}
+          wideTable={wideTable}
+          taskGroups={taskGroups.filter((taskGroup) => taskGroup.wideTableId === wideTable.id)}
+          fetchTasks={fetchTasks.filter((task) => task.wideTableId === wideTable.id)}
+          scheduleJobs={scheduleJobs.filter(
+            (job) => job.wideTableId === wideTable.id || taskGroups.some((tg) => tg.id === job.taskGroupId && tg.wideTableId === wideTable.id),
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RawCollectionResultsSection({
+  wideTable,
+  taskGroups,
+  fetchTasks,
+  scheduleJobs,
+}: {
+  wideTable: WideTable;
+  taskGroups: TaskGroup[];
+  fetchTasks: FetchTask[];
+  scheduleJobs: ScheduleJob[];
+}) {
+  const fullSnapshotPages = useMemo(
+    () => buildDisplayableFullSnapshotTaskGroupPages(taskGroups, scheduleJobs),
+    [scheduleJobs, taskGroups],
+  );
+  const [selectedPageKey, setSelectedPageKey] = useState<string>(() => {
+    const first = fullSnapshotPages[0];
+    return first ? snapshotPageKey(first) : "";
+  });
+  const [resultsByTask, setResultsByTask] = useState<Record<string, CollectionResult[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string>("");
+  const [normalizingIds, setNormalizingIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (fullSnapshotPages.length === 0) {
+      if (selectedPageKey) setSelectedPageKey("");
+      return;
+    }
+    if (!fullSnapshotPages.some((page) => snapshotPageKey(page) === selectedPageKey)) {
+      setSelectedPageKey(snapshotPageKey(fullSnapshotPages[0]));
+    }
+  }, [fullSnapshotPages, selectedPageKey]);
+
+  const activePage = useMemo(
+    () => fullSnapshotPages.find((page) => snapshotPageKey(page) === selectedPageKey) ?? fullSnapshotPages[0] ?? null,
+    [fullSnapshotPages, selectedPageKey],
+  );
+  const activeTaskGroup = useMemo(
+    () => activePage ? taskGroups.find((taskGroup) => taskGroup.id === activePage.taskGroupId) ?? null : null,
+    [activePage, taskGroups],
+  );
+  const activeFetchTasks = useMemo(
+    () => activeTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeTaskGroup.id) : [],
+    [activeTaskGroup, fetchTasks],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setActionMessage("");
+    const taskResultRequests = activeFetchTasks.map((task) =>
+      fetchTaskResults(task.id)
+        .then((payload) => [task.id, payload.collectionResults] as const)
+        .catch(() => [task.id, []] as const),
+    );
+    const groupResultsRequest = activeTaskGroup
+      ? fetchTaskGroupResults(activeTaskGroup.id).catch(() => ({ collectionResults: [], collectionResultRows: [] }))
+      : Promise.resolve({ collectionResults: [], collectionResultRows: [] });
+    Promise.all([
+      fetchWideTableResults(wideTable.id).catch(() => ({ collectionResults: [], collectionResultRows: [] })),
+      groupResultsRequest,
+      Promise.all(taskResultRequests),
+    ])
+      .then(([wideTablePayload, groupPayload, taskEntries]) => {
+        if (cancelled) return;
+        const next = Object.fromEntries(taskEntries);
+        for (const result of [...wideTablePayload.collectionResults, ...groupPayload.collectionResults]) {
+          const key = result.fetchTaskId || `__result__${result.id}`;
+          next[key] = [...(next[key] ?? []), result];
+        }
+        setResultsByTask(next);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFetchTasks, activeTaskGroup, wideTable.id]);
+
+  const resultItems = useMemo(
+    () => {
+      const taskById = new Map(activeFetchTasks.map((task) => [task.id, task]));
+      const seen = new Set<string>();
+      const items: Array<{ task?: FetchTask; result: CollectionResult }> = [];
+      Object.entries(resultsByTask).forEach(([taskId, results]) => {
+        results.forEach((result) => {
+          if (seen.has(result.id)) return;
+          seen.add(result.id);
+          items.push({ task: taskById.get(result.fetchTaskId || taskId), result });
+        });
+      });
+      return items.sort((left, right) => (left.result.rowId ?? 0) - (right.result.rowId ?? 0));
+    },
+    [activeFetchTasks, resultsByTask],
+  );
+  const aggregatedRows = useMemo(() => buildAggregatedNormalizedRows(resultItems), [resultItems]);
+  const aggregatedColumns = useMemo(() => buildNormalizedPreviewColumns(aggregatedRows), [aggregatedRows]);
+
+  const normalizeOne = async (taskId: string, resultId: string) => {
+    setNormalizingIds((prev) => new Set(prev).add(resultId));
+    setActionMessage("");
+    try {
+      const updated = await normalizeFinalReport(taskId, resultId);
+      setResultsByTask((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((key) => {
+          next[key] = next[key].map((item) => item.id === resultId ? updated : item);
+        });
+        if (!Object.values(next).some((items) => items.some((item) => item.id === resultId))) {
+          next[taskId] = [updated];
+        }
+        return next;
+      });
+      setActionMessage("已完成 Markdown 表格转 JSON。");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "转换失败");
+    } finally {
+      setNormalizingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(resultId);
+        return next;
+      });
+    }
+  };
+
+  const normalizeAll = async () => {
+    const candidates = resultItems.filter((item) => item.result.finalReport && item.result.id);
+    if (candidates.length === 0) {
+      setActionMessage("当前任务组暂无可转换的 final_report。");
+      return;
+    }
+    setNormalizingIds(new Set(candidates.map((item) => item.result.id)));
+    setActionMessage("");
+    try {
+      let payload = activeTaskGroup
+        ? await normalizeTaskGroupFinalReports(activeTaskGroup.id)
+        : await normalizeWideTableFinalReports(wideTable.id);
+      if (activeTaskGroup && payload.collectionResults.length === 0 && candidates.length > 0) {
+        payload = await normalizeWideTableFinalReports(wideTable.id);
+      }
+      setResultsByTask((prev) => {
+        const next = { ...prev };
+        for (const updated of payload.collectionResults) {
+          const key = updated.fetchTaskId || `__result__${updated.id}`;
+          let replaced = false;
+          Object.keys(next).forEach((entryKey) => {
+            next[entryKey] = next[entryKey].map((item) => {
+              if (item.id === updated.id) {
+                replaced = true;
+                return updated;
+              }
+              return item;
+            });
+          });
+          if (!replaced) {
+            next[key] = [...(next[key] ?? []), updated];
+          }
+        }
+        return next;
+      });
+      setActionMessage(`已按首条表头转换 ${payload.collectionResults.length} 条原始结果。`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "转换失败");
+    } finally {
+      setNormalizingIds(new Set());
+    }
+  };
+
+  return (
+    <section className="rounded-xl border bg-card p-6 space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold">{wideTable.name}</h2>
+          <p className="text-xs text-muted-foreground">
+            查看 collection_results.final_report，并手动写入 normalized_rows_json。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={normalizeAll}
+          disabled={loading || resultItems.length === 0 || normalizingIds.size > 0}
+          className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          转换当前页全部原始结果
+        </button>
+      </div>
+
+      {fullSnapshotPages.length > 0 ? (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {fullSnapshotPages.map((page) => (
+            <button
+              key={snapshotPageKey(page)}
+              type="button"
+              onClick={() => setSelectedPageKey(snapshotPageKey(page))}
+              className={cn(
+                "shrink-0 rounded-md border px-3 py-1.5 text-xs transition-colors",
+                snapshotPageKey(page) === selectedPageKey
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-primary",
+              )}
+            >
+              {page.pageLabel}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="text-xs text-muted-foreground">
+        {activeTaskGroup
+          ? `任务组 ${activeTaskGroup.id} · 任务 ${activeFetchTasks.length} · 原始结果 ${resultItems.length}`
+          : `按宽表读取原始结果 · 原始结果 ${resultItems.length}`}
+      </div>
+
+      {actionMessage ? (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">{actionMessage}</div>
+      ) : null}
+
+      {aggregatedRows && aggregatedRows.length > 0 && aggregatedColumns.length > 0 ? (
+        <NormalizedRowsTable
+          columns={aggregatedColumns}
+          rows={aggregatedRows}
+          title="normalized_rows_json 汇总预览"
+          maxRows={200}
+        />
+      ) : null}
+
+      {loading ? (
+        <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-xs text-muted-foreground">
+          正在加载原始结果...
+        </div>
+      ) : resultItems.length === 0 ? (
+        <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-xs text-muted-foreground">
+          当前宽表暂无 collection_results.final_report 可转换数据。
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {resultItems.map(({ task, result }) => (
+            <RawCollectionResultCard
+              key={result.id}
+              task={task}
+              result={result}
+              isNormalizing={normalizingIds.has(result.id)}
+              onNormalize={() => normalizeOne(result.fetchTaskId || task?.id || "", result.id)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RawCollectionResultCard({
+  task,
+  result,
+  isNormalizing,
+  onNormalize,
+}: {
+  task?: FetchTask;
+  result: CollectionResult;
+  isNormalizing: boolean;
+  onNormalize: () => void;
+}) {
+  const normalizedRows = useMemo(() => parseNormalizedRows(result.normalizedRowsJson), [result.normalizedRowsJson]);
+  const previewColumns = useMemo(() => buildNormalizedPreviewColumns(normalizedRows), [normalizedRows]);
+  const finalReportSummary = summarizeText(result.finalReport);
+
+  return (
+    <article className="rounded-lg border bg-background p-4 space-y-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="space-y-1 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-foreground">row_id {task?.rowId ?? result.rowId ?? "—"}</span>
+            <span className="text-muted-foreground">任务 {task?.id ?? result.fetchTaskId ?? "未绑定 fetch_task"}</span>
+            {result.externalTaskId ? <span className="text-muted-foreground">外部任务 {result.externalTaskId}</span> : null}
+            {result.status ? <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">{result.status}</span> : null}
+          </div>
+          <div className="text-muted-foreground">
+            采集时间 {formatNullable(result.collectedAt ?? result.createdAt)} · JSON 行数 {normalizedRows?.length ?? 0}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onNormalize}
+          disabled={isNormalizing || !result.finalReport || !result.fetchTaskId}
+          className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isNormalizing ? "转换中..." : "转换"}
+        </button>
+      </div>
+
+      <div className="rounded-md bg-muted/25 px-3 py-2 text-xs leading-5 text-muted-foreground">
+        {finalReportSummary || "final_report 为空"}
+      </div>
+
+      {normalizedRows && normalizedRows.length > 0 && previewColumns.length > 0 ? (
+        <NormalizedRowsTable columns={previewColumns} rows={normalizedRows} maxRows={5} />
+      ) : (
+        <div className="rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground">
+          normalized_rows_json 暂无可预览数据。
+        </div>
+      )}
+    </article>
+  );
+}
+
+function NormalizedRowsTable({
+  columns,
+  rows,
+  title,
+  maxRows,
+}: {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  title?: string;
+  maxRows: number;
+}) {
+  const visibleRows = rows.slice(0, maxRows);
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      {title ? (
+        <div className="border-b bg-muted/20 px-3 py-2 text-xs font-medium text-foreground">
+          {title} · 共 {rows.length} 行
+        </div>
+      ) : null}
+      <table className="min-w-full text-left text-xs">
+        <thead className="bg-muted/40 text-muted-foreground">
+          <tr>
+            {columns.map((column) => (
+              <th key={column} className="whitespace-nowrap px-3 py-2 font-medium">{column}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {visibleRows.map((row, index) => (
+            <tr key={index} className="border-t">
+              {columns.map((column) => (
+                <td key={column} className="max-w-[320px] truncate px-3 py-2 text-muted-foreground" title={String(row[column] ?? "")}>
+                  {String(row[column] ?? "") || "—"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > maxRows ? (
+        <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+          仅预览前 {maxRows} 行，共 {rows.length} 行。
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildAggregatedNormalizedRows(
+  items: Array<{ task?: FetchTask; result: CollectionResult }>,
+): Array<Record<string, unknown>> | null {
+  const rows: Array<Record<string, unknown>> = [];
+  items.forEach(({ task, result }) => {
+    const parsedRows = parseNormalizedRows(result.normalizedRowsJson);
+    if (!parsedRows || parsedRows.length === 0) return;
+    parsedRows.forEach((row) => {
+      rows.push({
+        row_id: task?.rowId ?? result.rowId ?? "",
+        fetch_task_id: result.fetchTaskId ?? task?.id ?? "",
+        collection_result_id: result.id,
+        ...row,
+      });
+    });
+  });
+  return rows.length > 0 ? rows : null;
+}
+
+function parseNormalizedRows(value?: string | Array<Record<string, unknown>> | null): Array<Record<string, unknown>> | null {
+  if (Array.isArray(value)) {
+    return filterNormalizedRows(value);
+  }
+  if (!value || String(value).trim() === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(String(value));
+    if (Array.isArray(parsed)) {
+      return filterNormalizedRows(parsed);
+    }
+    if (typeof parsed === "string") {
+      const reparsed = JSON.parse(parsed);
+      return Array.isArray(reparsed) ? filterNormalizedRows(reparsed) : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function filterNormalizedRows(value: unknown[]): Array<Record<string, unknown>> | null {
+  const rows = value.filter((item): item is Record<string, unknown> => item != null && typeof item === "object" && !Array.isArray(item));
+  return rows.length > 0 ? rows : null;
+}
+
+function buildNormalizedPreviewColumns(rows: Array<Record<string, unknown>> | null): string[] {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+  const columns: string[] = [];
+  rows.forEach((row) => {
+    Object.keys(row).forEach((key) => {
+      if (!columns.includes(key)) columns.push(key);
+    });
+  });
+  return columns;
+}
+
+function summarizeText(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 260 ? `${normalized.slice(0, 260)}...` : normalized;
+}
+
+function formatNullable(value?: string | null): string {
+  return value && String(value).trim() !== "" ? String(value) : "—";
+}
 
 function FillingRulesTooltip() {
   const [open, setOpen] = useState(false);

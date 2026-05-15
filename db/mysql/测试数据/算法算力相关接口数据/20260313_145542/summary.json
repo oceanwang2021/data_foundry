@@ -1,0 +1,240 @@
+{
+  "stats": {
+    "total": 19,
+    "success": 19,
+    "failed": 0,
+    "skipped": 0,
+    "start_time": "2026-03-13T14:55:44.699405",
+    "end_time": "2026-03-13T15:13:04.105921"
+  },
+  "results": [
+    {
+      "task_id": "c56569d4-08af-4156-8f56-649705c16285",
+      "subject": {
+        "comcode": "299644",
+        "company_name": "比亚迪"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 275.382647,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_001_比亚迪"
+    },
+    {
+      "task_id": "0e2cdcec-c492-42c6-b5c7-18ccc402b844",
+      "subject": {
+        "comcode": "3344180",
+        "company_name": "零跑汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 395.189483,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_002_零跑汽车"
+    },
+    {
+      "task_id": "0c263252-b163-461d-bfe9-7078df291b67",
+      "subject": {
+        "comcode": "8036928",
+        "company_name": "小鹏汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 275.127197,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_003_小鹏汽车"
+    },
+    {
+      "task_id": "abdeb758-7451-4795-a5cd-b49ae6e47908",
+      "subject": {
+        "comcode": "1111255",
+        "company_name": "赛力斯汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 304.467317,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_004_赛力斯汽车"
+    },
+    {
+      "task_id": "e1f85b87-2eb8-4766-a0b9-b43a1105192b",
+      "subject": {
+        "comcode": "351942",
+        "company_name": "吉利汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 244.483003,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_005_吉利汽车"
+    },
+    {
+      "task_id": "fb2666eb-0cf8-4fa6-ac5a-7a1f69c0184f",
+      "subject": {
+        "comcode": "5209493",
+        "company_name": "蔚来汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 210.46318,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_006_蔚来汽车"
+    },
+    {
+      "task_id": "cfcfe09d-4e0c-47c6-bcfc-16872a498847",
+      "subject": {
+        "comcode": "817510",
+        "company_name": "北京汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 270.454291,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_007_北京汽车"
+    },
+    {
+      "task_id": "d0494eab-d381-439b-8ea8-374224eb7a41",
+      "subject": {
+        "comcode": "8012069",
+        "company_name": "理想汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 300.463722,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_008_理想汽车"
+    },
+    {
+      "task_id": "e4ad3ba4-7072-4a6a-bda4-7ccf8a8b7792",
+      "subject": {
+        "comcode": "350936",
+        "company_name": "广汽集团"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 180.317779,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_009_广汽集团"
+    },
+    {
+      "task_id": "252f3e2f-7b8f-4e6b-bdb2-cf83e46f8deb",
+      "subject": {
+        "comcode": "285755",
+        "company_name": "上汽集团"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 210.329968,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_010_上汽集团"
+    },
+    {
+      "task_id": "d9667985-e41b-46b6-b3ea-25158519c68f",
+      "subject": {
+        "comcode": "341092",
+        "company_name": "长城汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 270.46683,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_011_长城汽车"
+    },
+    {
+      "task_id": "b26571e0-f9a4-4195-b941-b38813460b9d",
+      "subject": {
+        "comcode": "286316",
+        "company_name": "长安汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 180.323928,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_012_长安汽车"
+    },
+    {
+      "task_id": "18ff7795-6f6c-4e79-bf4b-8f66f61b1176",
+      "subject": {
+        "comcode": "285678",
+        "company_name": "北汽蓝谷"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 249.429577,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_013_北汽蓝谷"
+    },
+    {
+      "task_id": "d4e87cf0-3e8c-48bb-90cd-41ede988c449",
+      "subject": {
+        "comcode": "456132",
+        "company_name": "奇瑞汽车"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 283.075609,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_014_奇瑞汽车"
+    },
+    {
+      "task_id": "923e8620-f10b-4c92-bfa1-af45f4965bc2",
+      "subject": {
+        "comcode": "1158390",
+        "company_name": "百度(Apollo)"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 223.381577,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_015_百度(Apollo)"
+    },
+    {
+      "task_id": "e0b86f6c-bbc8-4565-8a40-e810cb111d16",
+      "subject": {
+        "comcode": "182645413",
+        "company_name": "小马智行(Pony.ai)"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 343.055111,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_016_小马智行(Pony.ai)"
+    },
+    {
+      "task_id": "44ba1722-ff4b-445f-97ba-7f916d10696e",
+      "subject": {
+        "comcode": "9372067",
+        "company_name": "文远知行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 282.805645,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_017_文远知行"
+    },
+    {
+      "task_id": "c032d7df-3ad2-41f6-b4eb-a8068b23a89c",
+      "subject": {
+        "comcode": "8195554",
+        "company_name": "Waymo"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 183.930514,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_018_Waymo"
+    },
+    {
+      "task_id": "b2f7f374-0811-40eb-b7c4-af9ab3a98999",
+      "subject": {
+        "comcode": "349905",
+        "company_name": "东风集团"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 210.316347,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\smart_drive_tech\\results\\20260313_145542\\task_019_东风集团"
+    }
+  ]
+}

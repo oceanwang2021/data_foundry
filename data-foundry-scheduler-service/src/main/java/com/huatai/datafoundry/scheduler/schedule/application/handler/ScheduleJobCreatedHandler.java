@@ -69,20 +69,24 @@ public class ScheduleJobCreatedHandler {
       String status = resp != null && "completed".equalsIgnoreCase(resp.getStatus()) ? "completed" : "failed";
       scheduleJobRepository.updateStatus(jobId, status, endedAt, record.getLogRef());
 
-      callbackBackend(record, status, endedAt);
+      callbackBackend(record, status, endedAt, resp);
     } catch (Exception ex) {
       log.warn("Agent execution failed for job {}: {}", jobId, ex.getMessage());
       String endedAt = Instant.now().toString();
       scheduleJobRepository.updateStatus(jobId, "failed", endedAt, record.getLogRef());
       try {
-        callbackBackend(record, "failed", endedAt);
+        callbackBackend(record, "failed", endedAt, null);
       } catch (Exception ignored) {
         // best-effort
       }
     }
   }
 
-  private void callbackBackend(ScheduleJob record, String status, String endedAt) {
+  private void callbackBackend(
+      ScheduleJob record,
+      String status,
+      String endedAt,
+      AgentExecutionResponse agentResult) {
     if (record == null) return;
     Map<String, Object> body = new HashMap<String, Object>();
     body.put("schedule_job_id", record.getId());
@@ -90,6 +94,9 @@ public class ScheduleJobCreatedHandler {
     body.put("task_id", record.getTaskId());
     body.put("status", status);
     body.put("ended_at", endedAt);
+    if (agentResult != null) {
+      body.put("agent_result", agentResult);
+    }
 
     String idem = "schedule-job-callback:" + record.getId();
     try {

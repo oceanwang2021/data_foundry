@@ -1,5 +1,6 @@
 import type {
   ColumnDefinition,
+  CollectionResultRow,
   ExecutionRecord,
   FetchTask,
   IndicatorGroup,
@@ -23,6 +24,7 @@ type FetchTaskLike = FetchTask & {
 
 export type FetchTaskReturnRowView = {
   contextValues: Record<string, string>;
+  indicatorKey: string;
   indicatorName: string;
   indicatorUnit: string;
   indicatorValue: string;
@@ -281,6 +283,7 @@ function buildReturnRow(params: {
   totalIndicatorCount: number;
 }): FetchTaskReturnRowView {
   const {
+    task,
     wideTable,
     record,
     contextColumns,
@@ -289,18 +292,25 @@ function buildReturnRow(params: {
     entityValue,
     taskGroup,
   } = params;
-  const indicatorValue = record
+  const collectionRow = findCollectionRow(task.collectionRows, indicatorColumn);
+  const indicatorValue = collectionRow
+    ? (collectionRow.cleanedValue ?? "")
+    : record
     ? buildWideTableProcessedCellValue(wideTable, record, indicatorColumn)
     : "";
-  const rawIndicatorValue = record
+  const rawIndicatorValue = collectionRow
+    ? (collectionRow.rawValue ?? collectionRow.cleanedValue ?? "")
+    : record
     ? buildWideTableRawCellValue(wideTable, record, indicatorColumn)
     : "";
-  const shouldExposeReturnMetadata = Boolean(indicatorValue || rawIndicatorValue);
-  const indicatorUnit = indicatorColumn.unit ?? "";
-  const sourceSite = shouldExposeReturnMetadata ? lookupSourceSite(entityValue) : "";
-  const sourceUrl = shouldExposeReturnMetadata ? lookupSourceUrl(entityValue) : "";
-  const indicatorBounds = shouldExposeReturnMetadata ? buildIndicatorBounds(rawIndicatorValue, indicatorUnit) : { maxValue: "", minValue: "" };
-  const quoteText = shouldExposeReturnMetadata
+  const shouldExposeReturnMetadata = Boolean(collectionRow || indicatorValue || rawIndicatorValue);
+  const indicatorUnit = collectionRow?.unit ?? indicatorColumn.unit ?? "";
+  const sourceSite = collectionRow?.sourceSite ?? (shouldExposeReturnMetadata ? lookupSourceSite(entityValue) : "");
+  const sourceUrl = collectionRow?.sourceUrl ?? (shouldExposeReturnMetadata ? lookupSourceUrl(entityValue) : "");
+  const indicatorBounds = collectionRow
+    ? { maxValue: collectionRow.maxValue ?? "", minValue: collectionRow.minValue ?? "" }
+    : shouldExposeReturnMetadata ? buildIndicatorBounds(rawIndicatorValue, indicatorUnit) : { maxValue: "", minValue: "" };
+  const quoteText = collectionRow?.quoteText ?? (shouldExposeReturnMetadata
     ? buildQuoteText({
       taskGroup,
       wideTable,
@@ -311,26 +321,44 @@ function buildReturnRow(params: {
       indicatorValue,
       indicatorUnit,
     })
-    : "";
+    : "");
 
   return {
     contextValues: Object.fromEntries(
       contextColumns.map((column) => [column.name, formatContextColumnValue(column, record, params.rowId)]),
     ),
+    indicatorKey: indicatorColumn.name,
     indicatorName: indicatorColumn.chineseName ?? indicatorColumn.name,
     indicatorUnit,
     indicatorValue: shouldExposeReturnMetadata ? indicatorValue : "",
     rawIndicatorValue: shouldExposeReturnMetadata ? rawIndicatorValue : "",
-    publishedAt: shouldExposeReturnMetadata ? resolveReturnRowPublishedAt(taskGroup, record) : "",
+    publishedAt: collectionRow?.publishedAt ?? (shouldExposeReturnMetadata ? resolveReturnRowPublishedAt(taskGroup, record) : ""),
     sourceSite,
     source: sourceSite,
     sourceUrl,
-    indicatorLogic: shouldExposeReturnMetadata ? buildIndicatorLogic(groupDescription) : "",
-    indicatorLogicSupplement: shouldExposeReturnMetadata ? buildIndicatorLogicSupplement(indicatorColumn) : "",
+    indicatorLogic: collectionRow?.reasoning ?? (shouldExposeReturnMetadata ? buildIndicatorLogic(groupDescription) : ""),
+    indicatorLogicSupplement: collectionRow?.whyNotFound ?? (shouldExposeReturnMetadata ? buildIndicatorLogicSupplement(indicatorColumn) : ""),
     maxValue: indicatorBounds.maxValue,
     minValue: indicatorBounds.minValue,
     quoteText,
   };
+}
+
+function findCollectionRow(rows: CollectionResultRow[] | undefined, indicatorColumn: ColumnDefinition): CollectionResultRow | undefined {
+  if (!rows || rows.length === 0) {
+    return undefined;
+  }
+  const columnKey = normalizeCollectionIndicatorKey(indicatorColumn.name);
+  const columnName = normalizeCollectionIndicatorKey(indicatorColumn.chineseName ?? indicatorColumn.name);
+  return rows.find((row) => {
+    const rowKey = normalizeCollectionIndicatorKey(row.indicatorKey);
+    const rowName = normalizeCollectionIndicatorKey(row.indicatorName ?? "");
+    return rowKey === columnKey || rowName === columnKey || rowName === columnName;
+  });
+}
+
+function normalizeCollectionIndicatorKey(value: string | undefined): string {
+  return (value ?? "").replace(/[^a-zA-Z0-9\u4e00-\u9fa5]+/g, "").toUpperCase();
 }
 
 function buildIndicatorGroups(wideTable: WideTable) {

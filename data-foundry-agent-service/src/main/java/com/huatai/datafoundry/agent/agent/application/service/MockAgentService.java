@@ -7,12 +7,18 @@ import com.huatai.datafoundry.contract.agent.NarrowIndicatorRow;
 import com.huatai.datafoundry.contract.agent.RetrievalTaskResult;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import org.springframework.stereotype.Service;
 
 @Service
 public class MockAgentService {
   private final Random random = new Random();
+  private final AgentResultNormalizer resultNormalizer;
+
+  public MockAgentService(AgentResultNormalizer resultNormalizer) {
+    this.resultNormalizer = resultNormalizer;
+  }
 
   public AgentExecutionResponse execute(AgentExecutionRequest request) {
     long started = System.currentTimeMillis();
@@ -30,6 +36,7 @@ public class MockAgentService {
       response.setRetrievalTasks(new ArrayList<RetrievalTaskResult>());
       response.setDurationMs((int) (System.currentTimeMillis() - started));
       response.setErrorMessage("Mock: simulated failure");
+      response.setExternalTaskId(request.getTaskId());
       return response;
     }
 
@@ -54,13 +61,17 @@ public class MockAgentService {
         retrieval.setStatus("completed");
         retrieval.setConfidence(indicator.getConfidence());
         NarrowIndicatorRow narrow = new NarrowIndicatorRow();
+        narrow.setBusinessDate(request.getBusinessDate());
         narrow.setIndicatorKey(key);
+        narrow.setIndicatorColumn(key);
         narrow.setIndicatorName(request.getIndicatorNames() != null ? request.getIndicatorNames().get(key) : key);
         narrow.setValue(indicator.getValue());
+        narrow.setRawValue(indicator.getValue());
         narrow.setUnit(request.getIndicatorUnits() != null ? request.getIndicatorUnits().get(key) : "");
         narrow.setSourceUrl(indicator.getSourceUrl());
         narrow.setSourceSite("mock");
         narrow.setQuoteText(indicator.getQuoteText());
+        narrow.setConfidence(indicator.getConfidence());
         narrow.setDimensionValues(request.getDimensionValues());
         retrieval.setNarrowRow(narrow);
         retrievalTasks.add(retrieval);
@@ -72,7 +83,59 @@ public class MockAgentService {
     response.setRetrievalTasks(retrievalTasks);
     response.setDurationMs((int) (System.currentTimeMillis() - started));
     response.setErrorMessage(null);
+    response.setExternalTaskId(request.getTaskId());
+    response.setFinalReport(buildMockFinalReport(request, retrievalTasks));
+    response.setNormalizedRows(extractNarrowRows(retrievalTasks));
+    Map<String, Object> rawResult =
+        resultNormalizer.buildRawResult(
+            request,
+            response.getNormalizedRows(),
+            response.getStatus(),
+            response.getFinalReport(),
+            response.getErrorMessage(),
+            response.getDurationMs());
+    response.setRawResult(rawResult);
     return response;
+  }
+
+  private List<NarrowIndicatorRow> extractNarrowRows(List<RetrievalTaskResult> retrievalTasks) {
+    List<NarrowIndicatorRow> rows = new ArrayList<NarrowIndicatorRow>();
+    if (retrievalTasks == null) {
+      return rows;
+    }
+    for (RetrievalTaskResult retrieval : retrievalTasks) {
+      if (retrieval != null && retrieval.getNarrowRow() != null) {
+        rows.add(retrieval.getNarrowRow());
+      }
+    }
+    return rows;
+  }
+
+  private String buildMockFinalReport(AgentExecutionRequest request, List<RetrievalTaskResult> retrievalTasks) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("| indicator_key | value | source_url | quote_text |\n");
+    sb.append("| --- | --- | --- | --- |\n");
+    if (retrievalTasks != null) {
+      for (RetrievalTaskResult retrieval : retrievalTasks) {
+        NarrowIndicatorRow row = retrieval != null ? retrieval.getNarrowRow() : null;
+        if (row == null) {
+          continue;
+        }
+        sb.append("| ")
+            .append(row.getIndicatorKey())
+            .append(" | ")
+            .append(row.getValue())
+            .append(" | ")
+            .append(row.getSourceUrl())
+            .append(" | ")
+            .append(row.getQuoteText())
+            .append(" |\n");
+      }
+    }
+    if (request != null && request.getDimensionValues() != null && !request.getDimensionValues().isEmpty()) {
+      sb.append("\nMock dimensions: ").append(request.getDimensionValues().toString());
+    }
+    return sb.toString();
   }
 
   private String buildQuery(String indicatorKey, AgentExecutionRequest request) {

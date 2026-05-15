@@ -1,6 +1,8 @@
 package com.huatai.datafoundry.backend.task.interfaces.web;
 
+import com.huatai.datafoundry.backend.requirement.application.query.dto.CollectionResultReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskResultsReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.service.RequirementQueryService;
 import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
@@ -45,6 +47,42 @@ public class TaskFacadeController {
       @RequestParam("project_id") String projectId,
       @RequestParam("requirement_id") String requirementId) {
     return requirementQueryService.listFetchTasks(projectId, requirementId);
+  }
+
+  @GetMapping("/{taskId}/results")
+  public FetchTaskResultsReadDto getTaskResults(@PathVariable("taskId") String taskId) {
+    return requirementQueryService.getTaskResults(taskId);
+  }
+
+  @GetMapping("/task-groups/{taskGroupId}/results")
+  public FetchTaskResultsReadDto getTaskGroupResults(@PathVariable("taskGroupId") String taskGroupId) {
+    return requirementQueryService.getTaskGroupResults(taskGroupId);
+  }
+
+  @GetMapping("/wide-tables/{wideTableId}/results")
+  public FetchTaskResultsReadDto getWideTableResults(@PathVariable("wideTableId") String wideTableId) {
+    return requirementQueryService.getWideTableResults(wideTableId);
+  }
+
+  @PostMapping("/{taskId}/results/{resultId}/actions/normalize-final-report")
+  public CollectionResultReadDto normalizeFinalReport(
+      @PathVariable("taskId") String taskId, @PathVariable("resultId") String resultId) {
+    return requirementQueryService.normalizeTaskResultFinalReport(taskId, resultId);
+  }
+
+  @PostMapping("/wide-tables/{wideTableId}/results/actions/normalize-final-reports")
+  public FetchTaskResultsReadDto normalizeWideTableFinalReports(@PathVariable("wideTableId") String wideTableId) {
+    return requirementQueryService.normalizeWideTableFinalReports(wideTableId);
+  }
+
+  @PostMapping("/task-groups/{taskGroupId}/results/actions/normalize-final-reports")
+  public FetchTaskResultsReadDto normalizeTaskGroupFinalReports(@PathVariable("taskGroupId") String taskGroupId) {
+    return requirementQueryService.normalizeTaskGroupFinalReports(taskGroupId);
+  }
+
+  @GetMapping("/{taskId}/runs")
+  public List<Map<String, Object>> listTaskRuns(@PathVariable("taskId") String taskId) {
+    return requirementQueryService.listTaskRuns(taskId);
   }
 
   @PostMapping("/task-groups/{taskGroupId}/actions/execute")

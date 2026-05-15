@@ -28,7 +28,10 @@ public class TaskExecutionCallbackAppServiceTest {
 
     TaskExecutionCallbackAppService svc =
         new TaskExecutionCallbackAppService(
-            taskGroupRepository, fetchTaskRepository, new TaskExecutionDomainService());
+            taskGroupRepository,
+            fetchTaskRepository,
+            new TaskExecutionDomainService(),
+            Mockito.mock(CollectionResultAppService.class));
 
     SchedulerExecutionCallbackCommand cmd = new SchedulerExecutionCallbackCommand();
     cmd.setTaskGroupId("TG1");
@@ -51,7 +54,10 @@ public class TaskExecutionCallbackAppServiceTest {
 
     TaskExecutionCallbackAppService svc =
         new TaskExecutionCallbackAppService(
-            taskGroupRepository, fetchTaskRepository, new TaskExecutionDomainService());
+            taskGroupRepository,
+            fetchTaskRepository,
+            new TaskExecutionDomainService(),
+            Mockito.mock(CollectionResultAppService.class));
 
     SchedulerExecutionCallbackCommand cmd = new SchedulerExecutionCallbackCommand();
     cmd.setTaskId("T1");
