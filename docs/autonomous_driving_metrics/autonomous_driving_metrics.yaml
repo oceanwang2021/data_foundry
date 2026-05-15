@@ -1,0 +1,205 @@
+# 自动驾驶行业长表模式采集模板 (Long Format)
+# 适用场景：单次注入单个公司，按指标行级展开，适合关系型数据库结构化存储
+#
+# 占位符：
+#   {ROBOTYPE}  - 业态类别（Robotaxi / Robovan / Robotruck / Robobus）
+#   {COMCODE}        - 公司代码
+#   {OPERATOR}   - 公司名称
+
+type: uploaded file
+fileName: ad_metrics_{ROBOTYPE}_{COMCODE}_{OPERATOR}.yaml
+
+query: |
+  请作为自动驾驶行业资深分析师，基于最新可验证的公开信息，系统性地采集目标公司的核心运营指标。
+
+  ### 🎯 当前采集目标
+  - **业态类别**：{ROBOTYPE}
+  - **公司代码 (comcode)**：{COMCODE}
+  - **公司名称**：{OPERATOR}
+
+  ### ⚠️ 核心指令 (Core Instructions)
+  1. **长表格式输出**：请务必以长表（多行结构）的形式输出数据。目标公司共有 14 个核心指标，因此您的输出表格**必须且仅有 14 行数据**（不含表头）。
+  2. **ID 强制透传**：在生成结果的每一行中，**必须**将上述提供的「业态类别」、「comcode」和「公司名称」原封不动地填入前三列。
+  3. **时效性与来源验证**：
+     - **优先采集 2025-2026 年最新披露的数据**。
+     - 若无最新数据，按年度倒序使用最近数据。
+     - 必须在「数据时间」列标明具体节点（如 "2025Q4"、"2026-01"）。
+     - 必须在「数据来源」列填写具体的财报、政府公告名称或研报机构（如 "文远知行2025年报"、"北京市交委"）。
+  4. **数据缺失与处理**：
+     - 若某项数据穷尽搜索仍完全无法获取，指标值填 `-`，来源填 `-`。
+     - 若部分数据可估算，在「逻辑说明及补充」中写明计算公式（例：`依据2025Q4单量×365估算`）。
+     - 海外金额数据强制换算为人民币。
+
+  ### 📊 目标输出表格模板
+  请严格按照以下 Markdown 长表格式输出结果。用您检索到的真实数据替换 `[待采集]` 等占位符。
+
+  | 业态类别 | comcode | 公司名称 | 指标名称 | 指标值 | 单位 | 数据时间 | 数据来源 | 逻辑说明及补充 |
+  |---|---|---|---|---|---|---|---|---|
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 无人牌照数量 | [填数值] | 辆 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 车队数量 | [填数值] | 辆 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 累计运营里程 | [填数值] | 万公里 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 累计订单数量 | [填数值] | 万单 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 平均订单单价 | [填数值] | 元 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 脱手率 | [填数值] | % | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 事故率 | [填数值] | 次/万公里 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 累计测试里程 | [填数值] | 万公里 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 累计自动驾驶测试里程 | [填数值] | 万公里 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 自动驾驶占比 | [填数值] | % | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 收入 | [填数值] | 亿元 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 收入同比增速 | [填数值] | % | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 研发投入 | [填数值] | 亿元 | [填时间] | [填来源] | [填说明] |
+  | {ROBOTYPE} | {COMCODE} | {OPERATOR} | 单车成本 | [填数值] | 万元 | [填时间] | [填来源] | [填说明] |
+
+  ### 📝 关键指标口径规范
+  - **脱手率 / 事故率**：脱手率指系统无需人工干预的里程比例；事故率按每万公里发生的责任事故次数计算。
+  - **自动驾驶占比**：累计自动驾驶测试里程 / 累计测试里程的百分比，保留2位小数。
+  - **单位统一**：指标值列**只填纯数字**（如 `150.5`），单位严格放在「单位」列。
+
+background: |
+  domain_meta:
+    industry_name: "Autonomous_Driving_Metrics_Long_Format"
+
+  # ============================================================
+  # 汇总节点输出约束（synthesizer 必须严格遵守）
+  # ============================================================
+  output_constraints:
+
+    # 【行数约束】每家公司每个业态固定输出 14 行，对应 14 个核心指标，不多不少
+    fixed_row_count: 14
+
+    # 【同一指标去重规则】
+    # 同一指标名称若存在多个时间节点的数据，只保留时间最新的一条，不得重复输出同名指标的历史数据。
+    # 时间优先级（从高到低）：具体日期（如 2026-01）> 季度（如 2025Q4）> 年度（如 2025年）
+    # 若多条数据时间相同，保留数值最大（最乐观）的一条，并在「逻辑说明及补充」中注明其他来源及数值。
+    dedup_rule: "per_metric_keep_latest"
+
+    # 【时效性要求】优先采集 2025-2026 年最新披露数据，无最新数据时按年度倒序取最近值
+    recency_priority: "2025-2026"
+
+    # 【单位规范】指标值列只填纯数字，单位严格放在「单位」列；海外金额强制换算为人民币
+    unit_rule: "numeric_only_in_value_column; overseas_amount_convert_to_cny"
+
+  entities:
+    - entity_type: "AD_COMPANY_METRICS"
+      description: "自动驾驶公司运营指标长表数据行"
+      table_columns:
+        - "业态类别 (Business Type)"
+        - "comcode"
+        - "公司名称 (Company Name)"
+        - "指标名称 (Metric Name)"
+        - "指标值 (Value)"
+        - "单位 (Unit)"
+        - "数据时间 (Data Period)"
+        - "数据来源 (Data Source)"
+        - "逻辑说明及补充 (Notes)"
+
+  metrics_library:
+    - key: "fleet_license"
+      name: "无人牌照数量"
+      search_config:
+        data_type: "Number"
+        must_include: ["无人驾驶牌照", "自动驾驶牌照", "无人化牌照", "driverless permit"]
+        context_hints: ["{OPERATOR}", "{ROBOTYPE}", "2025", "2026"]
+
+    - key: "fleet_size"
+      name: "车队数量"
+      search_config:
+        data_type: "Number"
+        must_include: ["车队规模", "fleet size", "运营车辆", "vehicle fleet"]
+        context_hints: ["{OPERATOR}", "{ROBOTYPE}"]
+
+    - key: "cumulative_mileage"
+      name: "累计运营里程"
+      search_config:
+        data_type: "Number"
+        must_include: ["累计运营里程", "cumulative mileage", "总运营里程"]
+        context_hints: ["{OPERATOR}", "万公里"]
+
+    - key: "cumulative_orders"
+      name: "累计订单数量"
+      search_config:
+        data_type: "Number"
+        must_include: ["累计订单", "cumulative orders", "总订单量", "total trips"]
+        context_hints: ["{OPERATOR}", "{ROBOTYPE}"]
+
+    - key: "avg_order_price"
+      name: "平均订单单价"
+      search_config:
+        data_type: "Number"
+        must_include: ["客单价", "平均单价", "average fare", "per trip revenue"]
+        context_hints: ["{OPERATOR}", "元"]
+
+    - key: "disengagement_rate"
+      name: "脱手率"
+      search_config:
+        data_type: "Number"
+        must_include: ["脱手率", "disengagement rate", "接管率", "intervention rate"]
+        context_hints: ["{OPERATOR}", "自动驾驶"]
+
+    - key: "accident_rate"
+      name: "事故率"
+      search_config:
+        data_type: "Number"
+        must_include: ["事故率", "accident rate", "碰撞率", "collision rate"]
+        context_hints: ["{OPERATOR}", "万公里"]
+
+    - key: "test_mileage"
+      name: "累计测试里程"
+      search_config:
+        data_type: "Number"
+        must_include: ["累计测试里程", "test mileage", "测试总里程"]
+        context_hints: ["{OPERATOR}"]
+
+    - key: "autonomous_test_mileage"
+      name: "累计自动驾驶测试里程"
+      search_config:
+        data_type: "Number"
+        must_include: ["自动驾驶测试里程", "autonomous miles", "自动驾驶里程"]
+        context_hints: ["{OPERATOR}"]
+
+    - key: "autonomous_ratio"
+      name: "自动驾驶占比"
+      search_config:
+        data_type: "Number"
+        must_include: ["自动驾驶占比", "autonomous ratio", "无人化比例"]
+        context_hints: ["{OPERATOR}"]
+
+    - key: "revenue"
+      name: "收入"
+      search_config:
+        data_type: "Number"
+        must_include: ["营业收入", "revenue", "总收入", "营收"]
+        context_hints: ["{OPERATOR}", "2025", "2026", "亿元"]
+
+    - key: "revenue_yoy"
+      name: "收入同比增速"
+      search_config:
+        data_type: "Number"
+        must_include: ["同比增长", "YoY", "year-over-year", "收入增速"]
+        context_hints: ["{OPERATOR}", "营收"]
+
+    - key: "rd_investment"
+      name: "研发投入"
+      search_config:
+        data_type: "Number"
+        must_include: ["研发投入", "R&D expense", "研发费用", "研发支出"]
+        context_hints: ["{OPERATOR}", "亿元"]
+
+    - key: "vehicle_cost"
+      name: "单车成本"
+      search_config:
+        data_type: "Number"
+        must_include: ["单车成本", "per vehicle cost", "车辆成本", "硬件成本"]
+        context_hints: ["{OPERATOR}", "万元"]
+
+  search_logic_templates:
+    - entity_type: "AD_COMPANY_METRICS"
+      template: "{OPERATOR} {ROBOTYPE} 车队规模 运营里程 订单量 2025 2026"
+    - entity_type: "AD_COMPANY_METRICS"
+      template: "{OPERATOR} 财报 营收 研发投入 2025 2026"
+    - entity_type: "AD_COMPANY_METRICS"
+      template: "{OPERATOR} autonomous vehicle fleet revenue R&D 2025 2026"
+    - entity_type: "AD_COMPANY_METRICS"
+      template: "{OPERATOR} 无人驾驶牌照 脱手率 事故率 测试里程"
+    - entity_type: "AD_COMPANY_METRICS"
+      template: "{OPERATOR} {ROBOTYPE} disengagement accident rate mileage official report"

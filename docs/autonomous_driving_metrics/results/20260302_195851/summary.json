@@ -1,0 +1,336 @@
+{
+  "stats": {
+    "total": 25,
+    "success": 24,
+    "failed": 1,
+    "start_time": "2026-03-02T19:58:52.977026",
+    "end_time": "2026-03-03T01:16:07.457991"
+  },
+  "results": [
+    {
+      "task_id": "706b80ca-2815-482a-a06e-553399211244",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "10028149",
+        "company_name": "Uber"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2059.484386,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_001_Uber"
+    },
+    {
+      "task_id": "ff4e31a3-1282-4d5d-86ad-648cedfb9aaa",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "7461206",
+        "company_name": "滴滴全球"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1969.316708,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_002_滴滴全球"
+    },
+    {
+      "task_id": "0ca6494f-1fb0-4fdf-aba3-d7efa775cf09",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "37524352",
+        "company_name": "如祺出行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2215.917222,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_003_如祺出行"
+    },
+    {
+      "task_id": "f336c538-e179-47f9-b703-cd95ef87e65a",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "96685391",
+        "company_name": "曹操出行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1860.308681,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_004_曹操出行"
+    },
+    {
+      "task_id": "3527a111-40aa-4a1e-b475-f43047d55b8e",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "10034508",
+        "company_name": "小马智行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1921.30281,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_005_小马智行"
+    },
+    {
+      "task_id": "c6bff9c1-4834-431d-a916-061f1945e19b",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "9372067",
+        "company_name": "文远知行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2581.406545,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_006_文远知行"
+    },
+    {
+      "task_id": "1363d02b-d861-457d-97a1-f4c5f4872b8d",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "1158390",
+        "company_name": "百度萝卜快跑"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1720.964467,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_007_百度萝卜快跑"
+    },
+    {
+      "task_id": "44ff08de-1195-4352-bcc9-a6164322b218",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "",
+        "company_name": "Waymo"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1752.5267,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_008_Waymo"
+    },
+    {
+      "task_id": "42ca63d1-43cd-468f-bd5b-75e361d30b15",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "9958481",
+        "company_name": "Cruise"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2238.561647,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_009_Cruise"
+    },
+    {
+      "task_id": "02c73182-2c15-411e-bc9e-9e67be1c120b",
+      "subject": {
+        "business_type": "Robotaxi",
+        "comcode": "1776435",
+        "company_name": "Tesla"
+      },
+      "success": false,
+      "status": "timeout",
+      "error": "任务超时（已等待 3600 秒，超时限制 3600 秒）",
+      "duration": 3600.110395,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_010_Tesla"
+    },
+    {
+      "task_id": "488faac2-cfea-4e54-8c06-9108bfcf1ee7",
+      "subject": {
+        "business_type": "Robovan",
+        "comcode": "7924775",
+        "company_name": "白犀牛"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 3567.672911,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_011_白犀牛"
+    },
+    {
+      "task_id": "d8ffb4c6-0316-40fa-ba57-3307dded8bee",
+      "subject": {
+        "business_type": "Robovan",
+        "comcode": "6604405",
+        "company_name": "新石器"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1837.712299,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_012_新石器"
+    },
+    {
+      "task_id": "63b8a350-1058-4622-a279-d5f5e8a12900",
+      "subject": {
+        "business_type": "Robovan",
+        "comcode": "86376387",
+        "company_name": "九识智能"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2554.367366,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_013_九识智能"
+    },
+    {
+      "task_id": "af457183-e2eb-4b47-9e06-57d1a92942b7",
+      "subject": {
+        "business_type": "Robovan",
+        "comcode": "",
+        "company_name": "Nuro"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 3338.930248,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_014_Nuro"
+    },
+    {
+      "task_id": "efc9afd1-2db5-4801-9bf2-fab41b185670",
+      "subject": {
+        "business_type": "Robovan",
+        "comcode": "",
+        "company_name": "Gatik"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2067.064145,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_015_Gatik"
+    },
+    {
+      "task_id": "d22fa3e9-2830-4ad1-a394-5cd5ce418dd2",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "10034508",
+        "company_name": "小马智行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2508.386381,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_016_小马智行"
+    },
+    {
+      "task_id": "8ddace61-4390-44e9-b9bc-8513a0435003",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "7959511",
+        "company_name": "嬴彻科技"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1936.133677,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_017_嬴彻科技"
+    },
+    {
+      "task_id": "0d880a6b-31f1-4c21-b058-c1f7ebbb8ed8",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "",
+        "company_name": "Deepway"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2292.407742,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_018_Deepway"
+    },
+    {
+      "task_id": "e8c41f85-ff79-45da-9d9e-35178609ea51",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "10015680",
+        "company_name": "Aurora"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2083.26951,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_019_Aurora"
+    },
+    {
+      "task_id": "638309be-41d0-40f2-a3af-7c81f54f687b",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "10183512",
+        "company_name": "Kodiak Robotics"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2462.672679,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_020_Kodiak Robotics"
+    },
+    {
+      "task_id": "a9a82a44-08f8-47aa-adde-2e29ee67e992",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "",
+        "company_name": "Plus.ai"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1981.412435,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_021_Plus.ai"
+    },
+    {
+      "task_id": "7f0a49be-e64c-467a-9ca3-5d4a95777c69",
+      "subject": {
+        "business_type": "Robotruck",
+        "comcode": "",
+        "company_name": "Torc Robotics"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1525.090953,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_022_Torc Robotics"
+    },
+    {
+      "task_id": "cb5ad774-0519-40ef-8a79-deb398e1b459",
+      "subject": {
+        "business_type": "Robobus",
+        "comcode": "9372067",
+        "company_name": "文远知行"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2605.053398,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_023_文远知行"
+    },
+    {
+      "task_id": "1d5f8c9f-4063-4061-ba6a-1d0ec1780fa8",
+      "subject": {
+        "business_type": "Robobus",
+        "comcode": "7941816",
+        "company_name": "轻舟智航"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 1790.440078,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_024_轻舟智航"
+    },
+    {
+      "task_id": "4d3a083f-e4f5-4b22-a05a-315204312025",
+      "subject": {
+        "business_type": "Robobus",
+        "comcode": "",
+        "company_name": "May Mobility"
+      },
+      "success": true,
+      "status": "completed",
+      "error": "",
+      "duration": 2057.724538,
+      "output_dir": "D:\\git-project\\open_program\\open_program\\deep-research-custom-web-demo-opt-fix\\deep-research-custom-web-demo-opt-fix\\batch_api_examples\\autonomous_driving_metrics\\results\\20260302_195851\\task_025_May Mobility"
+    }
+  ]
+}
