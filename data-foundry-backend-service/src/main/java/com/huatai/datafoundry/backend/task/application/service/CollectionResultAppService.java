@@ -27,8 +27,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class CollectionResultAppService {
@@ -154,8 +156,181 @@ public class CollectionResultAppService {
     return collectionResultRepository.listResultsByTask(taskId);
   }
 
+  public List<CollectionResult> listResultsByTaskGroup(String taskGroupId) {
+    return collectionResultRepository.listResultsByTaskGroup(taskGroupId);
+  }
+
+  public List<CollectionResult> listResultsByWideTable(String wideTableId) {
+    return collectionResultRepository.listResultsByWideTable(wideTableId);
+  }
+
   public List<CollectionResultRow> listRowsByTask(String taskId) {
     return collectionResultRepository.listRowsByTask(taskId);
+  }
+
+  @Transactional
+  public CollectionResult normalizeFinalReport(String taskId, String resultId) {
+    if (taskId == null || taskId.trim().isEmpty() || resultId == null || resultId.trim().isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Task id and result id are required");
+    }
+    String normalizedTaskId = taskId.trim();
+    String normalizedResultId = resultId.trim();
+    CollectionResult result =
+        collectionResultRepository.getResultByTaskAndId(normalizedTaskId, normalizedResultId);
+    if (result == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Collection result not found");
+    }
+
+    List<Map<String, String>> rows = parseFirstMarkdownTable(result.getFinalReport());
+    String normalizedRowsJson = rows == null || rows.isEmpty() ? null : writeJson(rows);
+    collectionResultRepository.updateNormalizedRowsJson(
+        normalizedTaskId, normalizedResultId, normalizedRowsJson);
+    result.setNormalizedRowsJson(normalizedRowsJson);
+    return result;
+  }
+
+  @Transactional
+  public List<CollectionResult> normalizeWideTableFinalReports(String wideTableId) {
+    if (wideTableId == null || wideTableId.trim().isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Wide table id is required");
+    }
+    return normalizeResultsWithFirstHeader(collectionResultRepository.listResultsByWideTable(wideTableId.trim()));
+  }
+
+  @Transactional
+  public List<CollectionResult> normalizeTaskGroupFinalReports(String taskGroupId) {
+    if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Task group id is required");
+    }
+    return normalizeResultsWithFirstHeader(collectionResultRepository.listResultsByTaskGroup(taskGroupId.trim()));
+  }
+
+  private List<CollectionResult> normalizeResultsWithFirstHeader(List<CollectionResult> results) {
+    List<String> standardHeaders = Collections.emptyList();
+    for (CollectionResult result : results) {
+      standardHeaders = parseFirstMarkdownTableHeaders(result != null ? result.getFinalReport() : null);
+      if (!standardHeaders.isEmpty()) {
+        break;
+      }
+    }
+    for (CollectionResult result : results) {
+      if (result == null || result.getId() == null || result.getFetchTaskId() == null) {
+        continue;
+      }
+      List<Map<String, String>> rows = standardHeaders.isEmpty()
+          ? Collections.<Map<String, String>>emptyList()
+          : parseFirstMarkdownTable(result.getFinalReport(), standardHeaders);
+      String normalizedRowsJson = rows == null || rows.isEmpty() ? null : writeJson(rows);
+      collectionResultRepository.updateNormalizedRowsJson(
+          result.getFetchTaskId(), result.getId(), normalizedRowsJson);
+      result.setNormalizedRowsJson(normalizedRowsJson);
+    }
+    return results;
+  }
+
+  List<Map<String, String>> parseFirstMarkdownTable(String markdown) {
+    return parseFirstMarkdownTable(markdown, null);
+  }
+
+  private List<Map<String, String>> parseFirstMarkdownTable(String markdown, List<String> forcedHeaders) {
+    if (markdown == null || markdown.trim().isEmpty()) {
+      return Collections.emptyList();
+    }
+    String[] lines = markdown.split("\\r?\\n");
+    for (int i = 0; i < lines.length - 1; i++) {
+      String headerLine = lines[i];
+      String separatorLine = lines[i + 1];
+      if (!looksLikeMarkdownRow(headerLine) || !looksLikeMarkdownRow(separatorLine)) {
+        continue;
+      }
+      List<String> headers = splitMarkdownRow(headerLine);
+      if (headers.isEmpty() || !isMarkdownSeparator(separatorLine, headers.size())) {
+        continue;
+      }
+      List<String> outputHeaders = forcedHeaders != null && !forcedHeaders.isEmpty() ? forcedHeaders : headers;
+      if (outputHeaders.size() != headers.size()) {
+        return Collections.emptyList();
+      }
+      List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+      for (int j = i + 2; j < lines.length; j++) {
+        String line = lines[j];
+        if (!looksLikeMarkdownRow(line)) {
+          break;
+        }
+        if (isMarkdownSeparator(line, headers.size())) {
+          continue;
+        }
+        List<String> cells = splitMarkdownRow(line);
+        if (cells.size() > headers.size()) {
+          return Collections.emptyList();
+        }
+        while (cells.size() < headers.size()) {
+          cells.add("");
+        }
+        Map<String, String> row = new LinkedHashMap<String, String>();
+        for (int k = 0; k < outputHeaders.size(); k++) {
+          row.put(outputHeaders.get(k), cells.get(k));
+        }
+        rows.add(row);
+      }
+      return rows;
+    }
+    return Collections.emptyList();
+  }
+
+  private List<String> parseFirstMarkdownTableHeaders(String markdown) {
+    if (markdown == null || markdown.trim().isEmpty()) {
+      return Collections.emptyList();
+    }
+    String[] lines = markdown.split("\\r?\\n");
+    for (int i = 0; i < lines.length - 1; i++) {
+      String headerLine = lines[i];
+      String separatorLine = lines[i + 1];
+      if (!looksLikeMarkdownRow(headerLine) || !looksLikeMarkdownRow(separatorLine)) {
+        continue;
+      }
+      List<String> headers = splitMarkdownRow(headerLine);
+      if (!headers.isEmpty() && isMarkdownSeparator(separatorLine, headers.size())) {
+        return headers;
+      }
+    }
+    return Collections.emptyList();
+  }
+
+  private boolean looksLikeMarkdownRow(String line) {
+    return line != null && line.indexOf('|') >= 0;
+  }
+
+  private List<String> splitMarkdownRow(String line) {
+    if (line == null) {
+      return Collections.emptyList();
+    }
+    String value = line.trim();
+    if (value.startsWith("|")) {
+      value = value.substring(1);
+    }
+    if (value.endsWith("|")) {
+      value = value.substring(0, value.length() - 1);
+    }
+    String[] parts = value.split("\\|", -1);
+    List<String> out = new ArrayList<String>();
+    for (String part : parts) {
+      out.add(part == null ? "" : part.trim());
+    }
+    return out;
+  }
+
+  private boolean isMarkdownSeparator(String line, int expectedColumns) {
+    List<String> cells = splitMarkdownRow(line);
+    if (cells.size() != expectedColumns || cells.isEmpty()) {
+      return false;
+    }
+    for (String cell : cells) {
+      if (cell == null || !cell.trim().matches(":?-{3,}:?")) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private RowBuildResult buildResultRow(

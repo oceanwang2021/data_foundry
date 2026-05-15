@@ -16,6 +16,9 @@ import type {
   WideTableRecord,
   TaskGroup,
   FetchTask,
+  CollectionResult,
+  CollectionResultRow,
+  FetchTaskResults,
   CollectionBatch,
   IndicatorGroup,
   ScheduleRule,
@@ -51,6 +54,32 @@ import {
 
 function fallbackIso(value?: string | null): string {
   return value && value.trim() !== "" ? value : new Date().toISOString();
+}
+
+function safeParseObject(value: unknown): Record<string, string> | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, item == null ? "" : String(item)]),
+    );
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object"
+      ? Object.fromEntries(Object.entries(parsed).map(([key, item]) => [key, item == null ? "" : String(item)]))
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readRaw(raw: any, snakeKey: string, camelKey: string = snakeKey): any {
+  return raw?.[snakeKey] ?? raw?.[camelKey];
 }
 
 const RESERVED_SYSTEM_COLUMN_KEYS = new Set(["row_status", "last_task_id", "updated_at"]);
@@ -637,11 +666,66 @@ function mapFetchTask(raw: any): FetchTask {
     rowBindingKey: raw.row_binding_key,
     indicatorGroupId: raw.indicator_group_id,
     indicatorGroupName: raw.name ?? raw.indicator_group_id,
+    collectionTaskId: raw.collection_task_id ?? raw.collectionTaskId ?? undefined,
     status: mapFetchTaskStatus(raw.status),
     confidence: raw.confidence,
     executionRecords: (raw.execution_records ?? []).map(mapExecutionRecord),
+    collectionRows: (raw.collection_rows ?? raw.collectionRows ?? raw.collection_result_rows ?? []).map(mapCollectionResultRow),
     createdAt: raw.created_at ?? new Date().toISOString(),
     updatedAt: raw.updated_at ?? new Date().toISOString(),
+  };
+}
+
+function mapCollectionResultRow(raw: any): CollectionResultRow {
+  return {
+    id: readRaw(raw, "id"),
+    collectionResultId: readRaw(raw, "collection_result_id", "collectionResultId"),
+    fetchTaskId: readRaw(raw, "fetch_task_id", "fetchTaskId"),
+    scheduleJobId: readRaw(raw, "schedule_job_id", "scheduleJobId"),
+    wideTableId: readRaw(raw, "wide_table_id", "wideTableId"),
+    rowId: readRaw(raw, "row_id", "rowId"),
+    indicatorKey: readRaw(raw, "indicator_key", "indicatorKey"),
+    indicatorName: readRaw(raw, "indicator_name", "indicatorName"),
+    businessDate: readRaw(raw, "business_date", "businessDate"),
+    dimensionValues: safeParseObject(readRaw(raw, "dimension_values_json", "dimensionValuesJson")),
+    rawValue: readRaw(raw, "raw_value", "rawValue") ?? undefined,
+    cleanedValue: readRaw(raw, "cleaned_value", "cleanedValue") ?? undefined,
+    unit: readRaw(raw, "unit") ?? undefined,
+    publishedAt: readRaw(raw, "published_at", "publishedAt") ?? undefined,
+    sourceSite: readRaw(raw, "source_site", "sourceSite") ?? undefined,
+    sourceUrl: readRaw(raw, "source_url", "sourceUrl") ?? undefined,
+    quoteText: readRaw(raw, "quote_text", "quoteText") ?? undefined,
+    maxValue: readRaw(raw, "max_value", "maxValue") ?? undefined,
+    minValue: readRaw(raw, "min_value", "minValue") ?? undefined,
+    confidence: readRaw(raw, "confidence") != null ? Number(readRaw(raw, "confidence")) : undefined,
+    status: readRaw(raw, "status") ?? undefined,
+    warningMsg: readRaw(raw, "warning_msg", "warningMsg") ?? undefined,
+    reasoning: readRaw(raw, "reasoning") ?? undefined,
+    whyNotFound: readRaw(raw, "why_not_found", "whyNotFound") ?? undefined,
+    createdAt: readRaw(raw, "created_at", "createdAt") ?? undefined,
+    updatedAt: readRaw(raw, "updated_at", "updatedAt") ?? undefined,
+  };
+}
+
+function mapCollectionResult(raw: any): CollectionResult {
+  return {
+    id: readRaw(raw, "id"),
+    fetchTaskId: readRaw(raw, "fetch_task_id", "fetchTaskId") ?? undefined,
+    scheduleJobId: readRaw(raw, "schedule_job_id", "scheduleJobId") ?? undefined,
+    externalTaskId: readRaw(raw, "external_task_id", "externalTaskId") ?? undefined,
+    taskGroupId: readRaw(raw, "task_group_id", "taskGroupId") ?? undefined,
+    batchId: readRaw(raw, "batch_id", "batchId") ?? undefined,
+    wideTableId: readRaw(raw, "wide_table_id", "wideTableId") ?? undefined,
+    rowId: readRaw(raw, "row_id", "rowId") ?? undefined,
+    rawResultJson: readRaw(raw, "raw_result_json", "rawResultJson") ?? undefined,
+    finalReport: readRaw(raw, "final_report", "finalReport") ?? undefined,
+    normalizedRowsJson: readRaw(raw, "normalized_rows_json", "normalizedRowsJson") ?? null,
+    status: readRaw(raw, "status") ?? undefined,
+    errorMsg: readRaw(raw, "error_msg", "errorMsg") ?? undefined,
+    durationMs: readRaw(raw, "duration_ms", "durationMs") ?? undefined,
+    collectedAt: readRaw(raw, "collected_at", "collectedAt") ?? undefined,
+    createdAt: readRaw(raw, "created_at", "createdAt") ?? undefined,
+    updatedAt: readRaw(raw, "updated_at", "updatedAt") ?? undefined,
   };
 }
 
@@ -1711,6 +1795,57 @@ export async function fetchFetchTasks(
   );
   // 后端返回 TaskSummary[]，task 在 .task 字段
   return raw.map((item) => mapFetchTask(item.task ?? item));
+}
+
+export async function fetchTaskResults(taskId: string): Promise<FetchTaskResults> {
+  const raw = await apiGet<any>(`/api/tasks/${encodeURIComponent(taskId)}/results`);
+  return {
+    collectionResults: (raw.collection_results ?? raw.collectionResults ?? []).map(mapCollectionResult),
+    collectionResultRows: (raw.collection_result_rows ?? raw.collectionResultRows ?? []).map(mapCollectionResultRow),
+  };
+}
+
+export async function fetchTaskGroupResults(taskGroupId: string): Promise<FetchTaskResults> {
+  const raw = await apiGet<any>(`/api/tasks/task-groups/${encodeURIComponent(taskGroupId)}/results`);
+  return {
+    collectionResults: (raw.collection_results ?? raw.collectionResults ?? []).map(mapCollectionResult),
+    collectionResultRows: (raw.collection_result_rows ?? raw.collectionResultRows ?? []).map(mapCollectionResultRow),
+  };
+}
+
+export async function fetchWideTableResults(wideTableId: string): Promise<FetchTaskResults> {
+  const raw = await apiGet<any>(`/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/results`);
+  return {
+    collectionResults: (raw.collection_results ?? raw.collectionResults ?? []).map(mapCollectionResult),
+    collectionResultRows: (raw.collection_result_rows ?? raw.collectionResultRows ?? []).map(mapCollectionResultRow),
+  };
+}
+
+export async function normalizeFinalReport(taskId: string, resultId: string): Promise<CollectionResult> {
+  const raw = await apiPost<any>(
+    `/api/tasks/${encodeURIComponent(taskId)}/results/${encodeURIComponent(resultId)}/actions/normalize-final-report`,
+  );
+  return mapCollectionResult(raw);
+}
+
+export async function normalizeWideTableFinalReports(wideTableId: string): Promise<FetchTaskResults> {
+  const raw = await apiPost<any>(
+    `/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/results/actions/normalize-final-reports`,
+  );
+  return {
+    collectionResults: (raw.collection_results ?? raw.collectionResults ?? []).map(mapCollectionResult),
+    collectionResultRows: (raw.collection_result_rows ?? raw.collectionResultRows ?? []).map(mapCollectionResultRow),
+  };
+}
+
+export async function normalizeTaskGroupFinalReports(taskGroupId: string): Promise<FetchTaskResults> {
+  const raw = await apiPost<any>(
+    `/api/tasks/task-groups/${encodeURIComponent(taskGroupId)}/results/actions/normalize-final-reports`,
+  );
+  return {
+    collectionResults: (raw.collection_results ?? raw.collectionResults ?? []).map(mapCollectionResult),
+    collectionResultRows: (raw.collection_result_rows ?? raw.collectionResultRows ?? []).map(mapCollectionResultRow),
+  };
 }
 
 export async function executeTask(taskId: string): Promise<void> {

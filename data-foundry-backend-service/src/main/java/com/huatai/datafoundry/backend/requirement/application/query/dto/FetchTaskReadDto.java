@@ -2,6 +2,8 @@ package com.huatai.datafoundry.backend.requirement.application.query.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class FetchTaskReadDto {
@@ -19,6 +21,7 @@ public class FetchTaskReadDto {
   private String executionMode;
   private String indicatorKeysJson;
   private String dimensionValuesJson;
+  private String collectionTaskId;
   private String businessDate;
   private String status;
   private Boolean canRerun;
@@ -27,6 +30,8 @@ public class FetchTaskReadDto {
   private BigDecimal confidence;
   private Integer planVersion;
   private String rowBindingKey;
+  private List<CollectionResultRowReadDto> collectionRows =
+      new ArrayList<CollectionResultRowReadDto>();
   private Object createdAt;
   private Object updatedAt;
 
@@ -142,6 +147,14 @@ public class FetchTaskReadDto {
     this.dimensionValuesJson = dimensionValuesJson;
   }
 
+  public String getCollectionTaskId() {
+    return collectionTaskId;
+  }
+
+  public void setCollectionTaskId(String collectionTaskId) {
+    this.collectionTaskId = collectionTaskId;
+  }
+
   public String getBusinessDate() {
     return businessDate;
   }
@@ -204,6 +217,14 @@ public class FetchTaskReadDto {
 
   public void setRowBindingKey(String rowBindingKey) {
     this.rowBindingKey = rowBindingKey;
+  }
+
+  public List<CollectionResultRowReadDto> getCollectionRows() {
+    return collectionRows;
+  }
+
+  public void setCollectionRows(List<CollectionResultRowReadDto> collectionRows) {
+    this.collectionRows = collectionRows;
   }
 
   public Object getCreatedAt() {

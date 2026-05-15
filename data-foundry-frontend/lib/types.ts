@@ -279,11 +279,67 @@ export type FetchTask = {
   rowBindingKey?: string;
   indicatorGroupId: string;
   indicatorGroupName: string;
+  collectionTaskId?: string;
   status: FetchTaskStatus;
   confidence?: number;
   executionRecords: ExecutionRecord[];
+  collectionRows?: CollectionResultRow[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type CollectionResultRow = {
+  id: string;
+  collectionResultId?: string;
+  fetchTaskId?: string;
+  scheduleJobId?: string;
+  wideTableId?: string;
+  rowId?: number;
+  indicatorKey: string;
+  indicatorName?: string;
+  businessDate?: string;
+  dimensionValues?: Record<string, string>;
+  rawValue?: string;
+  cleanedValue?: string;
+  unit?: string;
+  publishedAt?: string;
+  sourceSite?: string;
+  sourceUrl?: string;
+  quoteText?: string;
+  maxValue?: string;
+  minValue?: string;
+  confidence?: number;
+  status?: string;
+  warningMsg?: string;
+  reasoning?: string;
+  whyNotFound?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type CollectionResult = {
+  id: string;
+  fetchTaskId?: string;
+  scheduleJobId?: string;
+  externalTaskId?: string;
+  taskGroupId?: string;
+  batchId?: string;
+  wideTableId?: string;
+  rowId?: number;
+  rawResultJson?: string;
+  finalReport?: string;
+  normalizedRowsJson?: string | Array<Record<string, unknown>> | null;
+  status?: string;
+  errorMsg?: string;
+  durationMs?: number;
+  collectedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type FetchTaskResults = {
+  collectionResults: CollectionResult[];
+  collectionResultRows: CollectionResultRow[];
 };
 
 export type CollectionBatch = {

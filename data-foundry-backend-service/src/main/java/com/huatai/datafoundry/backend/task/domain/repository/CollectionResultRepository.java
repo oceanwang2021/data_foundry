@@ -11,7 +11,15 @@ public interface CollectionResultRepository {
 
   int insertRows(List<CollectionResultRow> rows);
 
+  CollectionResult getResultByTaskAndId(String fetchTaskId, String resultId);
+
+  int updateNormalizedRowsJson(String fetchTaskId, String resultId, String normalizedRowsJson);
+
   List<CollectionResult> listResultsByTask(String fetchTaskId);
+
+  List<CollectionResult> listResultsByTaskGroup(String taskGroupId);
+
+  List<CollectionResult> listResultsByWideTable(String wideTableId);
 
   List<CollectionResultRow> listRowsByTask(String fetchTaskId);
 }

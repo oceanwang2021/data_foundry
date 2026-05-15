@@ -2,7 +2,10 @@ package com.huatai.datafoundry.backend.requirement.application.query.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.CollectionResultReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.CollectionResultRowReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskResultsReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchItemReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchPageReadDto;
@@ -16,6 +19,9 @@ import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.myb
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper.WideTableScopeImportMapper;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.RequirementSearchRowRecord;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.WideTableScopeImportRecord;
+import com.huatai.datafoundry.backend.task.application.service.CollectionResultAppService;
+import com.huatai.datafoundry.backend.task.domain.model.CollectionResult;
+import com.huatai.datafoundry.backend.task.domain.model.CollectionResultRow;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
@@ -35,6 +41,7 @@ public class RequirementQueryService {
   private final WideTableScopeImportMapper wideTableScopeImportMapper;
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
+  private final CollectionResultAppService collectionResultAppService;
   private final ObjectMapper objectMapper;
 
   public RequirementQueryService(
@@ -43,12 +50,14 @@ public class RequirementQueryService {
       WideTableScopeImportMapper wideTableScopeImportMapper,
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
+      CollectionResultAppService collectionResultAppService,
       ObjectMapper objectMapper) {
     this.requirementRepository = requirementRepository;
     this.requirementSearchMapper = requirementSearchMapper;
     this.wideTableScopeImportMapper = wideTableScopeImportMapper;
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
+    this.collectionResultAppService = collectionResultAppService;
     this.objectMapper = objectMapper;
   }
 
@@ -168,6 +177,7 @@ public class RequirementQueryService {
       dto.setExecutionMode(record.getExecutionMode());
       dto.setIndicatorKeysJson(record.getIndicatorKeysJson());
       dto.setDimensionValuesJson(record.getDimensionValuesJson());
+      dto.setCollectionTaskId(record.getCollectionTaskId());
       dto.setBusinessDate(record.getBusinessDate());
       dto.setStatus(record.getStatus());
       dto.setCanRerun(record.getCanRerun());
@@ -176,9 +186,92 @@ public class RequirementQueryService {
       dto.setConfidence(record.getConfidence());
       dto.setPlanVersion(record.getPlanVersion());
       dto.setRowBindingKey(record.getRowBindingKey());
+      dto.setCollectionRows(mapCollectionResultRows(collectionResultAppService.listRowsByTask(record.getId())));
       dto.setCreatedAt(record.getCreatedAt());
       dto.setUpdatedAt(record.getUpdatedAt());
       out.add(dto);
+    }
+    return out;
+  }
+
+  public FetchTaskResultsReadDto getTaskResults(String taskId) {
+    FetchTaskResultsReadDto out = new FetchTaskResultsReadDto();
+    if (taskId == null || taskId.trim().isEmpty()) {
+      return out;
+    }
+    out.setCollectionResults(mapCollectionResults(collectionResultAppService.listResultsByTask(taskId.trim())));
+    out.setCollectionResultRows(mapCollectionResultRows(collectionResultAppService.listRowsByTask(taskId.trim())));
+    return out;
+  }
+
+  public FetchTaskResultsReadDto getTaskGroupResults(String taskGroupId) {
+    FetchTaskResultsReadDto out = new FetchTaskResultsReadDto();
+    if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
+      return out;
+    }
+    out.setCollectionResults(mapCollectionResults(collectionResultAppService.listResultsByTaskGroup(taskGroupId.trim())));
+    return out;
+  }
+
+  public FetchTaskResultsReadDto getWideTableResults(String wideTableId) {
+    FetchTaskResultsReadDto out = new FetchTaskResultsReadDto();
+    if (wideTableId == null || wideTableId.trim().isEmpty()) {
+      return out;
+    }
+    out.setCollectionResults(mapCollectionResults(collectionResultAppService.listResultsByWideTable(wideTableId.trim())));
+    return out;
+  }
+
+  public CollectionResultReadDto normalizeTaskResultFinalReport(String taskId, String resultId) {
+    return mapCollectionResult(collectionResultAppService.normalizeFinalReport(taskId, resultId));
+  }
+
+  public FetchTaskResultsReadDto normalizeWideTableFinalReports(String wideTableId) {
+    FetchTaskResultsReadDto out = new FetchTaskResultsReadDto();
+    if (wideTableId == null || wideTableId.trim().isEmpty()) {
+      return out;
+    }
+    out.setCollectionResults(
+        mapCollectionResults(collectionResultAppService.normalizeWideTableFinalReports(wideTableId.trim())));
+    return out;
+  }
+
+  public FetchTaskResultsReadDto normalizeTaskGroupFinalReports(String taskGroupId) {
+    FetchTaskResultsReadDto out = new FetchTaskResultsReadDto();
+    if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
+      return out;
+    }
+    out.setCollectionResults(
+        mapCollectionResults(collectionResultAppService.normalizeTaskGroupFinalReports(taskGroupId.trim())));
+    return out;
+  }
+
+  public List<Map<String, Object>> listTaskRuns(String taskId) {
+    List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+    if (taskId == null || taskId.trim().isEmpty()) {
+      return out;
+    }
+    List<CollectionResult> results = collectionResultAppService.listResultsByTask(taskId.trim());
+    if (results == null) {
+      return out;
+    }
+    int attempt = 1;
+    for (CollectionResult result : results) {
+      if (result == null) continue;
+      Map<String, Object> run = new HashMap<String, Object>();
+      run.put("id", result.getId());
+      run.put("fetch_task_id", result.getFetchTaskId());
+      run.put("task_id", result.getFetchTaskId());
+      run.put("attempt", attempt++);
+      run.put("status", mapCollectionResultStatusToRun(result.getStatus()));
+      run.put("trigger_type", "trial");
+      run.put("task_group_run_id", result.getScheduleJobId());
+      run.put("schedule_job_id", result.getScheduleJobId());
+      run.put("external_task_id", result.getExternalTaskId());
+      run.put("error_message", result.getErrorMsg());
+      run.put("started_at", result.getCreatedAt() != null ? result.getCreatedAt() : result.getCollectedAt());
+      run.put("ended_at", result.getCollectedAt() != null ? result.getCollectedAt() : result.getUpdatedAt());
+      out.add(run);
     }
     return out;
   }
@@ -334,6 +427,96 @@ public class RequirementQueryService {
     dto.setCreatedAt(record.getCreatedAt());
     dto.setUpdatedAt(record.getUpdatedAt());
     return dto;
+  }
+
+  private List<CollectionResultReadDto> mapCollectionResults(List<CollectionResult> records) {
+    List<CollectionResultReadDto> out = new ArrayList<CollectionResultReadDto>();
+    if (records == null) return out;
+    for (CollectionResult record : records) {
+      if (record == null) continue;
+      out.add(mapCollectionResult(record));
+    }
+    return out;
+  }
+
+  private CollectionResultReadDto mapCollectionResult(CollectionResult record) {
+    if (record == null) {
+      return null;
+    }
+    CollectionResultReadDto dto = new CollectionResultReadDto();
+    dto.setId(record.getId());
+    dto.setFetchTaskId(record.getFetchTaskId());
+    dto.setScheduleJobId(record.getScheduleJobId());
+    dto.setExternalTaskId(record.getExternalTaskId());
+    dto.setTaskGroupId(record.getTaskGroupId());
+    dto.setBatchId(record.getBatchId());
+    dto.setWideTableId(record.getWideTableId());
+    dto.setRowId(record.getRowId());
+    dto.setRawResultJson(record.getRawResultJson());
+    dto.setFinalReport(record.getFinalReport());
+    dto.setNormalizedRowsJson(record.getNormalizedRowsJson());
+    dto.setStatus(record.getStatus());
+    dto.setErrorMsg(record.getErrorMsg());
+    dto.setDurationMs(record.getDurationMs());
+    dto.setCollectedAt(record.getCollectedAt());
+    dto.setCreatedAt(record.getCreatedAt());
+    dto.setUpdatedAt(record.getUpdatedAt());
+    return dto;
+  }
+
+  private String mapCollectionResultStatusToRun(String status) {
+    if (status == null) {
+      return "running";
+    }
+    String normalized = status.trim().toLowerCase();
+    if ("failed".equals(normalized) || "parse_failed".equals(normalized)) {
+      return "failed";
+    }
+    if ("success".equals(normalized)
+        || "completed".equals(normalized)
+        || "partial".equals(normalized)
+        || "conflict".equals(normalized)
+        || "not_found".equals(normalized)) {
+      return "completed";
+    }
+    return normalized;
+  }
+
+  private List<CollectionResultRowReadDto> mapCollectionResultRows(List<CollectionResultRow> records) {
+    List<CollectionResultRowReadDto> out = new ArrayList<CollectionResultRowReadDto>();
+    if (records == null) return out;
+    for (CollectionResultRow record : records) {
+      if (record == null) continue;
+      CollectionResultRowReadDto dto = new CollectionResultRowReadDto();
+      dto.setId(record.getId());
+      dto.setCollectionResultId(record.getCollectionResultId());
+      dto.setFetchTaskId(record.getFetchTaskId());
+      dto.setScheduleJobId(record.getScheduleJobId());
+      dto.setWideTableId(record.getWideTableId());
+      dto.setRowId(record.getRowId());
+      dto.setIndicatorKey(record.getIndicatorKey());
+      dto.setIndicatorName(record.getIndicatorName());
+      dto.setBusinessDate(record.getBusinessDate());
+      dto.setDimensionValuesJson(record.getDimensionValuesJson());
+      dto.setRawValue(record.getRawValue());
+      dto.setCleanedValue(record.getCleanedValue());
+      dto.setUnit(record.getUnit());
+      dto.setPublishedAt(record.getPublishedAt());
+      dto.setSourceSite(record.getSourceSite());
+      dto.setSourceUrl(record.getSourceUrl());
+      dto.setQuoteText(record.getQuoteText());
+      dto.setMaxValue(record.getMaxValue());
+      dto.setMinValue(record.getMinValue());
+      dto.setConfidence(record.getConfidence());
+      dto.setStatus(record.getStatus());
+      dto.setWarningMsg(record.getWarningMsg());
+      dto.setReasoning(record.getReasoning());
+      dto.setWhyNotFound(record.getWhyNotFound());
+      dto.setCreatedAt(record.getCreatedAt());
+      dto.setUpdatedAt(record.getUpdatedAt());
+      out.add(dto);
+    }
+    return out;
   }
 
   private Map<String, Object> parseJsonObject(String raw) {

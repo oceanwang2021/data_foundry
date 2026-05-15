@@ -43,7 +43,7 @@
 
 ### backend-service
 
-- 新增 Flyway 迁移 `V007__add_collection_results.sql`：
+- 新增 Flyway 迁移 `V009__add_collection_results.sql`：
   - 新增 `collection_results`，用于保存 FetchTask 级别的 Agent 原始结果档案。
   - 新增 `collection_result_rows`，用于保存单指标粒度的清洗后窄表结果。
 - 新增领域模型：
@@ -104,3 +104,4 @@
 - 示例目录 `db/mysql/测试数据/算法算力相关接口数据/20260313_145542` 仅作为开发 fixture，不作为运行时存储位置。
 - 本次实现的 v1 目标表仍是 `wide_table_rows`，不会创建动态物理业务表。
 - 当前工作树中已有的 `application.yml`、`next-env.d.ts` 和示例数据目录改动被视为既有用户改动，本次没有回滚。
+

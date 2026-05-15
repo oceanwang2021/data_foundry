@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.task.domain.repository;
 
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
+import java.math.BigDecimal;
 import java.util.List;
 
 public interface FetchTaskRepository {
@@ -17,5 +18,7 @@ public interface FetchTaskRepository {
   int updateStatus(String taskId, String status);
 
   int updateStatus(String taskId, String status, String collectionTaskId);
+
+  int updateStatusAndConfidence(String taskId, String status, BigDecimal confidence);
 
 }

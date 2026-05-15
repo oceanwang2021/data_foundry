@@ -4,6 +4,7 @@ import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.mapper.FetchTaskMapper;
 import com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.record.FetchTaskRecord;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Repository;
@@ -58,6 +59,11 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   @Override
   public int updateStatus(String taskId, String status, String collectionTaskId) {
     return fetchTaskMapper.updateStatusAndCollectionTaskId(taskId, status, collectionTaskId);
+  }
+
+  @Override
+  public int updateStatusAndConfidence(String taskId, String status, BigDecimal confidence) {
+    return fetchTaskMapper.updateStatusAndConfidence(taskId, status, confidence);
   }
 
   private static List<FetchTask> toDomainList(List<FetchTaskRecord> records) {

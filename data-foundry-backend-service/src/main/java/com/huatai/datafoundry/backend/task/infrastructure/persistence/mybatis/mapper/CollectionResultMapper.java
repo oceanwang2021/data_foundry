@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface CollectionResultMapper {
@@ -76,10 +77,37 @@ public interface CollectionResultMapper {
   int insertRows(@Param("rows") List<CollectionResultRow> rows);
 
   @Select(
-      "select id, fetch_task_id, schedule_job_id, external_task_id, task_group_id, batch_id, wide_table_id, row_id, "
-          + "raw_result_json, final_report, normalized_rows_json, status, error_msg, duration_ms, collected_at, created_at, updated_at "
-          + "from collection_results where fetch_task_id = #{fetchTaskId} order by created_at desc")
+      "select id, fetch_task_id, schedule_job_id, task_group_id, wide_table_id, row_id, "
+          + "raw_result_json, final_report, normalized_rows_json, status "
+          + "from collection_results where fetch_task_id = #{fetchTaskId} and id = #{resultId} limit 1")
+  CollectionResult getResultByTaskAndId(
+      @Param("fetchTaskId") String fetchTaskId, @Param("resultId") String resultId);
+
+  @Update(
+      "update collection_results set normalized_rows_json = #{normalizedRowsJson} "
+          + "where fetch_task_id = #{fetchTaskId} and id = #{resultId}")
+  int updateNormalizedRowsJson(
+      @Param("fetchTaskId") String fetchTaskId,
+      @Param("resultId") String resultId,
+      @Param("normalizedRowsJson") String normalizedRowsJson);
+
+  @Select(
+      "select id, fetch_task_id, schedule_job_id, task_group_id, wide_table_id, row_id, "
+          + "raw_result_json, final_report, normalized_rows_json, status "
+          + "from collection_results where fetch_task_id = #{fetchTaskId} order by row_id asc, id asc")
   List<CollectionResult> listResultsByTask(@Param("fetchTaskId") String fetchTaskId);
+
+  @Select(
+      "select id, fetch_task_id, schedule_job_id, task_group_id, wide_table_id, row_id, "
+          + "raw_result_json, final_report, normalized_rows_json, status "
+          + "from collection_results where task_group_id = #{taskGroupId} order by row_id asc, id asc")
+  List<CollectionResult> listResultsByTaskGroup(@Param("taskGroupId") String taskGroupId);
+
+  @Select(
+      "select id, fetch_task_id, schedule_job_id, task_group_id, wide_table_id, row_id, "
+          + "raw_result_json, final_report, normalized_rows_json, status "
+          + "from collection_results where wide_table_id = #{wideTableId} order by row_id asc, id asc")
+  List<CollectionResult> listResultsByWideTable(@Param("wideTableId") String wideTableId);
 
   @Select(
       "select id, collection_result_id, fetch_task_id, schedule_job_id, wide_table_id, row_id, "

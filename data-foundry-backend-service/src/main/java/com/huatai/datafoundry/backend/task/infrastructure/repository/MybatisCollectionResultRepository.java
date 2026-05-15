@@ -35,8 +35,30 @@ public class MybatisCollectionResultRepository implements CollectionResultReposi
   }
 
   @Override
+  public CollectionResult getResultByTaskAndId(String fetchTaskId, String resultId) {
+    return collectionResultMapper.getResultByTaskAndId(fetchTaskId, resultId);
+  }
+
+  @Override
+  public int updateNormalizedRowsJson(String fetchTaskId, String resultId, String normalizedRowsJson) {
+    return collectionResultMapper.updateNormalizedRowsJson(fetchTaskId, resultId, normalizedRowsJson);
+  }
+
+  @Override
   public List<CollectionResult> listResultsByTask(String fetchTaskId) {
     List<CollectionResult> rows = collectionResultMapper.listResultsByTask(fetchTaskId);
+    return rows != null ? rows : Collections.<CollectionResult>emptyList();
+  }
+
+  @Override
+  public List<CollectionResult> listResultsByTaskGroup(String taskGroupId) {
+    List<CollectionResult> rows = collectionResultMapper.listResultsByTaskGroup(taskGroupId);
+    return rows != null ? rows : Collections.<CollectionResult>emptyList();
+  }
+
+  @Override
+  public List<CollectionResult> listResultsByWideTable(String wideTableId) {
+    List<CollectionResult> rows = collectionResultMapper.listResultsByWideTable(wideTableId);
     return rows != null ? rows : Collections.<CollectionResult>emptyList();
   }
 
