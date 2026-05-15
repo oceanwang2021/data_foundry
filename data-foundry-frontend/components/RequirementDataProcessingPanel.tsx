@@ -587,9 +587,12 @@ function RawCollectionResultsSection({
     setNormalizingIds(new Set(candidates.map((item) => item.result.id)));
     setActionMessage("");
     try {
-      const payload = activeTaskGroup
+      let payload = activeTaskGroup
         ? await normalizeTaskGroupFinalReports(activeTaskGroup.id)
         : await normalizeWideTableFinalReports(wideTable.id);
+      if (activeTaskGroup && payload.collectionResults.length === 0 && candidates.length > 0) {
+        payload = await normalizeWideTableFinalReports(wideTable.id);
+      }
       setResultsByTask((prev) => {
         const next = { ...prev };
         for (const updated of payload.collectionResults) {

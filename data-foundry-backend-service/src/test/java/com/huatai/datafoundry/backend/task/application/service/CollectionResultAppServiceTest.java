@@ -42,6 +42,23 @@ public class CollectionResultAppServiceTest {
   }
 
   @Test
+  void parsesMarkdownTableWhenHeadingAndHeaderAreOnSameLine() {
+    CollectionResultAppService service = newService(mock(CollectionResultRepository.class));
+    String markdown =
+        "### table: demo | comcode | company | algodesc |\n"
+            + "| ------- | ------- | -------- |\n"
+            + "| 3344180 | car A | algo A |\n";
+
+    List<Map<String, String>> rows = service.parseFirstMarkdownTable(markdown);
+
+    assertEquals(1, rows.size());
+    assertEquals("3344180", rows.get(0).get("comcode"));
+    assertEquals("car A", rows.get(0).get("company"));
+    assertEquals("algo A", rows.get(0).get("algodesc"));
+    assertTrue(!rows.get(0).containsKey("### table: demo"));
+  }
+
+  @Test
   void invalidMarkdownTableReturnsEmptyRows() {
     CollectionResultAppService service = newService(mock(CollectionResultRepository.class));
     String markdown =

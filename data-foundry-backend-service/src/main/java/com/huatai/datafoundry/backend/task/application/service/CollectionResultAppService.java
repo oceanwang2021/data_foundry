@@ -243,7 +243,7 @@ public class CollectionResultAppService {
       if (!looksLikeMarkdownRow(headerLine) || !looksLikeMarkdownRow(separatorLine)) {
         continue;
       }
-      List<String> headers = splitMarkdownRow(headerLine);
+      List<String> headers = normalizeHeaderCells(splitMarkdownRow(headerLine), splitMarkdownRow(separatorLine).size());
       if (headers.isEmpty() || !isMarkdownSeparator(separatorLine, headers.size())) {
         continue;
       }
@@ -289,7 +289,7 @@ public class CollectionResultAppService {
       if (!looksLikeMarkdownRow(headerLine) || !looksLikeMarkdownRow(separatorLine)) {
         continue;
       }
-      List<String> headers = splitMarkdownRow(headerLine);
+      List<String> headers = normalizeHeaderCells(splitMarkdownRow(headerLine), splitMarkdownRow(separatorLine).size());
       if (!headers.isEmpty() && isMarkdownSeparator(separatorLine, headers.size())) {
         return headers;
       }
@@ -299,6 +299,24 @@ public class CollectionResultAppService {
 
   private boolean looksLikeMarkdownRow(String line) {
     return line != null && line.indexOf('|') >= 0;
+  }
+
+  private List<String> normalizeHeaderCells(List<String> headers, int separatorColumns) {
+    if (headers == null || headers.isEmpty()) {
+      return Collections.emptyList();
+    }
+    if (headers.size() == separatorColumns + 1 && isTableMetadataHeader(headers.get(0))) {
+      return new ArrayList<String>(headers.subList(1, headers.size()));
+    }
+    return headers;
+  }
+
+  private boolean isTableMetadataHeader(String value) {
+    if (value == null) {
+      return false;
+    }
+    String trimmed = value.trim();
+    return trimmed.startsWith("#") || trimmed.toLowerCase().startsWith("table:") || trimmed.contains("表名");
   }
 
   private List<String> splitMarkdownRow(String line) {
