@@ -11,8 +11,18 @@ if defined MAVEN_HOME (
   set "PATH=%USERPROFILE%\.trae-cn\tools\maven\latest\bin;%PATH%"
 )
 if defined JAVA_HOME set "PATH=%JAVA_HOME%\bin;%PATH%"
-set "MAVEN_ARGS="
-if exist "%USERPROFILE%\.m2\repository" set "MAVEN_ARGS=-Dmaven.repo.local=%USERPROFILE%\.m2\repository"
-if "%DATAFOUNDRY_MAVEN_OFFLINE%"=="1" set "MAVEN_ARGS=-o %MAVEN_ARGS%"
+set "MAVEN_OFFLINE_ARG="
+set "MAVEN_REPO_LOCAL="
+if exist "%USERPROFILE%\.m2\repository" set "MAVEN_REPO_LOCAL=%USERPROFILE%\.m2\repository"
+if "%DATAFOUNDRY_MAVEN_OFFLINE%"=="1" set "MAVEN_OFFLINE_ARG=-o"
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "TS=%%i"
-call mvn %MAVEN_ARGS% -pl data-foundry-backend-service -am -DskipTests spring-boot:run 1>> logs\backend-!TS!.out.log 2>> logs\backend-!TS!.err.log
+if defined MAVEN_REPO_LOCAL (
+  call mvn %MAVEN_OFFLINE_ARG% "-Dmaven.repo.local=%MAVEN_REPO_LOCAL%" -pl data-foundry-backend-service -am -DskipTests spring-boot:run 1>> logs\backend-!TS!.out.log 2>> logs\backend-!TS!.err.log
+) else (
+  call mvn %MAVEN_OFFLINE_ARG% -pl data-foundry-backend-service -am -DskipTests spring-boot:run 1>> logs\backend-!TS!.out.log 2>> logs\backend-!TS!.err.log
+)
+if errorlevel 1 (
+  echo [backend] Startup failed. Check logs\backend-!TS!.out.log and logs\backend-!TS!.err.log
+  pause
+  exit /b %errorlevel%
+)
