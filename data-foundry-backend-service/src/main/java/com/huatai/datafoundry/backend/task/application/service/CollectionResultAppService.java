@@ -396,6 +396,8 @@ public class CollectionResultAppService {
     row.setScheduleJobId(command.getScheduleJobId());
     row.setWideTableId(task.getWideTableId());
     row.setRowId(task.getRowId());
+    row.setSourceMetricName(firstNonBlank(source.getIndicatorName(), source.getIndicatorKey(), source.getIndicatorColumn()));
+    row.setTargetIndicatorKey(key);
     row.setIndicatorKey(key);
     row.setIndicatorName(firstNonBlank(source.getIndicatorName(), meta != null ? meta.name : null, key));
     row.setBusinessDate(firstNonBlank(source.getBusinessDate(), task.getBusinessDate()));

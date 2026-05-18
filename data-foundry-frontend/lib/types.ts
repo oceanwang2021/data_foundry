@@ -295,6 +295,8 @@ export type CollectionResultRow = {
   scheduleJobId?: string;
   wideTableId?: string;
   rowId?: number;
+  sourceMetricName?: string;
+  targetIndicatorKey?: string;
   indicatorKey: string;
   indicatorName?: string;
   businessDate?: string;
@@ -340,6 +342,29 @@ export type CollectionResult = {
 export type FetchTaskResults = {
   collectionResults: CollectionResult[];
   collectionResultRows: CollectionResultRow[];
+};
+
+export type MetricFieldMapping = {
+  id: string;
+  requirementId: string;
+  wideTableId: string;
+  sourceMetricName: string;
+  targetIndicatorKey?: string;
+  targetIndicatorName?: string;
+  matchType: "manual" | "exact" | "alias" | "ai_suggested";
+  confidence?: number;
+  status: "pending" | "confirmed" | "rejected";
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type MappedResultMaterializationOutcome = {
+  wideTableId: string;
+  collectionResults: number;
+  collectionResultRows: number;
+  wideTableCells: number;
+  skippedMissingRows: number;
+  skippedUnmappedMetrics: number;
 };
 
 export type CollectionBatch = {

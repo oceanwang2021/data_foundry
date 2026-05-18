@@ -18,6 +18,8 @@ import type {
   FetchTask,
   CollectionResult,
   CollectionResultRow,
+  MetricFieldMapping,
+  MappedResultMaterializationOutcome,
   FetchTaskResults,
   CollectionBatch,
   IndicatorGroup,
@@ -684,6 +686,8 @@ function mapCollectionResultRow(raw: any): CollectionResultRow {
     scheduleJobId: readRaw(raw, "schedule_job_id", "scheduleJobId"),
     wideTableId: readRaw(raw, "wide_table_id", "wideTableId"),
     rowId: readRaw(raw, "row_id", "rowId"),
+    sourceMetricName: readRaw(raw, "source_metric_name", "sourceMetricName") ?? undefined,
+    targetIndicatorKey: readRaw(raw, "target_indicator_key", "targetIndicatorKey") ?? undefined,
     indicatorKey: readRaw(raw, "indicator_key", "indicatorKey"),
     indicatorName: readRaw(raw, "indicator_name", "indicatorName"),
     businessDate: readRaw(raw, "business_date", "businessDate"),
@@ -702,6 +706,22 @@ function mapCollectionResultRow(raw: any): CollectionResultRow {
     warningMsg: readRaw(raw, "warning_msg", "warningMsg") ?? undefined,
     reasoning: readRaw(raw, "reasoning") ?? undefined,
     whyNotFound: readRaw(raw, "why_not_found", "whyNotFound") ?? undefined,
+    createdAt: readRaw(raw, "created_at", "createdAt") ?? undefined,
+    updatedAt: readRaw(raw, "updated_at", "updatedAt") ?? undefined,
+  };
+}
+
+function mapMetricFieldMapping(raw: any): MetricFieldMapping {
+  return {
+    id: readRaw(raw, "id"),
+    requirementId: readRaw(raw, "requirement_id", "requirementId"),
+    wideTableId: readRaw(raw, "wide_table_id", "wideTableId"),
+    sourceMetricName: readRaw(raw, "source_metric_name", "sourceMetricName"),
+    targetIndicatorKey: readRaw(raw, "target_indicator_key", "targetIndicatorKey") ?? undefined,
+    targetIndicatorName: readRaw(raw, "target_indicator_name", "targetIndicatorName") ?? undefined,
+    matchType: readRaw(raw, "match_type", "matchType") ?? "manual",
+    confidence: readRaw(raw, "confidence") != null ? Number(readRaw(raw, "confidence")) : undefined,
+    status: readRaw(raw, "status") ?? "pending",
     createdAt: readRaw(raw, "created_at", "createdAt") ?? undefined,
     updatedAt: readRaw(raw, "updated_at", "updatedAt") ?? undefined,
   };
@@ -1845,6 +1865,56 @@ export async function normalizeTaskGroupFinalReports(taskGroupId: string): Promi
   return {
     collectionResults: (raw.collection_results ?? raw.collectionResults ?? []).map(mapCollectionResult),
     collectionResultRows: (raw.collection_result_rows ?? raw.collectionResultRows ?? []).map(mapCollectionResultRow),
+  };
+}
+
+export async function fetchMetricFieldMappings(wideTableId: string): Promise<MetricFieldMapping[]> {
+  const raw = await apiGet<any[]>(
+    `/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/metric-mappings`,
+  );
+  return raw.map(mapMetricFieldMapping);
+}
+
+export async function generateMetricFieldMappings(wideTableId: string): Promise<MetricFieldMapping[]> {
+  const raw = await apiPost<any[]>(
+    `/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/metric-mappings/actions/generate-from-results`,
+  );
+  return raw.map(mapMetricFieldMapping);
+}
+
+export async function updateMetricFieldMapping(
+  wideTableId: string,
+  mappingId: string,
+  data: {
+    targetIndicatorKey?: string | null;
+    targetIndicatorName?: string | null;
+    matchType?: MetricFieldMapping["matchType"];
+    status?: MetricFieldMapping["status"];
+  },
+): Promise<MetricFieldMapping> {
+  const raw = await apiPost<any>(
+    `/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/metric-mappings/${encodeURIComponent(mappingId)}`,
+    {
+      target_indicator_key: data.targetIndicatorKey ?? null,
+      target_indicator_name: data.targetIndicatorName ?? null,
+      match_type: data.matchType ?? "manual",
+      status: data.status ?? (data.targetIndicatorKey ? "confirmed" : "pending"),
+    },
+  );
+  return mapMetricFieldMapping(raw);
+}
+
+export async function materializeMappedResults(wideTableId: string): Promise<MappedResultMaterializationOutcome> {
+  const raw = await apiPost<any>(
+    `/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/results/actions/materialize-mapped-results`,
+  );
+  return {
+    wideTableId: String(raw.wide_table_id ?? raw.wideTableId ?? wideTableId),
+    collectionResults: Number(raw.collection_results ?? raw.collectionResults ?? 0),
+    collectionResultRows: Number(raw.collection_result_rows ?? raw.collectionResultRows ?? 0),
+    wideTableCells: Number(raw.wide_table_cells ?? raw.wideTableCells ?? 0),
+    skippedMissingRows: Number(raw.skipped_missing_rows ?? raw.skippedMissingRows ?? 0),
+    skippedUnmappedMetrics: Number(raw.skipped_unmapped_metrics ?? raw.skippedUnmappedMetrics ?? 0),
   };
 }
 
