@@ -6,6 +6,7 @@ import com.huatai.datafoundry.backend.requirement.application.query.dto.Collecti
 import com.huatai.datafoundry.backend.requirement.application.query.dto.CollectionResultRowReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskResultsReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.MetricFieldMappingReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchItemReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchPageReadDto;
@@ -20,9 +21,13 @@ import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.myb
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.RequirementSearchRowRecord;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.WideTableScopeImportRecord;
 import com.huatai.datafoundry.backend.task.application.service.CollectionResultAppService;
+import com.huatai.datafoundry.backend.task.application.service.MappedResultMaterializationAppService;
+import com.huatai.datafoundry.backend.task.application.service.MappedResultMaterializationAppService.MaterializationOutcome;
+import com.huatai.datafoundry.backend.task.application.service.MetricFieldMappingAppService;
 import com.huatai.datafoundry.backend.task.domain.model.CollectionResult;
 import com.huatai.datafoundry.backend.task.domain.model.CollectionResultRow;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
+import com.huatai.datafoundry.backend.task.domain.model.MetricFieldMapping;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
@@ -42,6 +47,8 @@ public class RequirementQueryService {
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
   private final CollectionResultAppService collectionResultAppService;
+  private final MetricFieldMappingAppService metricFieldMappingAppService;
+  private final MappedResultMaterializationAppService mappedResultMaterializationAppService;
   private final ObjectMapper objectMapper;
 
   public RequirementQueryService(
@@ -51,6 +58,8 @@ public class RequirementQueryService {
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       CollectionResultAppService collectionResultAppService,
+      MetricFieldMappingAppService metricFieldMappingAppService,
+      MappedResultMaterializationAppService mappedResultMaterializationAppService,
       ObjectMapper objectMapper) {
     this.requirementRepository = requirementRepository;
     this.requirementSearchMapper = requirementSearchMapper;
@@ -58,6 +67,8 @@ public class RequirementQueryService {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.collectionResultAppService = collectionResultAppService;
+    this.metricFieldMappingAppService = metricFieldMappingAppService;
+    this.mappedResultMaterializationAppService = mappedResultMaterializationAppService;
     this.objectMapper = objectMapper;
   }
 
@@ -243,6 +254,37 @@ public class RequirementQueryService {
     }
     out.setCollectionResults(
         mapCollectionResults(collectionResultAppService.normalizeTaskGroupFinalReports(taskGroupId.trim())));
+    return out;
+  }
+
+  public List<MetricFieldMappingReadDto> listMetricFieldMappings(String wideTableId) {
+    return mapMetricFieldMappings(metricFieldMappingAppService.listByWideTable(wideTableId));
+  }
+
+  public List<MetricFieldMappingReadDto> generateMetricFieldMappings(String wideTableId) {
+    return mapMetricFieldMappings(metricFieldMappingAppService.generateFromWideTableResults(wideTableId));
+  }
+
+  public MetricFieldMappingReadDto updateMetricFieldMapping(
+      String wideTableId,
+      String mappingId,
+      String targetIndicatorKey,
+      String targetIndicatorName,
+      String matchType,
+      String status) {
+    return mapMetricFieldMapping(metricFieldMappingAppService.updateMapping(
+        wideTableId, mappingId, targetIndicatorKey, targetIndicatorName, matchType, status));
+  }
+
+  public Map<String, Object> materializeMappedResults(String wideTableId) {
+    MaterializationOutcome outcome = mappedResultMaterializationAppService.materializeWideTable(wideTableId);
+    Map<String, Object> out = new HashMap<String, Object>();
+    out.put("wide_table_id", outcome.getWideTableId());
+    out.put("collection_results", outcome.getCollectionResults());
+    out.put("collection_result_rows", outcome.getCollectionResultRows());
+    out.put("wide_table_cells", outcome.getWideTableCells());
+    out.put("skipped_missing_rows", outcome.getSkippedMissingRows());
+    out.put("skipped_unmapped_metrics", outcome.getSkippedUnmappedMetrics());
     return out;
   }
 
@@ -494,6 +536,8 @@ public class RequirementQueryService {
       dto.setScheduleJobId(record.getScheduleJobId());
       dto.setWideTableId(record.getWideTableId());
       dto.setRowId(record.getRowId());
+      dto.setSourceMetricName(record.getSourceMetricName());
+      dto.setTargetIndicatorKey(record.getTargetIndicatorKey());
       dto.setIndicatorKey(record.getIndicatorKey());
       dto.setIndicatorName(record.getIndicatorName());
       dto.setBusinessDate(record.getBusinessDate());
@@ -517,6 +561,35 @@ public class RequirementQueryService {
       out.add(dto);
     }
     return out;
+  }
+
+  private List<MetricFieldMappingReadDto> mapMetricFieldMappings(List<MetricFieldMapping> records) {
+    List<MetricFieldMappingReadDto> out = new ArrayList<MetricFieldMappingReadDto>();
+    if (records == null) return out;
+    for (MetricFieldMapping record : records) {
+      if (record == null) continue;
+      out.add(mapMetricFieldMapping(record));
+    }
+    return out;
+  }
+
+  private MetricFieldMappingReadDto mapMetricFieldMapping(MetricFieldMapping record) {
+    if (record == null) {
+      return null;
+    }
+    MetricFieldMappingReadDto dto = new MetricFieldMappingReadDto();
+    dto.setId(record.getId());
+    dto.setRequirementId(record.getRequirementId());
+    dto.setWideTableId(record.getWideTableId());
+    dto.setSourceMetricName(record.getSourceMetricName());
+    dto.setTargetIndicatorKey(record.getTargetIndicatorKey());
+    dto.setTargetIndicatorName(record.getTargetIndicatorName());
+    dto.setMatchType(record.getMatchType());
+    dto.setConfidence(record.getConfidence());
+    dto.setStatus(record.getStatus());
+    dto.setCreatedAt(record.getCreatedAt());
+    dto.setUpdatedAt(record.getUpdatedAt());
+    return dto;
   }
 
   private Map<String, Object> parseJsonObject(String raw) {

@@ -10,6 +10,8 @@ public class CollectionResultRow {
   private String scheduleJobId;
   private String wideTableId;
   private Integer rowId;
+  private String sourceMetricName;
+  private String targetIndicatorKey;
   private String indicatorKey;
   private String indicatorName;
   private String businessDate;
@@ -77,6 +79,22 @@ public class CollectionResultRow {
 
   public void setRowId(Integer rowId) {
     this.rowId = rowId;
+  }
+
+  public String getSourceMetricName() {
+    return sourceMetricName;
+  }
+
+  public void setSourceMetricName(String sourceMetricName) {
+    this.sourceMetricName = sourceMetricName;
+  }
+
+  public String getTargetIndicatorKey() {
+    return targetIndicatorKey;
+  }
+
+  public void setTargetIndicatorKey(String targetIndicatorKey) {
+    this.targetIndicatorKey = targetIndicatorKey;
   }
 
   public String getIndicatorKey() {
