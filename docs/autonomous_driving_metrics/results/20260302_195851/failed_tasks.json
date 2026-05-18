@@ -1,0 +1,10 @@
+[
+  {
+    "subject": {
+      "business_type": "Robotaxi",
+      "comcode": "1776435",
+      "company_name": "Tesla"
+    },
+    "error": "任务超时（已等待 3600 秒，超时限制 3600 秒）"
+  }
+]
