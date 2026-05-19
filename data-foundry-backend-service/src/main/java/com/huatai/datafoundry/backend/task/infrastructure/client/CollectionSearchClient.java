@@ -158,6 +158,42 @@ public class CollectionSearchClient implements CollectionSearchGateway {
     }
   }
 
+  @Override
+  public CollectionTaskCancelResult cancelTask(String taskId) {
+    String normalizedTaskId = normalizeTaskId(taskId);
+    if (normalizedTaskId == null) {
+      return new CollectionTaskCancelResult(false, null, null, "missing task id", 400);
+    }
+    try {
+      ResponseEntity<String> response =
+          restTemplate.exchange(
+              URI.create(baseUrl + "/api/task/" + normalizedTaskId + "/cancel"),
+              HttpMethod.POST,
+              null,
+              String.class);
+      return parseTaskCancelResponse(normalizedTaskId, response.getStatusCode(), response.getBody());
+    } catch (HttpStatusCodeException ex) {
+      HttpStatus status;
+      try {
+        status = HttpStatus.valueOf(ex.getRawStatusCode());
+      } catch (Exception ignored) {
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+      }
+      String detail = extractErrorDetail(ex.getResponseBodyAsString());
+      return new CollectionTaskCancelResult(
+          false,
+          normalizedTaskId,
+          null,
+          detail != null ? detail : "http " + status.value() + safeSnippet(ex.getResponseBodyAsString()),
+          status.value());
+    } catch (RestClientException ex) {
+      return new CollectionTaskCancelResult(
+          false, normalizedTaskId, null, "unavailable: " + ex.getMessage(), 503);
+    } catch (Exception ex) {
+      return new CollectionTaskCancelResult(false, normalizedTaskId, null, ex.getMessage(), 500);
+    }
+  }
+
   private CollectionTaskStatusResult parseTaskStatusResponse(HttpStatus statusCode, String rawBody) {
     if (statusCode == null || !statusCode.is2xxSuccessful()) {
       return new CollectionTaskStatusResult(false, null, null, "non-2xx: " + statusCode);
@@ -215,6 +251,65 @@ public class CollectionSearchClient implements CollectionSearchGateway {
     } catch (Exception ex) {
       return new CollectionTaskResult(false, null, null, null, rawBody, ex.getMessage());
     }
+  }
+
+  private CollectionTaskCancelResult parseTaskCancelResponse(
+      String requestedTaskId, HttpStatus statusCode, String rawBody) {
+    if (statusCode == null || !statusCode.is2xxSuccessful()) {
+      return new CollectionTaskCancelResult(
+          false, requestedTaskId, null, "non-2xx: " + statusCode, statusCode != null ? statusCode.value() : 500);
+    }
+    try {
+      Map raw = objectMapper.readValue(rawBody, Map.class);
+      Object success = raw.get("success");
+      if (!(success instanceof Boolean) || !((Boolean) success).booleanValue()) {
+        Object detail = raw.get("detail");
+        return new CollectionTaskCancelResult(
+            false,
+            requestedTaskId,
+            null,
+            detail != null ? String.valueOf(detail) : "success=false",
+            statusCode.value());
+      }
+      Object data = raw.get("data");
+      String message = null;
+      String taskId = requestedTaskId;
+      if (data instanceof Map) {
+        Map dataMap = (Map) data;
+        String returnedTaskId = stringValue(dataMap.get("task_id"));
+        if (returnedTaskId != null) {
+          taskId = returnedTaskId;
+        }
+        message = stringValue(dataMap.get("message"));
+      }
+      return new CollectionTaskCancelResult(true, taskId, message, null, statusCode.value());
+    } catch (Exception ex) {
+      return new CollectionTaskCancelResult(false, requestedTaskId, null, ex.getMessage(), statusCode.value());
+    }
+  }
+
+  private String extractErrorDetail(String rawBody) {
+    if (rawBody == null || rawBody.trim().isEmpty()) {
+      return null;
+    }
+    try {
+      Map raw = objectMapper.readValue(rawBody, Map.class);
+      String detail = stringValue(raw.get("detail"));
+      if (detail != null) {
+        return detail;
+      }
+      String message = stringValue(raw.get("message"));
+      if (message != null) {
+        return message;
+      }
+      String error = stringValue(raw.get("error"));
+      if (error != null) {
+        return error;
+      }
+    } catch (Exception ignored) {
+      // fall through to raw snippet
+    }
+    return null;
   }
 
   private static String normalizeTaskId(String taskId) {

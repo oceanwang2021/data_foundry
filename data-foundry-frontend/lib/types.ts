@@ -240,7 +240,7 @@ export type ScheduleRule = {
 
 // ==================== 任务组 ====================
 
-export type TaskGroupStatus = "pending" | "running" | "completed" | "failed" | "partial" | "invalidated";
+export type TaskGroupStatus = "pending" | "running" | "completed" | "failed" | "partial" | "cancelled" | "invalidated";
 
 export type TaskGroup = {
   id: string;
@@ -267,7 +267,7 @@ export type TaskGroup = {
 
 // ==================== 采集任务 ====================
 
-export type FetchTaskStatus = "pending" | "running" | "completed" | "failed" | "invalidated";
+export type FetchTaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "invalidated";
 
 export type FetchTask = {
   id: string;
@@ -374,7 +374,7 @@ export type CollectionBatch = {
   snapshotLabel: string;
   coverageMode: "incremental_by_business_date" | "full_snapshot";
   semanticTimeAxis: "business_date" | "none";
-  status: "pending" | "running" | "completed" | "failed" | "invalidated";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled" | "invalidated";
   isCurrent: boolean;
   planVersion?: number;
   triggeredBy?: string;

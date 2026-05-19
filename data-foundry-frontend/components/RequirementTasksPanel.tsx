@@ -14,6 +14,7 @@ import type {
 import type { ScheduleJob } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import {
+  cancelTask,
   createTrialRun,
   executeTask,
   executeTaskGroup,
@@ -174,6 +175,7 @@ export default function RequirementTasksPanel({
   const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
   const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
+  const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
   const [activeTaskSubTab, setActiveTaskSubTab] = useState<TaskSubTabKey>(() => {
     if (requestedSubTab === "prompts" || requestedSubTab === "tasks" || requestedSubTab === "output") {
       return requestedSubTab;
@@ -1332,58 +1334,87 @@ export default function RequirementTasksPanel({
     }
 
     const nextAttempt = targetTask.executionRecords.length + 1;
-    onFetchTasksChange(
-      fetchTasks.map((task) => (
-        task.id === taskId
-          ? {
-              ...task,
-              status: "running",
-              updatedAt: now,
-              executionRecords: [
-                ...task.executionRecords,
-                {
-                  id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
-                  fetchTaskId: task.id,
-                  attempt: nextAttempt,
-                  status: "running",
-                  triggeredBy: "manual_retry",
-                  startedAt: now,
-                },
-              ],
-            }
-          : task
-      )),
-    );
-    onTaskGroupsChange(
-      taskGroups.map((taskGroup) => (
-        taskGroup.id === targetTask.taskGroupId
-          ? {
-              ...taskGroup,
-              status: "running",
-              completedTasks: targetTask.status === "completed"
-                ? Math.max(taskGroup.completedTasks - 1, 0)
-                : taskGroup.completedTasks,
-              failedTasks: targetTask.status === "failed"
-                ? Math.max(taskGroup.failedTasks - 1, 0)
-                : taskGroup.failedTasks,
-              updatedAt: now,
-            }
-          : taskGroup
-      )),
-    );
+    const optimisticFetchTasks = fetchTasks.map((task) => (
+      task.id === taskId
+        ? {
+            ...task,
+            status: "running",
+            updatedAt: now,
+            executionRecords: [
+              ...task.executionRecords,
+              {
+                id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
+                fetchTaskId: task.id,
+                attempt: nextAttempt,
+                status: "running",
+                triggeredBy: "manual_retry",
+                startedAt: now,
+              },
+            ],
+          }
+        : task
+    ));
+    onFetchTasksChange(optimisticFetchTasks);
+    const optimisticTaskGroups = taskGroups.map((taskGroup) => (
+      taskGroup.id === targetTask.taskGroupId
+        ? {
+            ...taskGroup,
+            status: "running",
+            completedTasks: targetTask.status === "completed"
+              ? Math.max(taskGroup.completedTasks - 1, 0)
+              : taskGroup.completedTasks,
+            failedTasks: targetTask.status === "failed"
+              ? Math.max(taskGroup.failedTasks - 1, 0)
+              : taskGroup.failedTasks,
+            updatedAt: now,
+          }
+        : taskGroup
+    ));
+    onTaskGroupsChange(optimisticTaskGroups);
     setRunningTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
     setTaskActionMessage(`已发起任务 ${taskId}（${rowLabel}）的单任务执行，正在同步最新结果。`);
     try {
-      if (targetTask.status === "failed") {
-        await retryTask(taskId);
-      } else {
-        await executeTask(taskId);
+      const dispatchResult = targetTask.status === "failed"
+        ? await retryTask(taskId)
+        : await executeTask(taskId);
+      if (dispatchResult.collectionTaskId || dispatchResult.status) {
+        onFetchTasksChange(
+          optimisticFetchTasks.map((task) => (
+            task.id === taskId
+              ? {
+                  ...task,
+                  collectionTaskId: dispatchResult.collectionTaskId ?? task.collectionTaskId,
+                  status: dispatchResult.status ?? task.status,
+                  updatedAt: new Date().toISOString(),
+                }
+              : task
+          )),
+        );
       }
       await refreshAfterExecution();
     } catch (error) {
       setTaskActionMessage(`执行失败：${formatTaskActionError(error)}`);
     } finally {
       setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
+    }
+  };
+
+  const handleCancelTask = async (taskId: string, rowLabel: string) => {
+    const targetTask = fetchTasks.find((task) => task.id === taskId);
+    if (!targetTask || targetTask.status !== "running" || !targetTask.collectionTaskId) {
+      return;
+    }
+
+    setCancellingTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
+    setTaskActionMessage(`正在取消采集任务 ${taskId}（${rowLabel}）...`);
+    try {
+      await cancelTask(targetTask.collectionTaskId);
+      await refreshAfterExecution();
+      setTaskActionMessage(`已取消采集任务 ${taskId}（${rowLabel}）。`);
+    } catch (error) {
+      setTaskActionMessage(`取消失败：${formatTaskActionError(error)}`);
+    } finally {
+      setCancellingTaskIds((prev) => prev.filter((id) => id !== taskId));
     }
   };
 
@@ -1434,7 +1465,7 @@ export default function RequirementTasksPanel({
             <tbody className="divide-y">
               {rows.map((row) => {
                 const isRunning = row.status === "running";
-                const actionLabel = row.status === "failed" || row.status === "completed" ? "重采" : "采集";
+                const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
                 return (
                   <tr key={row.fetchTaskId}>
                     <td className="px-3 py-3 align-top text-slate-700">
@@ -1464,7 +1495,7 @@ export default function RequirementTasksPanel({
                         <button
                           type="button"
                           onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-                          disabled={runningTaskIds.includes(row.fetchTaskId) || isRunning}
+                          disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
                           className={cn(
                             "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
                             "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
@@ -1472,14 +1503,17 @@ export default function RequirementTasksPanel({
                         >
                           {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
                         </button>
-                        {isRunning ? (
+                        {isRunning && row.collectionTaskId ? (
                           <button
                             type="button"
-                            disabled
-                            title="暂未接入取消接口"
-                            className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-muted-foreground opacity-60"
+                            onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+                            disabled={cancellingTaskIds.includes(row.fetchTaskId)}
+                            className={cn(
+                              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+                            )}
                           >
-                            取消
+                            {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
                           </button>
                         ) : null}
                       </div>
@@ -1525,7 +1559,7 @@ export default function RequirementTasksPanel({
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     {tg.isReal
-                      ? `${tg.id} | total ${tg.totalTasks} | running ${tg.runningTasks} | completed ${tg.completedTasks} | failed ${tg.failedTasks}${tg.pendingTasks > 0 ? ` | pending ${tg.pendingTasks}` : ""}`
+                      ? `${tg.id} | total ${tg.totalTasks} | running ${tg.runningTasks} | completed ${tg.completedTasks} | failed ${tg.failedTasks}${tg.cancelledTasks > 0 ? ` | cancelled ${tg.cancelledTasks}` : ""}${tg.pendingTasks > 0 ? ` | pending ${tg.pendingTasks}` : ""}`
                       : isScheduledFutureTaskGroupView(tg)
                         ? `planned task group | total ${tg.totalTasks} | will be created and executed automatically when due`
                         : `planned task group | total ${tg.totalTasks} | no runtime records yet`}
@@ -1536,13 +1570,12 @@ export default function RequirementTasksPanel({
                     <div
                       className={cn(
                         "h-full rounded-full",
-                        tg.displayStatus === "running"
-                          ? "bg-blue-400"
-                          : tg.failedTasks > 0
-                            ? "bg-red-400"
-                            : "bg-emerald-400",
+                        "",
                       )}
-                      style={{ width: `${tg.progressPercent}%` }}
+                      style={{
+                        width: `${tg.progressPercent}%`,
+                        backgroundColor: getTaskStatusRailFillColor(tg.displayStatus),
+                      }}
                     />
                   </div>
                   <div className="text-[10px] text-muted-foreground text-right mt-0.5">
@@ -1590,7 +1623,7 @@ export default function RequirementTasksPanel({
                         <tbody className="divide-y">
                           {expandedTaskInstanceRows.map((row) => {
                             const isRunning = row.status === "running";
-                            const actionLabel = row.status === "failed" || row.status === "completed" ? "重采" : "采集";
+                            const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
                             return (
                               <tr key={row.fetchTaskId}>
                                 <td className="px-3 py-3 align-top text-slate-700">
@@ -1620,7 +1653,7 @@ export default function RequirementTasksPanel({
                                     <button
                                       type="button"
                                       onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-                                      disabled={runningTaskIds.includes(row.fetchTaskId) || isRunning}
+                                      disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
                                       className={cn(
                                         "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
                                         "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
@@ -1628,14 +1661,17 @@ export default function RequirementTasksPanel({
                                     >
                                       {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
                                     </button>
-                                    {isRunning ? (
+                                    {isRunning && row.collectionTaskId ? (
                                       <button
                                         type="button"
-                                        disabled
-                                        title="暂未接入取消接口"
-                                        className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-muted-foreground opacity-60"
+                                        onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+                                        disabled={cancellingTaskIds.includes(row.fetchTaskId)}
+                                        className={cn(
+                                          "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                                          "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+                                        )}
                                       >
-                                        取消
+                                        {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
                                       </button>
                                     ) : null}
                                   </div>
@@ -2658,7 +2694,7 @@ export default function RequirementTasksPanel({
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {tg.isReal
-                            ? `${tg.id} | 总计 ${tg.totalTasks} | 运行中 ${tg.runningTasks} | 已完成 ${tg.completedTasks} | 失败 ${tg.failedTasks}${tg.pendingTasks > 0 ? ` | 待执行 ${tg.pendingTasks}` : ""}`
+                            ? `${tg.id} | 总计 ${tg.totalTasks} | 运行中 ${tg.runningTasks} | 已完成 ${tg.completedTasks} | 失败 ${tg.failedTasks}${tg.cancelledTasks > 0 ? ` | 已取消 ${tg.cancelledTasks}` : ""}${tg.pendingTasks > 0 ? ` | 待执行 ${tg.pendingTasks}` : ""}`
                             : isScheduledFutureTaskGroupView(tg)
                               ? `待调度任务组 | 总计 ${tg.totalTasks} | 到期后由系统自动创建并执行`
                               : `计划任务组 | 总计 ${tg.totalTasks} | 尚未建立运行记录`}
@@ -2669,13 +2705,12 @@ export default function RequirementTasksPanel({
                           <div
                             className={cn(
                               "h-full rounded-full",
-                              tg.displayStatus === "running"
-                                ? "bg-blue-400"
-                                : tg.failedTasks > 0
-                                ? "bg-red-400"
-                                : "bg-emerald-400",
+                              "",
                             )}
-                            style={{ width: `${tg.progressPercent}%` }}
+                            style={{
+                              width: `${tg.progressPercent}%`,
+                              backgroundColor: getTaskStatusRailFillColor(tg.displayStatus),
+                            }}
                           />
                         </div>
                         <div className="text-[10px] text-muted-foreground text-right mt-0.5">
@@ -2869,7 +2904,7 @@ export default function RequirementTasksPanel({
                     </span>
                   </div>
                   <div className="text-muted-foreground">
-                    {tg.id} | 总计 {tg.totalTasks} | 已完成 {tg.completedTasks} | 失败 {tg.failedTasks}
+                    {tg.id} | 总计 {tg.totalTasks} | 已完成 {tg.completedTasks} | 失败 {tg.failedTasks}{tg.cancelledTasks > 0 ? ` | 已取消 ${tg.cancelledTasks}` : ""}
                   </div>
                 </div>
               ))}
@@ -3208,7 +3243,7 @@ function VersionTabContent({
                 </span>
               </div>
               <div className="text-muted-foreground">
-                {taskGroup.id} | 总计 {taskGroup.totalTasks} | 已完成 {taskGroup.completedTasks} | 失败 {taskGroup.failedTasks}
+                {taskGroup.id} | 总计 {taskGroup.totalTasks} | 已完成 {taskGroup.completedTasks} | 失败 {taskGroup.failedTasks}{taskGroup.cancelledTasks > 0 ? ` | 已取消 ${taskGroup.cancelledTasks}` : ""}
               </div>
               {taskGroup.deltaReason ? (
                 <div className="text-amber-700">{taskGroup.deltaReason}</div>
@@ -3248,7 +3283,7 @@ function buildTaskStatusLegend(tasks: Array<{ status: string }>): Array<{
   badgeClassName: string;
   dotClassName: string;
 }> {
-  const orderedStatuses = ["completed", "running", "failed", "pending", "invalidated"];
+  const orderedStatuses = ["completed", "running", "failed", "cancelled", "pending", "invalidated"];
   const countMap = new Map<string, number>();
 
   for (const task of tasks) {
@@ -3339,16 +3374,17 @@ function buildTaskGroupSummaryFromCards(
       running: 0,
       completed: 0,
       failed: 0,
+      cancelled: 0,
       invalidated: 0,
     } satisfies Record<FetchTask["status"], number>,
   );
   const totalTasks = Math.max(fallbackSummary.totalTasks, taskCards.length);
   const pendingTasks = Math.max(
-    totalTasks - counts.completed - counts.failed - counts.running - counts.invalidated,
+    totalTasks - counts.completed - counts.failed - counts.cancelled - counts.running - counts.invalidated,
     0,
   );
   const progressPercent = totalTasks > 0
-    ? Math.round(((counts.completed + counts.failed + counts.invalidated) / totalTasks) * 100)
+    ? Math.round(((counts.completed + counts.failed + counts.cancelled + counts.invalidated) / totalTasks) * 100)
     : 0;
   const lastUpdatedAt = taskCards.reduce((latest, taskCard) => {
     const candidate = taskCard.endedAt || taskCard.startedAt || fallbackSummary.lastUpdatedAt;
@@ -3361,6 +3397,7 @@ function buildTaskGroupSummaryFromCards(
       runningTasks: counts.running,
       completedTasks: counts.completed,
       failedTasks: counts.failed,
+      cancelledTasks: counts.cancelled,
       invalidatedTasks: counts.invalidated,
     }),
     totalTasks,
@@ -3368,6 +3405,7 @@ function buildTaskGroupSummaryFromCards(
     runningTasks: counts.running,
     completedTasks: counts.completed,
     failedTasks: counts.failed,
+    cancelledTasks: counts.cancelled,
     invalidatedTasks: counts.invalidated,
     progressPercent,
     lastUpdatedAt,
@@ -3381,18 +3419,28 @@ function resolveTaskGroupDisplayStatus(
     runningTasks: number;
     completedTasks: number;
     failedTasks: number;
+    cancelledTasks: number;
     invalidatedTasks: number;
   },
 ): TaskGroup["status"] {
   if (fallbackStatus === "invalidated") {
     return "invalidated";
   }
+  if (fallbackStatus === "cancelled" && counts.runningTasks === 0 && counts.pendingTasks === 0) {
+    return "cancelled";
+  }
   if (counts.runningTasks > 0) {
     return "running";
   }
   if (counts.failedTasks > 0 && counts.pendingTasks === 0) {
-    if (counts.completedTasks === 0 && counts.invalidatedTasks === 0) {
+    if (counts.completedTasks === 0 && counts.cancelledTasks === 0 && counts.invalidatedTasks === 0) {
       return "failed";
+    }
+    return "partial";
+  }
+  if (counts.cancelledTasks > 0 && counts.pendingTasks === 0) {
+    if (counts.completedTasks === 0 && counts.failedTasks === 0 && counts.invalidatedTasks === 0) {
+      return "cancelled";
     }
     return "partial";
   }
@@ -3441,6 +3489,7 @@ type HistoricalTaskGroupView = {
   runningTasks: number;
   completedTasks: number;
   failedTasks: number;
+  cancelledTasks: number;
   invalidatedTasks: number;
   progressPercent: number;
   triggeredBy: TaskGroup["triggeredBy"];
@@ -3637,6 +3686,7 @@ function buildTaskGroupRunViews(
           runningTasks: summary?.runningTasks ?? 0,
           completedTasks: summary?.completedTasks ?? taskGroup.completedTasks,
           failedTasks: summary?.failedTasks ?? taskGroup.failedTasks,
+          cancelledTasks: summary?.cancelledTasks ?? 0,
           invalidatedTasks: summary?.invalidatedTasks ?? 0,
           progressPercent: summary?.progressPercent ?? 0,
           triggeredBy: taskGroup.triggeredBy,
@@ -3702,6 +3752,7 @@ function buildTaskGroupRunViews(
             runningTasks: summary?.runningTasks ?? 0,
             completedTasks: summary?.completedTasks ?? taskGroup.completedTasks,
             failedTasks: summary?.failedTasks ?? taskGroup.failedTasks,
+            cancelledTasks: summary?.cancelledTasks ?? 0,
             invalidatedTasks: summary?.invalidatedTasks ?? 0,
             progressPercent: summary?.progressPercent ?? 0,
             triggeredBy: taskGroup.triggeredBy,
@@ -3735,6 +3786,7 @@ function buildTaskGroupRunViews(
           runningTasks: 0,
           completedTasks: 0,
           failedTasks: 0,
+          cancelledTasks: 0,
           invalidatedTasks: 0,
           progressPercent: 0,
           triggeredBy: plannedTriggerType,
@@ -3776,6 +3828,7 @@ function buildTaskGroupRunViews(
         runningTasks: 0,
         completedTasks: 0,
         failedTasks: 0,
+        cancelledTasks: 0,
         invalidatedTasks: 0,
         progressPercent: 0,
         triggeredBy: plannedTriggerType,

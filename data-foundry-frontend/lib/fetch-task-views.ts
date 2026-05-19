@@ -811,11 +811,19 @@ function buildSyntheticTaskStatuses(
     completed: Math.max(taskGroupExecution.completedTasks - explicitCounts.completed, 0),
     running: Math.max(taskGroupExecution.runningTasks - explicitCounts.running, 0),
     failed: Math.max(taskGroupExecution.failedTasks - explicitCounts.failed, 0),
+    cancelled: Math.max(taskGroupExecution.cancelledTasks - explicitCounts.cancelled, 0),
     pending: Math.max(taskGroupExecution.pendingTasks - explicitCounts.pending, 0),
     invalidated: Math.max(taskGroupExecution.invalidatedTasks - explicitCounts.invalidated, 0),
   };
   const statuses: FetchTask["status"][] = [];
-  const orderedStatuses: Array<FetchTask["status"]> = ["completed", "running", "failed", "pending", "invalidated"];
+  const orderedStatuses: Array<FetchTask["status"]> = [
+    "completed",
+    "running",
+    "failed",
+    "cancelled",
+    "pending",
+    "invalidated",
+  ];
 
   for (const status of orderedStatuses) {
     for (let count = 0; count < remainingCounts[status]; count += 1) {
@@ -837,6 +845,9 @@ function inferFallbackSyntheticStatus(taskGroupStatus: TaskGroup["status"]): Fet
   if (taskGroupStatus === "partial") {
     return "failed";
   }
+  if (taskGroupStatus === "cancelled") {
+    return "cancelled";
+  }
   if (taskGroupStatus === "running") {
     return "pending";
   }
@@ -853,8 +864,10 @@ function taskStatusProgress(status: FetchTask["status"]): number {
       return 2;
     case "failed":
       return 3;
-    case "invalidated":
+    case "cancelled":
       return 4;
+    case "invalidated":
+      return 5;
     default:
       return 0;
   }
@@ -871,6 +884,7 @@ function countTaskStatuses(tasks: FetchTask[]): Record<FetchTask["status"], numb
       running: 0,
       completed: 0,
       failed: 0,
+      cancelled: 0,
       invalidated: 0,
     } satisfies Record<FetchTask["status"], number>,
   );
@@ -922,6 +936,21 @@ function buildSyntheticExecutionRecords(
         errorMessage: "该任务在组级执行中失败，等待人工重试。",
         startedAt: taskGroup.createdAt,
         endedAt: taskGroup.updatedAt || taskGroup.createdAt,
+      },
+    ];
+  }
+
+  if (status === "cancelled") {
+    return [
+      {
+        id: `${baseId}_cancelled`,
+        fetchTaskId: `ft_auto_${taskGroup.id}_${indicatorGroupId}_${rowId}`,
+        attempt: 1,
+        status: "failure",
+        triggeredBy: taskGroup.triggeredBy,
+        startedAt: taskGroup.updatedAt || taskGroup.createdAt,
+        endedAt: taskGroup.updatedAt || taskGroup.createdAt,
+        errorMessage: "任务已取消。",
       },
     ];
   }

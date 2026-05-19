@@ -7,6 +7,7 @@ public final class TaskStatus {
   public static final String RUNNING = "running";
   public static final String COMPLETED = "completed";
   public static final String FAILED = "failed";
+  public static final String CANCELLED = "cancelled";
   public static final String INVALIDATED = "invalidated";
 
   public static int rank(String status) {
@@ -15,13 +16,16 @@ public final class TaskStatus {
     if (PENDING.equals(s)) return 1;
     if (RUNNING.equals(s)) return 2;
     if (FAILED.equals(s)) return 3;
-    if (COMPLETED.equals(s)) return 4;
-    if (INVALIDATED.equals(s)) return 5;
+    if (CANCELLED.equals(s)) return 4;
+    if (COMPLETED.equals(s)) return 5;
+    if (INVALIDATED.equals(s)) return 6;
     return 1;
   }
 
   public static boolean isTerminal(String status) {
-    return COMPLETED.equalsIgnoreCase(status) || INVALIDATED.equalsIgnoreCase(status);
+    return COMPLETED.equalsIgnoreCase(status)
+        || CANCELLED.equalsIgnoreCase(status)
+        || INVALIDATED.equalsIgnoreCase(status);
   }
 
   public static boolean isInvalidated(String status) {

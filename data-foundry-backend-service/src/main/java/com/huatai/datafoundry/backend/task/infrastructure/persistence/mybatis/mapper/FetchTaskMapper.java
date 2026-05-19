@@ -56,6 +56,17 @@ public interface FetchTaskMapper {
           + "limit 1")
   FetchTaskRecord getById(@Param("id") String id);
 
+  @Select(
+      "select "
+          + "id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id, "
+          + "indicator_group_id, indicator_group_name, name, schema_version, execution_mode, "
+          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
+          + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
+          + "from fetch_tasks "
+          + "where collection_task_id = #{collectionTaskId} "
+          + "limit 1")
+  FetchTaskRecord getByCollectionTaskId(@Param("collectionTaskId") String collectionTaskId);
+
   @Select("select count(1) from fetch_tasks where task_group_id = #{taskGroupId}")
   int countByTaskGroup(@Param("taskGroupId") String taskGroupId);
 

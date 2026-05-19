@@ -151,6 +151,11 @@ public class TaskFacadeController {
     return taskAppService.retryTask(taskId, idempotencyKey);
   }
 
+  @PostMapping("/{collectionTaskId}/actions/cancel")
+  public Map<String, Object> cancelTask(@PathVariable("collectionTaskId") String collectionTaskId) {
+    return taskAppService.cancelTask(collectionTaskId);
+  }
+
   @PostMapping("/wide-tables/{wideTableId}/actions/sync-collection-statuses")
   public Map<String, Object> syncWideTableCollectionStatuses(@PathVariable("wideTableId") String wideTableId) {
     return taskAppService.syncWideTableCollectionStatuses(wideTableId);

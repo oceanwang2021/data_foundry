@@ -4,6 +4,7 @@ export const taskStatusLabel: Record<string, string> = {
   running: "执行中",
   completed: "已完成",
   failed: "失败",
+  cancelled: "已取消",
   partial: "部分完成",
   invalidated: "已作废",
   queued: "排队中",
@@ -51,6 +52,12 @@ const TASK_STATUS_PRESENTATION: Record<string, TaskStatusPresentation> = {
     dotClassName: "bg-rose-500",
     railFillColor: "#f43f5e",
     panelClassName: "border-rose-200 bg-rose-50/80 text-rose-900",
+  },
+  cancelled: {
+    badgeClassName: "border-stone-200 bg-stone-50 text-stone-700",
+    dotClassName: "bg-stone-500",
+    railFillColor: "#78716c",
+    panelClassName: "border-stone-200 bg-stone-50/80 text-stone-900",
   },
   partial: {
     badgeClassName: "border-amber-200 bg-amber-50 text-amber-700",

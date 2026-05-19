@@ -130,7 +130,16 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    let detail = "";
+    if (text.trim() !== "") {
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.detail ?? parsed?.message ?? parsed?.error ?? "";
+      } catch {
+        detail = text;
+      }
+    }
+    throw new Error(detail && String(detail).trim() !== "" ? String(detail).trim() : `API ${res.status}: ${text}`);
   }
   if (res.status === 204) return undefined as unknown as T;
   return res.json();
@@ -643,6 +652,7 @@ export function mapTaskGroupStatus(status: string): TaskGroup["status"] {
     pending: "pending",
     running: "running",
     failed: "failed",
+    cancelled: "cancelled",
     partial: "partial",
     completed: "completed",
     invalidated: "invalidated",
@@ -774,6 +784,7 @@ export function mapFetchTaskStatus(status: string): FetchTask["status"] {
     running: "running",
     completed: "completed",
     failed: "failed",
+    cancelled: "cancelled",
     invalidated: "invalidated",
   };
   return mapping[status] ?? "pending";
@@ -1918,12 +1929,34 @@ export async function materializeMappedResults(wideTableId: string): Promise<Map
   };
 }
 
-export async function executeTask(taskId: string): Promise<void> {
-  await apiPost(`/api/tasks/${taskId}/execute`);
+export async function executeTask(taskId: string): Promise<{
+  taskId: string;
+  collectionTaskId?: string;
+  status?: FetchTask["status"];
+}> {
+  const raw = await apiPost<any>(`/api/tasks/${taskId}/execute`);
+  return {
+    taskId: String(raw.task_id ?? raw.taskId ?? taskId),
+    collectionTaskId: raw.collection_task_id ?? raw.collectionTaskId ?? undefined,
+    status: raw.status ? mapFetchTaskStatus(String(raw.status)) : undefined,
+  };
 }
 
-export async function retryTask(taskId: string): Promise<void> {
-  await apiPost(`/api/tasks/${taskId}/retry`);
+export async function retryTask(taskId: string): Promise<{
+  taskId: string;
+  collectionTaskId?: string;
+  status?: FetchTask["status"];
+}> {
+  const raw = await apiPost<any>(`/api/tasks/${taskId}/retry`);
+  return {
+    taskId: String(raw.task_id ?? raw.taskId ?? taskId),
+    collectionTaskId: raw.collection_task_id ?? raw.collectionTaskId ?? undefined,
+    status: raw.status ? mapFetchTaskStatus(String(raw.status)) : undefined,
+  };
+}
+
+export async function cancelTask(collectionTaskId: string): Promise<void> {
+  await apiPost(`/api/tasks/${encodeURIComponent(collectionTaskId)}/cancel`);
 }
 
 export async function executeTaskGroup(
