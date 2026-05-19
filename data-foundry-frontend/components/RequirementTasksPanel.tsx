@@ -646,6 +646,14 @@ export default function RequirementTasksPanel({
     () => taskGroupRunViews.filter((taskGroup) => taskGroup.triggeredBy === "trial"),
     [taskGroupRunViews],
   );
+  const trialTaskGroupIds = useMemo(
+    () => new Set(trialTaskGroupRunViews.map((taskGroup) => taskGroup.id)),
+    [trialTaskGroupRunViews],
+  );
+  const trialFetchTasks = useMemo(
+    () => fetchTasks.filter((task) => trialTaskGroupIds.has(task.taskGroupId)),
+    [fetchTasks, trialTaskGroupIds],
+  );
   const collectionTaskGroupRunViews = useMemo(
     () => taskGroupRunViews.filter((taskGroup) => taskGroup.triggeredBy !== "trial"),
     [taskGroupRunViews],
@@ -668,6 +676,16 @@ export default function RequirementTasksPanel({
     }),
     [currentWideTableRecords, effectiveWideTable, returnContextColumns, selectedWt, tgFetchTasks],
   );
+  const trialTaskInstanceRows = useMemo(
+    () => buildTaskInstanceRowViews({
+      wideTable: selectedWt ?? effectiveWideTable ?? undefined,
+      fetchTasks: trialFetchTasks,
+      wideTableRecords: currentWideTableRecords,
+      indicatorGroups: effectiveWideTable?.indicatorGroups ?? selectedWt?.indicatorGroups ?? [],
+      parameterColumns: returnContextColumns.filter((column) => !column.isBusinessDate),
+    }),
+    [currentWideTableRecords, effectiveWideTable, returnContextColumns, selectedWt, trialFetchTasks],
+  );
   const hasRunningCollectionInstances = useMemo(
     () => Boolean(
       selectedWt && fetchTasks.some(
@@ -678,6 +696,10 @@ export default function RequirementTasksPanel({
       ),
     ),
     [fetchTasks, selectedWt],
+  );
+  const trialTaskInstanceStatusLegend = useMemo(
+    () => buildTaskStatusLegend(trialFetchTasks),
+    [trialFetchTasks],
   );
 
   useEffect(() => {
@@ -1363,6 +1385,113 @@ export default function RequirementTasksPanel({
     } finally {
       setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
     }
+  };
+
+  const renderTaskInstanceTable = (
+    rows: TaskInstanceRowView[],
+    legendItems: Array<{
+      status: string;
+      label: string;
+      count: number;
+      badgeClassName: string;
+      dotClassName: string;
+    }>,
+  ) => {
+    if (rows.length === 0) {
+      return (
+        <div className="text-xs text-muted-foreground">当前还没有可展示的采集实例。</div>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+          {legendItems.map((item) => (
+            <span
+              key={item.status}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
+                item.badgeClassName,
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
+              {item.label} {item.count}
+            </span>
+          ))}
+        </div>
+        <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+          <table className="w-full text-xs leading-5">
+            <thead>
+              <tr>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集参数</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">时间列</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集指标组</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集实例 ID</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">实例状态</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {rows.map((row) => {
+                const isRunning = row.status === "running";
+                const actionLabel = row.status === "failed" || row.status === "completed" ? "重采" : "采集";
+                return (
+                  <tr key={row.fetchTaskId}>
+                    <td className="px-3 py-3 align-top text-slate-700">
+                      <div className="space-y-1">
+                        {row.parameterLines.map((line) => (
+                          <div key={`${row.fetchTaskId}-${line}`} className="break-all">
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-700">{row.businessDateLabel}</td>
+                    <td className="px-3 py-3 align-top text-slate-700">
+                      <div className="space-y-1">
+                        <div className="font-medium">{row.indicatorGroupName}</div>
+                        <div className="text-muted-foreground">{row.indicatorLabels.join("、") || "-"}</div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
+                      {row.collectionTaskId ?? "-"}
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <StatusBadge status={row.status} />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
+                          disabled={runningTaskIds.includes(row.fetchTaskId) || isRunning}
+                          className={cn(
+                            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                            "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
+                          )}
+                        >
+                          {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
+                        </button>
+                        {isRunning ? (
+                          <button
+                            type="button"
+                            disabled
+                            title="暂未接入取消接口"
+                            className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-muted-foreground opacity-60"
+                          >
+                            取消
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   };
 
   const renderTaskGroupCards = (taskGroupViews: HistoricalTaskGroupView[]) => (
@@ -2463,7 +2592,7 @@ export default function RequirementTasksPanel({
                     这里展示试运行时生成的采集实例，包含采集参数、时间列、采集指标组、采集实例 ID、实例状态与操作。
                   </div>
                 </div>
-                {renderTaskGroupCards(trialTaskGroupRunViews)}
+                {renderTaskInstanceTable(trialTaskInstanceRows, trialTaskInstanceStatusLegend)}
               </div>
             ) : null}
 
