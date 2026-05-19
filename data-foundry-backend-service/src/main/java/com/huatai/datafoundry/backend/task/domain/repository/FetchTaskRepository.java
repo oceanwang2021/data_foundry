@@ -9,6 +9,8 @@ public interface FetchTaskRepository {
 
   List<FetchTask> listByRequirement(String requirementId);
 
+  List<FetchTask> listByWideTable(String wideTableId);
+
   List<FetchTask> listByTaskGroup(String taskGroupId);
 
   int countByTaskGroup(String taskGroupId);

@@ -1,16 +1,29 @@
 package com.huatai.datafoundry.backend.task.application.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huatai.datafoundry.backend.task.application.event.TaskExecuteRequestedEvent;
 import com.huatai.datafoundry.backend.task.application.event.TaskGroupExecuteRequestedEvent;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway.CollectionSearchResult;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway.CollectionTaskResult;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway.CollectionTaskStatusResult;
+import com.huatai.datafoundry.backend.task.domain.model.CollectionResult;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
+import com.huatai.datafoundry.backend.task.domain.repository.CollectionResultRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.backend.task.domain.service.TaskExecutionDomainService;
 import com.huatai.datafoundry.backend.task.infrastructure.config.TaskExecutionProperties;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -26,6 +39,9 @@ public class TaskAppService {
   private final TaskExecutionDomainService taskExecutionDomainService;
   private final TaskExecutionProperties taskExecutionProperties;
   private final ApplicationEventPublisher eventPublisher;
+  private final CollectionSearchGateway collectionSearchGateway;
+  private final CollectionResultRepository collectionResultRepository;
+  private final ObjectMapper objectMapper;
 
   public TaskAppService(
       TaskGroupRepository taskGroupRepository,
@@ -33,13 +49,19 @@ public class TaskAppService {
       TaskPlanAppService taskPlanAppService,
       TaskExecutionDomainService taskExecutionDomainService,
       TaskExecutionProperties taskExecutionProperties,
-      ApplicationEventPublisher eventPublisher) {
+      ApplicationEventPublisher eventPublisher,
+      CollectionSearchGateway collectionSearchGateway,
+      CollectionResultRepository collectionResultRepository,
+      ObjectMapper objectMapper) {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.taskPlanAppService = taskPlanAppService;
     this.taskExecutionDomainService = taskExecutionDomainService;
     this.taskExecutionProperties = taskExecutionProperties;
     this.eventPublisher = eventPublisher;
+    this.collectionSearchGateway = collectionSearchGateway;
+    this.collectionResultRepository = collectionResultRepository;
+    this.objectMapper = objectMapper;
   }
 
   @Transactional
@@ -54,25 +76,21 @@ public class TaskAppService {
 
     // Ensure tasks exist (lazy generation).
     taskPlanAppService.ensureFetchTasksForTaskGroup(tg);
+    List<FetchTask> tasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
+    if (tasks == null || tasks.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No fetch tasks available for task group");
+    }
 
-    String startStatus = taskExecutionDomainService.nextStatusOnStart(tg.getStatus());
-    if (startStatus != null) {
-      taskGroupRepository.updateStatus(taskGroupId, startStatus);
-    }
-    if (taskExecutionProperties.isPlaceholderComplete()) {
-      // Placeholder: instantly mark as completed (real pipeline comes in M4).
-      String completeStatus =
-          taskExecutionDomainService.nextStatusOnComplete(startStatus != null ? startStatus : tg.getStatus());
-      if (completeStatus != null) {
-        taskGroupRepository.updateStatus(taskGroupId, completeStatus);
-      }
-    }
+    dispatchFetchTasks(tasks, resolveRequestId(idempotencyKey), "task-group");
+    refreshTaskGroupAggregates(Collections.singletonList(taskGroupId));
 
     String requestId = resolveRequestId(idempotencyKey);
     eventPublisher.publishEvent(new TaskGroupExecuteRequestedEvent(taskGroupId, requestId));
 
     Map<String, Object> out = new HashMap<String, Object>();
     out.put("ok", true);
+    out.put("task_group_id", taskGroupId);
+    out.put("task_count", tasks.size());
     return out;
   }
 
@@ -98,24 +116,15 @@ public class TaskAppService {
     }
 
     taskExecutionDomainService.assertCanExecuteTask(task.getStatus());
-
-    String startStatus = taskExecutionDomainService.nextStatusOnStart(task.getStatus());
-    if (startStatus != null) {
-      fetchTaskRepository.updateStatus(taskId, startStatus);
-    }
-    if (taskExecutionProperties.isPlaceholderComplete()) {
-      String completeStatus =
-          taskExecutionDomainService.nextStatusOnComplete(startStatus != null ? startStatus : task.getStatus());
-      if (completeStatus != null) {
-        fetchTaskRepository.updateStatus(taskId, completeStatus);
-      }
-    }
+    dispatchFetchTasks(Collections.singletonList(task), resolveRequestId(idempotencyKey), "task");
+    refreshTaskGroupAggregates(Collections.singletonList(task.getTaskGroupId()));
 
     String requestId = resolveRequestId(idempotencyKey);
     eventPublisher.publishEvent(new TaskExecuteRequestedEvent(taskId, requestId));
 
     Map<String, Object> out = new HashMap<String, Object>();
     out.put("ok", true);
+    out.put("task_id", taskId);
     return out;
   }
 
@@ -130,14 +139,244 @@ public class TaskAppService {
 
     String next = taskExecutionDomainService.nextStatusOnRetry(task.getStatus());
     if (next != null) {
-      fetchTaskRepository.updateStatus(taskId, next);
+      task.setStatus(next);
     }
+    dispatchFetchTasks(Collections.singletonList(task), resolveRequestId(idempotencyKey), "retry");
+    refreshTaskGroupAggregates(Collections.singletonList(task.getTaskGroupId()));
     String requestId = resolveRequestId(idempotencyKey);
     eventPublisher.publishEvent(new TaskExecuteRequestedEvent(taskId, requestId));
 
     Map<String, Object> out = new HashMap<String, Object>();
     out.put("ok", true);
+    out.put("task_id", taskId);
     return out;
+  }
+
+  @Transactional
+  public Map<String, Object> syncWideTableCollectionStatuses(String wideTableId) {
+    if (wideTableId == null || wideTableId.trim().isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "wideTableId is required");
+    }
+    List<FetchTask> tasks = fetchTaskRepository.listByWideTable(wideTableId.trim());
+    SyncSummary summary = syncFetchTasks(tasks);
+    Map<String, Object> out = new HashMap<String, Object>();
+    out.put("ok", true);
+    out.put("wide_table_id", wideTableId.trim());
+    out.put("synced_task_count", summary.syncedTaskCount);
+    out.put("completed_task_count", summary.completedTaskCount);
+    out.put("failed_task_count", summary.failedTaskCount);
+    out.put("error_count", summary.errorCount);
+    return out;
+  }
+
+  private void dispatchFetchTasks(List<FetchTask> fetchTasks, String requestId, String prefix) {
+    List<FetchTask> preparedTasks = taskPlanAppService.refreshPromptSnapshotsForCollection(fetchTasks);
+    for (FetchTask task : preparedTasks) {
+      if (task == null || task.getId() == null) {
+        continue;
+      }
+      Object requestBody = parseRenderedPromptBody(task.getRenderedPromptText());
+      if (requestBody == null || collectionSearchGateway == null) {
+        fetchTaskRepository.updateStatus(task.getId(), "failed", null);
+        task.setStatus("failed");
+        task.setCollectionTaskId(null);
+        continue;
+      }
+      CollectionSearchResult result =
+          collectionSearchGateway.createSearch(requestBody, prefix + ":" + requestId + ":" + task.getId());
+      if (result != null && result.isSuccess() && result.getTaskId() != null) {
+        fetchTaskRepository.updateStatus(task.getId(), "running", result.getTaskId());
+        task.setStatus("running");
+        task.setCollectionTaskId(result.getTaskId());
+      } else {
+        fetchTaskRepository.updateStatus(task.getId(), "failed", null);
+        task.setStatus("failed");
+        task.setCollectionTaskId(null);
+      }
+    }
+  }
+
+  private Object parseRenderedPromptBody(String renderedPromptText) {
+    if (renderedPromptText == null || renderedPromptText.trim().isEmpty()) {
+      return null;
+    }
+    try {
+      return objectMapper.readValue(renderedPromptText, Object.class);
+    } catch (Exception ex) {
+      return null;
+    }
+  }
+
+  private SyncSummary syncFetchTasks(List<FetchTask> fetchTasks) {
+    SyncSummary summary = new SyncSummary();
+    if (fetchTasks == null || fetchTasks.isEmpty() || collectionSearchGateway == null) {
+      return summary;
+    }
+    Set<String> taskGroupIds = new LinkedHashSet<String>();
+    for (FetchTask fetchTask : fetchTasks) {
+      if (fetchTask == null) {
+        continue;
+      }
+      if (fetchTask.getTaskGroupId() != null) {
+        taskGroupIds.add(fetchTask.getTaskGroupId());
+      }
+      String externalTaskId = normalize(fetchTask.getCollectionTaskId());
+      if (externalTaskId == null) {
+        continue;
+      }
+      CollectionTaskStatusResult statusResult = collectionSearchGateway.getTaskStatus(externalTaskId);
+      if (statusResult == null || !statusResult.isSuccess()) {
+        summary.errorCount++;
+        continue;
+      }
+      String nextStatus = mapExternalTaskStatus(statusResult.getStatus());
+      if (nextStatus != null && !nextStatus.equalsIgnoreCase(normalize(fetchTask.getStatus()))) {
+        fetchTaskRepository.updateStatus(fetchTask.getId(), nextStatus, externalTaskId);
+        fetchTask.setStatus(nextStatus);
+      }
+      summary.syncedTaskCount++;
+      if ("completed".equalsIgnoreCase(nextStatus)) {
+        summary.completedTaskCount++;
+        upsertCompletedCollectionResult(fetchTask, externalTaskId);
+      } else if ("failed".equalsIgnoreCase(nextStatus)) {
+        summary.failedTaskCount++;
+      }
+    }
+    refreshTaskGroupAggregates(new ArrayList<String>(taskGroupIds));
+    return summary;
+  }
+
+  private void upsertCompletedCollectionResult(FetchTask fetchTask, String externalTaskId) {
+    if (fetchTask == null || fetchTask.getId() == null || externalTaskId == null) {
+      return;
+    }
+    if (hasCollectionResult(fetchTask.getId(), externalTaskId)) {
+      return;
+    }
+    CollectionTaskResult taskResult = collectionSearchGateway.getTaskResult(externalTaskId);
+    if (taskResult == null || !taskResult.isSuccess() || taskResult.getRawResponseJson() == null) {
+      return;
+    }
+    CollectionResult result = new CollectionResult();
+    result.setId(buildCollectionResultId(fetchTask.getId(), externalTaskId));
+    result.setFetchTaskId(fetchTask.getId());
+    result.setExternalTaskId(externalTaskId);
+    result.setTaskGroupId(fetchTask.getTaskGroupId());
+    result.setBatchId(fetchTask.getBatchId());
+    result.setWideTableId(fetchTask.getWideTableId());
+    result.setRowId(fetchTask.getRowId());
+    result.setRawResultJson(taskResult.getRawResponseJson());
+    result.setFinalReport(taskResult.getFinalReport());
+    result.setStatus("completed");
+    result.setCollectedAt(LocalDateTime.now());
+    collectionResultRepository.upsertResult(result);
+  }
+
+  private boolean hasCollectionResult(String fetchTaskId, String externalTaskId) {
+    List<CollectionResult> existing = collectionResultRepository.listResultsByTask(fetchTaskId);
+    if (existing == null || existing.isEmpty()) {
+      return false;
+    }
+    for (CollectionResult collectionResult : existing) {
+      if (collectionResult == null) {
+        continue;
+      }
+      String storedExternalTaskId = normalize(collectionResult.getExternalTaskId());
+      if (storedExternalTaskId != null && storedExternalTaskId.equals(externalTaskId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private void refreshTaskGroupAggregates(List<String> taskGroupIds) {
+    if (taskGroupIds == null || taskGroupIds.isEmpty()) {
+      return;
+    }
+    for (String taskGroupId : taskGroupIds) {
+      if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
+        continue;
+      }
+      TaskGroup taskGroup = taskGroupRepository.getById(taskGroupId);
+      if (taskGroup == null) {
+        continue;
+      }
+      List<FetchTask> tasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
+      int total = tasks != null ? tasks.size() : 0;
+      int running = 0;
+      int completed = 0;
+      int failed = 0;
+      int invalidated = 0;
+      if (tasks != null) {
+        for (FetchTask task : tasks) {
+          String status = normalize(task != null ? task.getStatus() : null);
+          if ("running".equals(status)) {
+            running++;
+          } else if ("completed".equals(status)) {
+            completed++;
+          } else if ("failed".equals(status)) {
+            failed++;
+          } else if ("invalidated".equals(status)) {
+            invalidated++;
+          }
+        }
+      }
+      int pending = Math.max(total - running - completed - failed - invalidated, 0);
+      taskGroup.setTotalTasks(total);
+      taskGroup.setCompletedTasks(completed);
+      taskGroup.setFailedTasks(failed);
+      taskGroup.setStatus(resolveAggregateTaskGroupStatus(pending, running, completed, failed, invalidated));
+      taskGroupRepository.upsert(taskGroup);
+    }
+  }
+
+  private String resolveAggregateTaskGroupStatus(
+      int pending, int running, int completed, int failed, int invalidated) {
+    if (running > 0) {
+      return "running";
+    }
+    if (pending > 0 && completed == 0 && failed == 0 && invalidated == 0) {
+      return "pending";
+    }
+    if (completed > 0 && failed == 0 && pending == 0) {
+      return "completed";
+    }
+    if (failed > 0 && completed == 0 && pending == 0) {
+      return "failed";
+    }
+    if (failed > 0 || completed > 0) {
+      return "partial";
+    }
+    if (invalidated > 0 && pending == 0) {
+      return "invalidated";
+    }
+    return "pending";
+  }
+
+  private String mapExternalTaskStatus(String rawStatus) {
+    String normalized = normalize(rawStatus);
+    if (normalized == null) {
+      return null;
+    }
+    if ("pending".equals(normalized) || "running".equals(normalized) || "completed".equals(normalized)
+        || "failed".equals(normalized)) {
+      return normalized;
+    }
+    return null;
+  }
+
+  private static String buildCollectionResultId(String fetchTaskId, String externalTaskId) {
+    UUID uuid =
+        UUID.nameUUIDFromBytes(("collection-result:" + fetchTaskId + ":" + externalTaskId).getBytes(StandardCharsets.UTF_8));
+    return uuid.toString();
+  }
+
+  private static String normalize(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    String normalized = raw.trim().toLowerCase();
+    return normalized.length() > 0 ? normalized : null;
   }
 
   private static String resolveRequestId(String idempotencyKey) {
@@ -147,5 +386,12 @@ public class TaskAppService {
     UUID uuid =
         UUID.nameUUIDFromBytes(("req:" + idempotencyKey.trim()).getBytes(StandardCharsets.UTF_8));
     return uuid.toString();
+  }
+
+  private static final class SyncSummary {
+    private int syncedTaskCount;
+    private int completedTaskCount;
+    private int failedTaskCount;
+    private int errorCount;
   }
 }

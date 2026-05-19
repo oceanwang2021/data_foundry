@@ -30,6 +30,17 @@ public interface FetchTaskMapper {
           + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
           + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
           + "from fetch_tasks "
+          + "where wide_table_id = #{wideTableId} "
+          + "order by sort_order asc")
+  List<FetchTaskRecord> listByWideTable(@Param("wideTableId") String wideTableId);
+
+  @Select(
+      "select "
+          + "id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id, "
+          + "indicator_group_id, indicator_group_name, name, schema_version, execution_mode, "
+          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
+          + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
+          + "from fetch_tasks "
           + "where task_group_id = #{taskGroupId} "
           + "order by sort_order asc")
   List<FetchTaskRecord> listByTaskGroup(@Param("taskGroupId") String taskGroupId);
@@ -64,6 +75,9 @@ public interface FetchTaskMapper {
       "  </foreach>",
       "on duplicate key update ",
       "  status = values(status),",
+      "  rendered_prompt_text = values(rendered_prompt_text),",
+      "  prompt_template_snapshot = values(prompt_template_snapshot),",
+      "  dimension_values_json = values(dimension_values_json),",
       "  collection_task_id = coalesce(values(collection_task_id), collection_task_id),",
       "  confidence = values(confidence),",
       "  can_rerun = values(can_rerun),",

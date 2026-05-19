@@ -627,6 +627,53 @@ public class TaskPlanAppService {
     taskGroupRepository.upsert(withTotals(taskGroup, tasks.size()));
   }
 
+  public List<FetchTask> refreshPromptSnapshotsForCollection(List<FetchTask> fetchTasks) {
+    if (fetchTasks == null || fetchTasks.isEmpty()) {
+      return Collections.emptyList();
+    }
+    List<FetchTask> refreshed = new ArrayList<FetchTask>(fetchTasks.size());
+    for (FetchTask fetchTask : fetchTasks) {
+      FetchTask prepared = refreshPromptSnapshotForCollection(fetchTask);
+      if (prepared != null) {
+        refreshed.add(prepared);
+      }
+    }
+    if (!refreshed.isEmpty()) {
+      fetchTaskRepository.upsertBatch(refreshed);
+    }
+    return refreshed;
+  }
+
+  public FetchTask refreshPromptSnapshotForCollection(FetchTask fetchTask) {
+    if (fetchTask == null) {
+      return null;
+    }
+    WideTablePlanSource wideTable =
+        wideTableReadRepository.getByIdForRequirement(fetchTask.getRequirementId(), fetchTask.getWideTableId());
+    if (wideTable == null) {
+      return fetchTask;
+    }
+    List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTable.getId());
+    IndicatorGroup matchedGroup = null;
+    for (IndicatorGroup indicatorGroup : indicatorGroups) {
+      if (indicatorGroup == null) {
+        continue;
+      }
+      if (fetchTask.getIndicatorGroupId() != null && fetchTask.getIndicatorGroupId().equals(indicatorGroup.id)) {
+        matchedGroup = indicatorGroup;
+        break;
+      }
+    }
+    if (matchedGroup == null && !indicatorGroups.isEmpty()) {
+      matchedGroup = indicatorGroups.get(0);
+    }
+    Map<String, String> dimensionValues = parseStringMap(fetchTask.getDimensionValuesJson());
+    String templateSnapshot = matchedGroup != null ? matchedGroup.promptTemplate : null;
+    fetchTask.setPromptTemplateSnapshot(templateSnapshot);
+    fetchTask.setRenderedPromptText(renderPromptTemplate(templateSnapshot, dimensionValues));
+    return fetchTask;
+  }
+
   private TaskGroup withTotals(TaskGroup taskGroup, int total) {
     TaskGroup tg = new TaskGroup();
     tg.setId(taskGroup.getId());
@@ -988,6 +1035,32 @@ public class TaskPlanAppService {
     } while (matcher.find());
     matcher.appendTail(sb);
     return sb.toString();
+  }
+
+  private Map<String, String> parseStringMap(String rawJson) {
+    if (rawJson == null || rawJson.trim().isEmpty()) {
+      return Collections.emptyMap();
+    }
+    try {
+      Map<?, ?> raw = objectMapper.readValue(rawJson, Map.class);
+      if (raw == null || raw.isEmpty()) {
+        return Collections.emptyMap();
+      }
+      Map<String, String> normalized = new LinkedHashMap<String, String>();
+      for (Map.Entry<?, ?> entry : raw.entrySet()) {
+        if (entry == null || entry.getKey() == null) {
+          continue;
+        }
+        String key = String.valueOf(entry.getKey()).trim();
+        if (key.isEmpty()) {
+          continue;
+        }
+        normalized.put(key, entry.getValue() == null ? "" : String.valueOf(entry.getValue()));
+      }
+      return normalized;
+    } catch (Exception ex) {
+      return Collections.emptyMap();
+    }
   }
 
   private String writeJson(Object value) {

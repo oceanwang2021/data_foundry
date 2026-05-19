@@ -1,5 +1,6 @@
 package com.huatai.datafoundry.backend.task.infrastructure.client;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway;
 import java.net.URI;
 import java.util.Map;
@@ -19,12 +20,15 @@ import org.springframework.web.client.RestTemplate;
 public class CollectionSearchClient implements CollectionSearchGateway {
   private final RestTemplate restTemplate;
   private final String baseUrl;
+  private final ObjectMapper objectMapper;
 
   public CollectionSearchClient(
       @Qualifier("collectionRestTemplate") RestTemplate restTemplate,
-      @Value("${data-foundry.collection.base-url:http://118.196.116.160:3000}") String baseUrl) {
+      @Value("${data-foundry.collection.base-url:http://118.196.116.160:3000}") String baseUrl,
+      ObjectMapper objectMapper) {
     this.restTemplate = restTemplate;
     this.baseUrl = baseUrl;
+    this.objectMapper = objectMapper;
   }
 
   @Override
@@ -88,6 +92,147 @@ public class CollectionSearchClient implements CollectionSearchGateway {
     }
   }
 
+  @Override
+  public CollectionTaskStatusResult getTaskStatus(String taskId) {
+    String normalizedTaskId = normalizeTaskId(taskId);
+    if (normalizedTaskId == null) {
+      return new CollectionTaskStatusResult(false, null, null, "missing task id");
+    }
+    try {
+      ResponseEntity<String> response =
+          restTemplate.exchange(
+              URI.create(baseUrl + "/api/task/" + normalizedTaskId + "/status"),
+              HttpMethod.GET,
+              null,
+              String.class);
+      return parseTaskStatusResponse(response.getStatusCode(), response.getBody());
+    } catch (HttpStatusCodeException ex) {
+      HttpStatus status;
+      try {
+        status = HttpStatus.valueOf(ex.getRawStatusCode());
+      } catch (Exception ignored) {
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+      }
+      return new CollectionTaskStatusResult(
+          false, normalizedTaskId, null, "http " + status.value() + safeSnippet(ex.getResponseBodyAsString()));
+    } catch (RestClientException ex) {
+      return new CollectionTaskStatusResult(false, normalizedTaskId, null, "unavailable: " + ex.getMessage());
+    } catch (Exception ex) {
+      return new CollectionTaskStatusResult(false, normalizedTaskId, null, ex.getMessage());
+    }
+  }
+
+  @Override
+  public CollectionTaskResult getTaskResult(String taskId) {
+    String normalizedTaskId = normalizeTaskId(taskId);
+    if (normalizedTaskId == null) {
+      return new CollectionTaskResult(false, null, null, null, null, "missing task id");
+    }
+    try {
+      ResponseEntity<String> response =
+          restTemplate.exchange(
+              URI.create(baseUrl + "/api/task/" + normalizedTaskId + "/result"),
+              HttpMethod.GET,
+              null,
+              String.class);
+      return parseTaskResultResponse(response.getStatusCode(), response.getBody());
+    } catch (HttpStatusCodeException ex) {
+      HttpStatus status;
+      try {
+        status = HttpStatus.valueOf(ex.getRawStatusCode());
+      } catch (Exception ignored) {
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+      }
+      return new CollectionTaskResult(
+          false,
+          normalizedTaskId,
+          null,
+          null,
+          ex.getResponseBodyAsString(),
+          "http " + status.value() + safeSnippet(ex.getResponseBodyAsString()));
+    } catch (RestClientException ex) {
+      return new CollectionTaskResult(
+          false, normalizedTaskId, null, null, null, "unavailable: " + ex.getMessage());
+    } catch (Exception ex) {
+      return new CollectionTaskResult(false, normalizedTaskId, null, null, null, ex.getMessage());
+    }
+  }
+
+  private CollectionTaskStatusResult parseTaskStatusResponse(HttpStatus statusCode, String rawBody) {
+    if (statusCode == null || !statusCode.is2xxSuccessful()) {
+      return new CollectionTaskStatusResult(false, null, null, "non-2xx: " + statusCode);
+    }
+    try {
+      Map raw = objectMapper.readValue(rawBody, Map.class);
+      Object success = raw.get("success");
+      if (!(success instanceof Boolean) || !((Boolean) success).booleanValue()) {
+        Object detail = raw.get("detail");
+        return new CollectionTaskStatusResult(
+            false, null, null, detail != null ? String.valueOf(detail) : "success=false");
+      }
+      Object data = raw.get("data");
+      if (!(data instanceof Map)) {
+        return new CollectionTaskStatusResult(false, null, null, "missing data");
+      }
+      Map dataMap = (Map) data;
+      String taskId = stringValue(dataMap.get("task_id"));
+      String taskStatus = stringValue(dataMap.get("status"));
+      if (taskId == null || taskStatus == null) {
+        return new CollectionTaskStatusResult(false, taskId, taskStatus, "missing task status");
+      }
+      return new CollectionTaskStatusResult(true, taskId, taskStatus, null);
+    } catch (Exception ex) {
+      return new CollectionTaskStatusResult(false, null, null, ex.getMessage());
+    }
+  }
+
+  private CollectionTaskResult parseTaskResultResponse(HttpStatus statusCode, String rawBody) {
+    if (statusCode == null || !statusCode.is2xxSuccessful()) {
+      return new CollectionTaskResult(false, null, null, null, rawBody, "non-2xx: " + statusCode);
+    }
+    try {
+      Map raw = objectMapper.readValue(rawBody, Map.class);
+      Object success = raw.get("success");
+      if (!(success instanceof Boolean) || !((Boolean) success).booleanValue()) {
+        Object detail = raw.get("detail");
+        return new CollectionTaskResult(
+            false,
+            null,
+            null,
+            null,
+            rawBody,
+            detail != null ? String.valueOf(detail) : "success=false");
+      }
+      Object data = raw.get("data");
+      if (!(data instanceof Map)) {
+        return new CollectionTaskResult(false, null, null, null, rawBody, "missing data");
+      }
+      Map dataMap = (Map) data;
+      String taskId = stringValue(dataMap.get("task_id"));
+      String taskStatus = stringValue(dataMap.get("status"));
+      String finalReport = stringValue(dataMap.get("final_report"));
+      return new CollectionTaskResult(true, taskId, taskStatus, finalReport, rawBody, null);
+    } catch (Exception ex) {
+      return new CollectionTaskResult(false, null, null, null, rawBody, ex.getMessage());
+    }
+  }
+
+  private static String normalizeTaskId(String taskId) {
+    if (taskId == null) {
+      return null;
+    }
+    String normalized = taskId.trim();
+    return normalized.length() > 0 ? normalized : null;
+  }
+
+  private static String stringValue(Object raw) {
+    if (raw == null) {
+      return null;
+    }
+    String value = String.valueOf(raw).trim();
+    return value.length() > 0 ? value : null;
+  }
+
   private static String safeSnippet(String raw) {
     if (raw == null) return "";
     String s = raw.trim();
@@ -98,4 +243,3 @@ public class CollectionSearchClient implements CollectionSearchGateway {
     return " (downstream=" + s + ")";
   }
 }
-

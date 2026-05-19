@@ -49,4 +49,9 @@ public class TaskExecutionLegacyController {
       @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey) {
     return taskAppService.retryTask(taskId, idempotencyKey);
   }
+
+  @PostMapping("/tasks/wide-tables/{wideTableId}/sync-collection-statuses")
+  public Map<String, Object> syncWideTableCollectionStatuses(@PathVariable("wideTableId") String wideTableId) {
+    return taskAppService.syncWideTableCollectionStatuses(wideTableId);
+  }
 }

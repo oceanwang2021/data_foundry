@@ -1875,6 +1875,10 @@ export async function ensureTaskGroupTasks(taskGroupId: string): Promise<void> {
   await apiPost(`/api/task-groups/${taskGroupId}/ensure-tasks`);
 }
 
+export async function syncWideTableCollectionStatuses(wideTableId: string): Promise<void> {
+  await apiPost(`/api/tasks/wide-tables/${encodeURIComponent(wideTableId)}/sync-collection-statuses`);
+}
+
 // ---- Backfill ----
 
 export async function fetchBackfillRequests(

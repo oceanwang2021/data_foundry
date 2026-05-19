@@ -111,4 +111,9 @@ public class TaskFacadeController {
       @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey) {
     return taskAppService.retryTask(taskId, idempotencyKey);
   }
+
+  @PostMapping("/wide-tables/{wideTableId}/actions/sync-collection-statuses")
+  public Map<String, Object> syncWideTableCollectionStatuses(@PathVariable("wideTableId") String wideTableId) {
+    return taskAppService.syncWideTableCollectionStatuses(wideTableId);
+  }
 }

@@ -30,6 +30,12 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   }
 
   @Override
+  public List<FetchTask> listByWideTable(String wideTableId) {
+    List<FetchTaskRecord> records = fetchTaskMapper.listByWideTable(wideTableId);
+    return toDomainList(records);
+  }
+
+  @Override
   public List<FetchTask> listByTaskGroup(String taskGroupId) {
     List<FetchTaskRecord> records = fetchTaskMapper.listByTaskGroup(taskGroupId);
     return toDomainList(records);

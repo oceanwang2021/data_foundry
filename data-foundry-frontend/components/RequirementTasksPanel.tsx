@@ -20,6 +20,7 @@ import {
   ensureTaskGroupTasks,
   persistWideTablePlan,
   persistWideTablePreview,
+  syncWideTableCollectionStatuses,
   updateRequirementWideTable,
   retryTask,
 } from "@/lib/api-client";
@@ -637,6 +638,47 @@ export default function RequirementTasksPanel({
     () => buildTaskStatusLegend(expandedTaskCards),
     [expandedTaskCards],
   );
+  const expandedTaskInstanceStatusLegend = useMemo(
+    () => buildTaskStatusLegend(tgFetchTasks),
+    [tgFetchTasks],
+  );
+  const trialTaskGroupRunViews = useMemo(
+    () => taskGroupRunViews.filter((taskGroup) => taskGroup.triggeredBy === "trial"),
+    [taskGroupRunViews],
+  );
+  const collectionTaskGroupRunViews = useMemo(
+    () => taskGroupRunViews.filter((taskGroup) => taskGroup.triggeredBy !== "trial"),
+    [taskGroupRunViews],
+  );
+  const collectionTaskGroupSections = useMemo(
+    () => (
+      effectiveWideTable
+        ? buildTaskGroupRunSections(effectiveWideTable, collectionTaskGroupRunViews)
+        : [{ id: "__all__", label: "", taskGroups: collectionTaskGroupRunViews }]
+    ),
+    [collectionTaskGroupRunViews, effectiveWideTable],
+  );
+  const expandedTaskInstanceRows = useMemo(
+    () => buildTaskInstanceRowViews({
+      wideTable: selectedWt ?? effectiveWideTable ?? undefined,
+      fetchTasks: tgFetchTasks,
+      wideTableRecords: currentWideTableRecords,
+      indicatorGroups: effectiveWideTable?.indicatorGroups ?? selectedWt?.indicatorGroups ?? [],
+      parameterColumns: returnContextColumns.filter((column) => !column.isBusinessDate),
+    }),
+    [currentWideTableRecords, effectiveWideTable, returnContextColumns, selectedWt, tgFetchTasks],
+  );
+  const hasRunningCollectionInstances = useMemo(
+    () => Boolean(
+      selectedWt && fetchTasks.some(
+        (task) =>
+          task.wideTableId === selectedWt.id
+          && Boolean(task.collectionTaskId)
+          && (task.status === "running" || task.status === "pending"),
+      ),
+    ),
+    [fetchTasks, selectedWt],
+  );
 
   useEffect(() => {
     setIndicatorGroupMessage("");
@@ -689,6 +731,41 @@ export default function RequirementTasksPanel({
       return next;
     });
   }, [effectiveWideTable, promptEditorGroups, requirement, selectedWt]);
+
+  useEffect(() => {
+    if (!selectedWt || activeTaskSubTab !== "tasks" || !hasRunningCollectionInstances || !onRefreshData) {
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const sync = async () => {
+      if (cancelled || inFlight) {
+        return;
+      }
+      inFlight = true;
+      try {
+        await syncWideTableCollectionStatuses(selectedWt.id);
+        if (!cancelled) {
+          await onRefreshData();
+        }
+      } catch {
+        // Keep the page interactive even if downstream status sync is temporarily unavailable.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void sync();
+    const timer = window.setInterval(() => {
+      void sync();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeTaskSubTab, hasRunningCollectionInstances, onRefreshData, selectedWt]);
 
   const handleAddIndicatorGroup = () => {
     if (!selectedWt) {
@@ -1287,6 +1364,168 @@ export default function RequirementTasksPanel({
       setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
     }
   };
+
+  const renderTaskGroupCards = (taskGroupViews: HistoricalTaskGroupView[]) => (
+    <div className="rounded-xl border bg-background divide-y overflow-hidden">
+      {taskGroupViews.map((tg) => {
+        const isExpanded = expandedTgId === tg.id;
+        return (
+          <div
+            key={tg.id}
+            className={cn(
+              "transition-colors",
+              isExpanded ? "bg-muted/10" : "hover:bg-muted/20",
+            )}
+          >
+            <div className="flex items-center gap-3 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => toggleTaskGroupExpand(tg.id)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{tg.displayLabel}</span>
+                    <StatusBadge
+                      status={tg.displayStatus}
+                      label={getTaskGroupStatusLabel(tg)}
+                    />
+                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border bg-background")}>
+                      {getTriggerDisplayLabel(tg.triggeredBy)}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {tg.isReal
+                      ? `${tg.id} | total ${tg.totalTasks} | running ${tg.runningTasks} | completed ${tg.completedTasks} | failed ${tg.failedTasks}${tg.pendingTasks > 0 ? ` | pending ${tg.pendingTasks}` : ""}`
+                      : isScheduledFutureTaskGroupView(tg)
+                        ? `planned task group | total ${tg.totalTasks} | will be created and executed automatically when due`
+                        : `planned task group | total ${tg.totalTasks} | no runtime records yet`}
+                  </div>
+                </div>
+                <div className="w-24 shrink-0">
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full",
+                        tg.displayStatus === "running"
+                          ? "bg-blue-400"
+                          : tg.failedTasks > 0
+                            ? "bg-red-400"
+                            : "bg-emerald-400",
+                      )}
+                      style={{ width: `${tg.progressPercent}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-muted-foreground text-right mt-0.5">
+                    {tg.progressPercent}%
+                  </div>
+                </div>
+                <span className="text-xs text-muted-foreground shrink-0">
+                  {isExpanded ? "收起" : "展开"}
+                </span>
+              </button>
+            </div>
+
+            {isExpanded ? (
+              <div className="border-t bg-background px-4 py-3">
+                {expandedTaskInstanceRows.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集实例。</div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                      {expandedTaskInstanceStatusLegend.map((item) => (
+                        <span
+                          key={item.status}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border px-2 py-1",
+                            item.badgeClassName,
+                          )}
+                        >
+                          <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
+                          {item.label} {item.count}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+                      <table className="w-full text-xs leading-5">
+                        <thead>
+                          <tr>
+                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集参数</th>
+                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">时间列</th>
+                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集指标组</th>
+                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集实例 ID</th>
+                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">实例状态</th>
+                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {expandedTaskInstanceRows.map((row) => {
+                            const isRunning = row.status === "running";
+                            const actionLabel = row.status === "failed" || row.status === "completed" ? "重采" : "采集";
+                            return (
+                              <tr key={row.fetchTaskId}>
+                                <td className="px-3 py-3 align-top text-slate-700">
+                                  <div className="space-y-1">
+                                    {row.parameterLines.map((line) => (
+                                      <div key={`${row.fetchTaskId}-${line}`} className="break-all">
+                                        {line}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 align-top text-slate-700">{row.businessDateLabel}</td>
+                                <td className="px-3 py-3 align-top text-slate-700">
+                                  <div className="space-y-1">
+                                    <div className="font-medium">{row.indicatorGroupName}</div>
+                                    <div className="text-muted-foreground">{row.indicatorLabels.join("、") || "-"}</div>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
+                                  {row.collectionTaskId ?? "-"}
+                                </td>
+                                <td className="px-3 py-3 align-top">
+                                  <StatusBadge status={row.status} />
+                                </td>
+                                <td className="px-3 py-3 align-top">
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
+                                      disabled={runningTaskIds.includes(row.fetchTaskId) || isRunning}
+                                      className={cn(
+                                        "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                                        "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
+                                      )}
+                                    >
+                                      {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
+                                    </button>
+                                    {isRunning ? (
+                                      <button
+                                        type="button"
+                                        disabled
+                                        title="暂未接入取消接口"
+                                        className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-muted-foreground opacity-60"
+                                      >
+                                        取消
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -2129,7 +2368,7 @@ export default function RequirementTasksPanel({
 
           {taskPlan ? (
             <>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-3 md:grid-cols-2">
                 <PlanMetricCard
                   title={usesBusinessDateAxis ? "业务日期数" : "单次快照行数"}
                   value={String(usesBusinessDateAxis ? taskPlan.businessDateCount : taskPlan.plannedRowCount)}
@@ -2139,16 +2378,18 @@ export default function RequirementTasksPanel({
                       : taskPlan.scheduleSummary
                   }
                 />
-                <PlanMetricCard title="维度组合" value={String(taskPlan.dimensionCombinationCount)} hint={taskPlan.dimensionSummary} />
-                <PlanMetricCard title="指标组数" value={String(taskPlan.indicatorGroupCount)} hint={taskPlan.indicatorGroupSummary} />
                 <PlanMetricCard
-                  title={usesBusinessDateAxis ? "总逻辑任务" : "单次任务组任务数"}
-                  value={String(taskPlan.plannedTaskCount)}
-                  hint={
-                    usesBusinessDateAxis
-                      ? `${taskPlan.plannedRowCount} 行 × ${taskPlan.indicatorGroupCount} 组${taskPlan.futureWindowLabel ? ` · ${taskPlan.futureWindowLabel}` : ""}`
-                      : `${taskPlan.plannedRowCount} 行 × ${taskPlan.indicatorGroupCount} 组`
-                  }
+                  title="采集任务"
+                  value={String(taskPlan.collectionTaskCount)}
+                  hint={taskPlan.collectionTasks.length > 0 ? (
+                    <div className="space-y-1">
+                      {taskPlan.collectionTasks.map((task, index) => (
+                        <div key={task.id}>
+                          {`采集任务${index + 1}${task.name ? `（${task.name}）` : ""}：${task.indicatorLabels.join("、") || "未关联指标"}`}
+                        </div>
+                      ))}
+                    </div>
+                  ) : "未配置采集任务"}
                 />
               </div>
             </>
@@ -2214,7 +2455,35 @@ export default function RequirementTasksPanel({
           </div>
         ) : (
           <div className="space-y-6">
-            {taskGroupRunSections.map((section, sectionIndex) => {
+            {trialTaskGroupRunViews.length > 0 ? (
+              <div className="space-y-3">
+                <div className="px-1">
+                  <div className="text-base font-semibold text-foreground">试运行任务</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    这里展示试运行时生成的采集实例，包含采集参数、时间列、采集指标组、采集实例 ID、实例状态与操作。
+                  </div>
+                </div>
+                {renderTaskGroupCards(trialTaskGroupRunViews)}
+              </div>
+            ) : null}
+
+            {collectionTaskGroupSections.map((section, sectionIndex) => {
+              const displayGroupLabel = section.taskGroups[0]?.indicatorGroupName || "统一提示词";
+
+              return (
+                <div key={section.id} className="space-y-3">
+                  <div className="px-1">
+                    <div className="text-base font-semibold text-foreground">{`采集任务${sectionIndex + 1}：${displayGroupLabel}`}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      任务实例按业务周期拆分；子任务实例在展开或执行任务实例时按维度组合按需生成。
+                    </div>
+                  </div>
+                  {renderTaskGroupCards(section.taskGroups)}
+                </div>
+              );
+            })}
+
+            {false && taskGroupRunSections.map((section, sectionIndex) => {
               const rawLabel = (section.label ?? "").trim();
               const groupLabel = rawLabel.endsWith("采集任务")
                 ? rawLabel.slice(0, rawLabel.length - "采集任务".length)
@@ -2677,7 +2946,7 @@ function StatusBadge({ status, label }: { status: string; label?: string }) {
   );
 }
 
-function PlanMetricCard({ title, value, hint }: { title: string; value: string; hint: string }) {
+function PlanMetricCard({ title, value, hint }: { title: string; value: string; hint: React.ReactNode }) {
   return (
     <div className="rounded-lg border bg-muted/10 px-4 py-3">
       <div className="text-[11px] text-muted-foreground">{title}</div>
@@ -3016,6 +3285,12 @@ type TaskPlanView = {
   futureRangeLabel: string;
   dimensionCombinationCount: number;
   indicatorGroupCount: number;
+  collectionTaskCount: number;
+  collectionTasks: Array<{
+    id: string;
+    name: string;
+    indicatorLabels: string[];
+  }>;
   plannedRowCount: number;
   plannedTaskCount: number;
   dimensionSummary: string;
@@ -3055,6 +3330,17 @@ type TaskGroupRunSectionView = {
   taskGroups: HistoricalTaskGroupView[];
 };
 
+type TaskInstanceRowView = {
+  fetchTaskId: string;
+  rowLabel: string;
+  parameterLines: string[];
+  businessDateLabel: string;
+  indicatorGroupName: string;
+  indicatorLabels: string[];
+  collectionTaskId?: string;
+  status: FetchTask["status"];
+};
+
 type PlanVersionView = {
   version: number;
   isCurrent: boolean;
@@ -3066,6 +3352,9 @@ type PlanVersionView = {
 };
 
 function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
+  const collectionTasks = resolveCollectionTaskSummaries(wideTable);
+  const collectionTaskCount = collectionTasks.length;
+
   if (!hasWideTableBusinessDateDimension(wideTable)) {
     const dimensionColumns = wideTable.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate);
     const dimensionCombinationCount = calculateDimensionCombinationCount(wideTable, dimensionColumns);
@@ -3081,6 +3370,8 @@ function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
       futureRangeLabel: "由调度规则持续生成",
       dimensionCombinationCount,
       indicatorGroupCount,
+      collectionTaskCount,
+      collectionTasks,
       plannedRowCount,
       plannedTaskCount: plannedRowCount * indicatorGroupCount,
       dimensionSummary: summarizeDimensions(wideTable, dimensionColumns),
@@ -3121,6 +3412,8 @@ function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
     futureRangeLabel: summarizeDateSlots(futureDates, "当前范围内无未来任务"),
     dimensionCombinationCount,
     indicatorGroupCount,
+    collectionTaskCount,
+    collectionTasks,
     plannedRowCount,
     plannedTaskCount,
     dimensionSummary: summarizeDimensions(wideTable, dimensionColumns),
@@ -3440,6 +3733,110 @@ function resolveIndicatorGroupLabels(wideTable: WideTable): string[] {
   }
 
   return [];
+}
+
+function resolveCollectionTaskSummaries(
+  wideTable: WideTable,
+): Array<{ id: string; name: string; indicatorLabels: string[] }> {
+  const indicatorColumns = wideTable.schema.columns.filter((column) => column.category === "indicator");
+  if (indicatorColumns.length === 0) {
+    return [];
+  }
+
+  if (wideTable.indicatorGroups.length > 0) {
+    return [...wideTable.indicatorGroups]
+      .filter((group) => group.indicatorColumns.length > 0)
+      .sort((left, right) => left.priority - right.priority)
+      .map((group) => ({
+        id: group.id,
+        name: group.name || "统一提示词",
+        indicatorLabels: group.indicatorColumns.map((columnName) => findIndicatorColumnLabel(indicatorColumns, columnName)),
+      }));
+  }
+
+  return [{
+    id: buildDefaultIndicatorGroupId(wideTable.id),
+    name: "统一提示词",
+    indicatorLabels: indicatorColumns.map((column) => findIndicatorColumnLabel(indicatorColumns, column.name)),
+  }];
+}
+
+function buildTaskInstanceRowViews(params: {
+  wideTable?: WideTable;
+  fetchTasks: FetchTask[];
+  wideTableRecords: WideTableRecord[];
+  indicatorGroups: WideTable["indicatorGroups"];
+  parameterColumns: ColumnDefinition[];
+}): TaskInstanceRowView[] {
+  const { wideTable, fetchTasks, wideTableRecords, indicatorGroups, parameterColumns } = params;
+  if (!wideTable || fetchTasks.length === 0) {
+    return [];
+  }
+
+  const recordsByRowBindingKey = new Map<string, WideTableRecord>();
+  const recordsByRowId = new Map<number, WideTableRecord>();
+  for (const record of wideTableRecords) {
+    const rowBindingKey = String(record.rowBindingKey ?? "").trim();
+    if (rowBindingKey) {
+      recordsByRowBindingKey.set(rowBindingKey, record);
+    }
+    recordsByRowId.set(record.id, record);
+  }
+
+  const indicatorColumns = wideTable.schema.columns.filter((column) => column.category === "indicator");
+  const indicatorGroupById = new Map(indicatorGroups.map((group) => [group.id, group] as const));
+
+  return fetchTasks.map((fetchTask) => {
+    const record = (fetchTask.rowBindingKey && recordsByRowBindingKey.get(fetchTask.rowBindingKey))
+      ?? recordsByRowId.get(fetchTask.rowId);
+    const businessDate = record ? resolveTaskRecordBusinessDate(wideTable, record) : "";
+    const matchedIndicatorGroup = indicatorGroupById.get(fetchTask.indicatorGroupId);
+    const indicatorLabels = (matchedIndicatorGroup?.indicatorColumns ?? [])
+      .map((columnName) => findIndicatorColumnLabel(indicatorColumns, columnName));
+
+    return {
+      fetchTaskId: fetchTask.id,
+      rowLabel: buildTaskInstanceRowLabel(fetchTask, record),
+      parameterLines: formatTaskInstanceParameterLines(parameterColumns, record),
+      businessDateLabel: businessDate
+        ? formatBusinessDateLabel(businessDate, wideTable.businessDateRange.frequency)
+        : fetchTask.id,
+      indicatorGroupName: matchedIndicatorGroup?.name ?? fetchTask.indicatorGroupName ?? "统一提示词",
+      indicatorLabels,
+      collectionTaskId: fetchTask.collectionTaskId,
+      status: fetchTask.status,
+    };
+  });
+}
+
+function formatTaskInstanceParameterLines(
+  parameterColumns: ColumnDefinition[],
+  record?: WideTableRecord,
+): string[] {
+  if (!record) {
+    return ["参数行未匹配到当前宽表记录"];
+  }
+
+  const lines = parameterColumns
+    .map((column) => {
+      const label = column.chineseName || column.name;
+      const value = record[column.name];
+      const text = value == null ? "" : String(value).trim();
+      return text ? `${label}：${text}` : "";
+    })
+    .filter(Boolean);
+
+  return lines.length > 0 ? lines : [`rowId：${record.id}`];
+}
+
+function buildTaskInstanceRowLabel(fetchTask: FetchTask, record?: WideTableRecord): string {
+  if (record?.rowBindingKey) {
+    return record.rowBindingKey;
+  }
+  if (record) {
+    return `row-${record.id}`;
+  }
+  return fetchTask.id;
 }
 
 function buildTrialParameterRowKey(
