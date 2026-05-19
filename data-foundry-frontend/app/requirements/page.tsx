@@ -35,12 +35,21 @@ function buildDefaultFilters(): Filters {
   };
 }
 
+function formatSearchError(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  if (detail.includes("ECONNREFUSED") || detail.includes("Proxy request failed")) {
+    return "Cannot connect to backend. Start backend on http://127.0.0.1:8000 or update BACKEND_API_BASE.";
+  }
+  return detail ? `Failed to load requirements: ${detail}` : "Failed to load requirements.";
+}
+
 export default function RequirementsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [result, setResult] = useState<RequirementSearchPage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [searchError, setSearchError] = useState("");
 
   const [draftFilters, setDraftFilters] = useState<Filters>(() => buildDefaultFilters());
   const [filters, setFilters] = useState<Filters>(() => buildDefaultFilters());
@@ -64,6 +73,7 @@ export default function RequirementsPage() {
 
   const runSearch = useCallback(async () => {
     setIsLoading(true);
+    setSearchError("");
     try {
       const data = await searchRequirementsPage({
         page,
@@ -79,6 +89,8 @@ export default function RequirementsPage() {
         sortDir,
       });
       setResult(data);
+    } catch (error) {
+      setSearchError(formatSearchError(error));
     } finally {
       setIsLoading(false);
     }
@@ -160,6 +172,11 @@ export default function RequirementsPage() {
           </div>
 
           {message ? <div className="mt-3 text-xs text-primary">{message}</div> : null}
+          {searchError ? (
+            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {searchError}
+            </div>
+          ) : null}
 
           <div className="mt-4 rounded-lg border bg-muted/10 p-4">
             <div className="grid gap-3 md:grid-cols-6">

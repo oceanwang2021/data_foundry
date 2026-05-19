@@ -3,6 +3,7 @@ package com.huatai.datafoundry.backend.task.interfaces.web;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.CollectionResultReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskResultsReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.MetricFieldMappingReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.service.RequirementQueryService;
 import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
@@ -78,6 +79,44 @@ public class TaskFacadeController {
   @PostMapping("/task-groups/{taskGroupId}/results/actions/normalize-final-reports")
   public FetchTaskResultsReadDto normalizeTaskGroupFinalReports(@PathVariable("taskGroupId") String taskGroupId) {
     return requirementQueryService.normalizeTaskGroupFinalReports(taskGroupId);
+  }
+
+  @GetMapping("/wide-tables/{wideTableId}/metric-mappings")
+  public List<MetricFieldMappingReadDto> listMetricFieldMappings(@PathVariable("wideTableId") String wideTableId) {
+    return requirementQueryService.listMetricFieldMappings(wideTableId);
+  }
+
+  @PostMapping("/wide-tables/{wideTableId}/metric-mappings/actions/generate-from-results")
+  public List<MetricFieldMappingReadDto> generateMetricFieldMappings(@PathVariable("wideTableId") String wideTableId) {
+    return requirementQueryService.generateMetricFieldMappings(wideTableId);
+  }
+
+  @PostMapping("/wide-tables/{wideTableId}/results/actions/materialize-mapped-results")
+  public Map<String, Object> materializeMappedResults(@PathVariable("wideTableId") String wideTableId) {
+    return requirementQueryService.materializeMappedResults(wideTableId);
+  }
+
+  @PostMapping("/wide-tables/{wideTableId}/metric-mappings/{mappingId}")
+  public MetricFieldMappingReadDto updateMetricFieldMapping(
+      @PathVariable("wideTableId") String wideTableId,
+      @PathVariable("mappingId") String mappingId,
+      @RequestBody Map<String, Object> body) {
+    String targetIndicatorKey = body != null && body.get("target_indicator_key") != null
+        ? String.valueOf(body.get("target_indicator_key"))
+        : body != null && body.get("targetIndicatorKey") != null
+            ? String.valueOf(body.get("targetIndicatorKey"))
+            : null;
+    String targetIndicatorName = body != null && body.get("target_indicator_name") != null
+        ? String.valueOf(body.get("target_indicator_name"))
+        : body != null && body.get("targetIndicatorName") != null
+            ? String.valueOf(body.get("targetIndicatorName"))
+            : null;
+    String matchType = body != null && body.get("match_type") != null
+        ? String.valueOf(body.get("match_type"))
+        : body != null && body.get("matchType") != null ? String.valueOf(body.get("matchType")) : null;
+    String status = body != null && body.get("status") != null ? String.valueOf(body.get("status")) : null;
+    return requirementQueryService.updateMetricFieldMapping(
+        wideTableId, mappingId, targetIndicatorKey, targetIndicatorName, matchType, status);
   }
 
   @GetMapping("/{taskId}/runs")

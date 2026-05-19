@@ -42,6 +42,16 @@ public interface WideTableMapper {
       @Param("requirementId") String requirementId,
       @Param("wideTableId") String wideTableId);
 
+  @Select(
+      "select "
+          + "id, sort_order, requirement_id, title, description, table_name, schema_version, "
+          + "schema_json, scope_json, indicator_groups_json, schedule_rules_json, semantic_time_axis, "
+          + "collection_coverage_mode, status, record_count, created_at, updated_at "
+          + "from wide_tables "
+          + "where id = #{wideTableId} "
+          + "limit 1")
+  WideTableRecord getById(@Param("wideTableId") String wideTableId);
+
   @Update({
       "<script>",
       "update wide_tables",

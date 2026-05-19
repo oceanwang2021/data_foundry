@@ -5,15 +5,20 @@ import {
   fetchPreprocessRules,
   fetchTaskGroupResults,
   fetchTaskResults,
+  fetchMetricFieldMappings,
+  generateMetricFieldMappings,
+  materializeMappedResults,
   fetchWideTableResults,
   normalizeFinalReport,
   normalizeTaskGroupFinalReports,
   normalizeWideTableFinalReports,
+  updateMetricFieldMapping,
 } from "@/lib/api-client";
 import type {
   ColumnDefinition,
   CollectionResult,
   FetchTask,
+  MetricFieldMapping,
   Requirement,
   TaskGroup,
   WideTable,
@@ -199,16 +204,16 @@ function buildRequirementPreprocessRules(requirement: Requirement): PreprocessRu
   return [];
 }
 
-type DataSubTab = "raw" | "narrow" | "wide";
+type DataSubTab = "raw" | "mapping" | "wide";
 
 const dataSubTabMeta: Record<DataSubTab, { title: string; description: string }> = {
   raw: {
-    title: "采集原始结果",
+    title: "采集明细",
     description: "查看 Agent 原始回传，并将 final_report 第一张 Markdown 表转为 JSON。",
   },
-  narrow: {
-    title: "采集明细",
-    description: "查看任务回传、语义判断和填充结果。",
+  mapping: {
+    title: "指标映射",
+    description: "把 Agent 返回的指标搜索名称映射到目标宽表字段。",
   },
   wide: {
     title: "结果预览",
@@ -239,6 +244,8 @@ export default function RequirementDataProcessingPanel({
   }, [rules.length]);
   const [selectedTaskModal, setSelectedTaskModal] = useState<SelectedTaskModalState | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<DataSubTab>("raw");
+  const [materializingWideTableId, setMaterializingWideTableId] = useState<string>("");
+  const [materializeMessage, setMaterializeMessage] = useState<string>("");
 
   const enabledCategories = useMemo(
     () => new Set(rules.filter((item) => item.enabled).map((item) => item.category)),
@@ -293,13 +300,29 @@ export default function RequirementDataProcessingPanel({
     [currentWideTableRecords, enabledCategories, requirement, wideTables],
   );
 
+  const materializeWideTable = async (wideTable: WideTable) => {
+    setMaterializingWideTableId(wideTable.id);
+    setMaterializeMessage("");
+    try {
+      const outcome = await materializeMappedResults(wideTable.id);
+      setMaterializeMessage(
+        `${wideTable.name} 已根据映射生成结果预览：明细 ${outcome.collectionResultRows} 行，回填 ${outcome.wideTableCells} 个指标值。`,
+      );
+      await onRefreshData?.();
+    } catch (error) {
+      setMaterializeMessage(error instanceof Error ? error.message : "根据映射生成结果预览失败");
+    } finally {
+      setMaterializingWideTableId("");
+    }
+  };
+
   // Demo → 正式转换流程已取消：需求创建后即可直接进入任务与数据产出。
 
   return (
     <div className="space-y-6">
       <section className="rounded-xl border bg-card/90 p-2">
         <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          {(["raw", "narrow", "wide"] as const).map((tab) => (
+          {(["raw", "mapping", "wide"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -329,49 +352,34 @@ export default function RequirementDataProcessingPanel({
         />
       ) : null}
 
-      {activeSubTab === "narrow" ? (
-        <div className="space-y-6">
-          <section className="rounded-xl border bg-card p-6 space-y-4">
-            <h2 className="sr-only">采集明细</h2>
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <p className="text-xs text-muted-foreground md:max-w-3xl">
-                按采集任务逐行查看回传值、语义判断和填充结果，便于核对每个指标是如何落到最终值的。
-              </p>
-              <FillingRulesTooltip />
-            </div>
-            {requirementWideTables.length === 0 ? (
-              <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-xs text-muted-foreground">
-                暂无可预览的采集明细。请先在表结构定义中补充指标列并完成采集。
-              </div>
-            ) : (
-              requirementWideTables
-                .map((wt) => (
-                  <NarrowTableViewSection
-                    key={wt.id}
-                    wideTable={wt}
-                    wideTableRecords={currentWideTableRecords.filter((r) => r.wideTableId === wt.id)}
-                    taskGroups={currentTaskGroups.filter((tg) => tg.wideTableId === wt.id)}
-                    fetchTasks={currentFetchTasks.filter((ft) => ft.wideTableId === wt.id)}
-                    scheduleJobs={scheduleJobs.filter(
-                      (job) => job.wideTableId === wt.id || currentTaskGroups.some((tg) => tg.id === job.taskGroupId && tg.wideTableId === wt.id),
-                    )}
-                    onOpenTaskModal={setSelectedTaskModal}
-                  />
-                ))
-            )}
-          </section>
-        </div>
+      {activeSubTab === "mapping" ? (
+        <MetricFieldMappingPanel wideTables={requirementWideTables} />
       ) : null}
 
       {activeSubTab === "wide" ? (
         <div className="space-y-6">
           <section className="rounded-xl border bg-card p-6 space-y-4">
             <h3 className="sr-only">结果预览</h3>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <p className="text-xs text-muted-foreground md:max-w-3xl">
                 按需求定义的结构查看当前结果；点亮的指标单元格可直接回溯到对应任务。
               </p>
+              {requirementWideTables.length === 1 ? (
+                <button
+                  type="button"
+                  onClick={() => materializeWideTable(requirementWideTables[0])}
+                  disabled={materializingWideTableId !== ""}
+                  className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {materializingWideTableId ? "生成中..." : "根据映射生成结果预览"}
+                </button>
+              ) : null}
             </div>
+            {materializeMessage ? (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                {materializeMessage}
+              </div>
+            ) : null}
             {wideTableViews.length === 0 ? <EmptyWideTableState /> : null}
             {wideTableViews.map((view) => {
               const wideTable = wideTables.find((item) => item.id === view.wideTableId);
@@ -412,6 +420,272 @@ export default function RequirementDataProcessingPanel({
 }
 
 // ==================== 填充规则 Tooltip ====================
+
+function MetricFieldMappingPanel({ wideTables }: { wideTables: WideTable[] }) {
+  if (wideTables.length === 0) {
+    return (
+      <section className="rounded-xl border bg-card p-6">
+        <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-xs text-muted-foreground">
+          暂无目标宽表，无法配置指标映射。
+        </div>
+      </section>
+    );
+  }
+  return (
+    <div className="space-y-6">
+      {wideTables.map((wideTable) => (
+        <MetricFieldMappingSection key={wideTable.id} wideTable={wideTable} />
+      ))}
+    </div>
+  );
+}
+
+function buildMappingDrafts(mappings: MetricFieldMapping[]): Record<string, string> {
+  return Object.fromEntries(mappings.map((mapping) => [mapping.id, mapping.targetIndicatorKey ?? ""]));
+}
+
+function MetricFieldMappingSection({ wideTable }: { wideTable: WideTable }) {
+  const [mappings, setMappings] = useState<MetricFieldMapping[]>([]);
+  const [draftTargetById, setDraftTargetById] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
+  const [message, setMessage] = useState<string>("");
+  const targetColumns = useMemo(
+    () => wideTable.schema.columns.filter((column) => column.category === "indicator"),
+    [wideTable.schema.columns],
+  );
+
+  const loadMappings = async () => {
+    setLoading(true);
+    setMessage("");
+    try {
+      const next = await fetchMetricFieldMappings(wideTable.id);
+      setMappings(next);
+      setDraftTargetById(buildMappingDrafts(next));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "加载指标映射失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMappings();
+  }, [wideTable.id]);
+
+  const generateMappings = async () => {
+    setLoading(true);
+    setMessage("");
+    try {
+      const next = await generateMetricFieldMappings(wideTable.id);
+      setMappings(next);
+      setDraftTargetById(buildMappingDrafts(next));
+      setMessage(`已从 normalized_rows_json 提取 ${next.length} 个指标搜索名称。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "生成指标映射失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateDraftTarget = (mapping: MetricFieldMapping, targetKey: string) => {
+    setDraftTargetById((prev) => ({ ...prev, [mapping.id]: targetKey }));
+  };
+
+  const confirmMappings = async () => {
+    if (mappings.length === 0) return;
+    setSavingAll(true);
+    setMessage("");
+    try {
+      const updatedMappings: MetricFieldMapping[] = [];
+      for (const mapping of mappings) {
+        const targetKey = (draftTargetById[mapping.id] ?? mapping.targetIndicatorKey ?? "").trim();
+        const originalTargetKey = (mapping.targetIndicatorKey ?? "").trim();
+        const updated = await updateMetricFieldMapping(wideTable.id, mapping.id, {
+          targetIndicatorKey: targetKey || null,
+          targetIndicatorName: null,
+          matchType: targetKey && targetKey === originalTargetKey ? mapping.matchType : "manual",
+          status: targetKey ? "confirmed" : "rejected",
+        });
+        updatedMappings.push(updated);
+      }
+      setMappings(updatedMappings);
+      setDraftTargetById(buildMappingDrafts(updatedMappings));
+      setMessage("映射关系已确认保存，未选择目标字段的指标已标记为不转换。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存映射关系失败");
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
+  const confirmedCount = mappings.filter((item) => item.status === "confirmed").length;
+  const skippedCount = mappings.filter((item) => item.status === "rejected").length;
+
+  return (
+    <section className="rounded-xl border bg-card p-6 space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold">{wideTable.name}</h2>
+          <p className="text-xs text-muted-foreground">
+            指标搜索名称来自 normalized_rows_json，目标字段来自当前宽表 indicator 列。只有确认后的映射才应进入后续物化回填。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={generateMappings}
+          disabled={loading || savingAll}
+          className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? "处理中..." : "从原始结果生成映射"}
+        </button>
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        映射项 {mappings.length} · 已确认 {confirmedCount} · 目标字段 {targetColumns.length}
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-muted-foreground">
+          {"不转换"} {skippedCount} {"项。目标字段留空后确认保存，会标记为 rejected。"}
+        </div>
+        <button
+          type="button"
+          onClick={confirmMappings}
+          disabled={loading || savingAll || mappings.length === 0}
+          className="inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {savingAll ? "保存中..." : "确认并保存映射"}
+        </button>
+      </div>
+      {message ? (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">{message}</div>
+      ) : null}
+
+      <div className="overflow-x-auto rounded-md border">
+        <table className="min-w-full text-left text-xs">
+          <thead className="bg-muted/40 text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">指标搜索名称</th>
+              <th className="px-3 py-2 font-medium">目标字段</th>
+              <th className="px-3 py-2 font-medium">字段说明</th>
+              <th className="px-3 py-2 font-medium">状态</th>
+              <th className="px-3 py-2 font-medium">匹配方式</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mappings.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                  暂无映射。请先在“采集明细”完成转换，再点击“从原始结果生成映射”。
+                </td>
+              </tr>
+            ) : mappings.map((mapping) => {
+              const draftTargetKey = draftTargetById[mapping.id] ?? mapping.targetIndicatorKey ?? "";
+              const target = targetColumns.find((column) => column.name === draftTargetKey);
+              const displayStatus = draftTargetKey ? mapping.status : "rejected";
+              return (
+                <tr key={mapping.id} className="border-t">
+                  <td className="min-w-48 px-3 py-2 text-foreground">{mapping.sourceMetricName}</td>
+                  <td className="min-w-56 px-3 py-2">
+                    <TargetIndicatorCombobox
+                      mappingId={mapping.id}
+                      value={draftTargetKey}
+                      columns={targetColumns}
+                      disabled={savingAll}
+                      onChange={(targetKey) => updateDraftTarget(mapping, targetKey)}
+                    />
+                  </td>
+                  <td className="min-w-48 px-3 py-2 text-muted-foreground">
+                    {draftTargetKey ? mapping.targetIndicatorName ?? (target ? target.chineseName ?? target.description ?? target.name : "-") : "不转换"}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">{displayStatus}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{mapping.matchType}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function TargetIndicatorCombobox({
+  mappingId,
+  value,
+  columns,
+  disabled,
+  onChange,
+}: {
+  mappingId: string;
+  value: string;
+  columns: ColumnDefinition[];
+  disabled: boolean;
+  onChange: (targetKey: string) => void;
+}) {
+  const [inputValue, setInputValue] = useState(value);
+  const datalistId = `target-indicator-options-${mappingId}`;
+
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  const resolveInput = (rawValue: string) => {
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      if (value) onChange("");
+      return;
+    }
+    const normalized = trimmed.toLowerCase();
+    const matched = columns.find((column) =>
+      column.name.toLowerCase() === normalized
+      || (column.chineseName ?? "").toLowerCase() === normalized
+      || (column.description ?? "").toLowerCase() === normalized,
+    );
+    if (matched && matched.name !== value) {
+      onChange(matched.name);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <input
+        list={datalistId}
+        value={inputValue}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          setInputValue(nextValue);
+          const matched = columns.find((column) => column.name === nextValue);
+          if (matched && matched.name !== value) {
+            onChange(matched.name);
+          }
+          if (nextValue === "" && value) {
+            onChange("");
+          }
+        }}
+        onBlur={() => resolveInput(inputValue)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+        disabled={disabled}
+        placeholder="输入字段名或中文说明搜索"
+        className="w-full rounded-md border bg-background px-2 py-1 text-xs outline-none transition-colors focus:border-primary/50 focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+      />
+      <datalist id={datalistId}>
+        <option value="">未映射</option>
+        {columns.map((column) => (
+          <option
+            key={column.name}
+            value={column.name}
+            label={[column.chineseName, column.description].filter(Boolean).join(" · ")}
+          />
+        ))}
+      </datalist>
+    </div>
+  );
+}
 
 function RawCollectionResultsPanel({
   wideTables,
@@ -1989,12 +2263,6 @@ function WideTableCard({
                         value = returnRow.indicatorValue || returnRow.rawIndicatorValue || value;
                         rawValue = returnRow.rawIndicatorValue || rawValue;
                       }
-                    } else if (matchingTask && matchingTask.status !== "completed") {
-                      value = "";
-                      rawValue = "";
-                    } else if (!matchingTask) {
-                      value = "";
-                      rawValue = "";
                     }
                   }
 

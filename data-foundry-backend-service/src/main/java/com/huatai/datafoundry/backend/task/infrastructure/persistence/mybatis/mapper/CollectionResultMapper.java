@@ -43,17 +43,19 @@ public interface CollectionResultMapper {
       "<script>",
       "insert into collection_result_rows (",
       "  id, collection_result_id, fetch_task_id, schedule_job_id, wide_table_id, row_id,",
-      "  indicator_key, indicator_name, business_date, dimension_values_json, raw_value, cleaned_value,",
+      "  source_metric_name, target_indicator_key, indicator_key, indicator_name, business_date, dimension_values_json, raw_value, cleaned_value,",
       "  unit, published_at, source_site, source_url, quote_text, max_value, min_value, confidence,",
       "  status, warning_msg, reasoning, why_not_found",
       ") values ",
       "  <foreach collection='rows' item='r' separator=','>",
       "    (#{r.id}, #{r.collectionResultId}, #{r.fetchTaskId}, #{r.scheduleJobId}, #{r.wideTableId}, #{r.rowId},",
-      "     #{r.indicatorKey}, #{r.indicatorName}, #{r.businessDate}, #{r.dimensionValuesJson}, #{r.rawValue}, #{r.cleanedValue},",
+      "     #{r.sourceMetricName}, #{r.targetIndicatorKey}, #{r.indicatorKey}, #{r.indicatorName}, #{r.businessDate}, #{r.dimensionValuesJson}, #{r.rawValue}, #{r.cleanedValue},",
       "     #{r.unit}, #{r.publishedAt}, #{r.sourceSite}, #{r.sourceUrl}, #{r.quoteText}, #{r.maxValue}, #{r.minValue}, #{r.confidence},",
       "     #{r.status}, #{r.warningMsg}, #{r.reasoning}, #{r.whyNotFound})",
       "  </foreach>",
       "on duplicate key update ",
+      "  source_metric_name = values(source_metric_name),",
+      "  target_indicator_key = values(target_indicator_key),",
       "  indicator_name = values(indicator_name),",
       "  business_date = values(business_date),",
       "  dimension_values_json = values(dimension_values_json),",
@@ -111,7 +113,7 @@ public interface CollectionResultMapper {
 
   @Select(
       "select id, collection_result_id, fetch_task_id, schedule_job_id, wide_table_id, row_id, "
-          + "indicator_key, indicator_name, business_date, dimension_values_json, raw_value, cleaned_value, "
+          + "source_metric_name, target_indicator_key, indicator_key, indicator_name, business_date, dimension_values_json, raw_value, cleaned_value, "
           + "unit, published_at, source_site, source_url, quote_text, max_value, min_value, confidence, "
           + "status, warning_msg, reasoning, why_not_found, created_at, updated_at "
           + "from collection_result_rows where fetch_task_id = #{fetchTaskId} order by created_at desc, indicator_key asc")
