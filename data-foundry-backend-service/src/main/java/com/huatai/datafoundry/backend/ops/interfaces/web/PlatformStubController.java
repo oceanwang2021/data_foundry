@@ -46,11 +46,6 @@ public class PlatformStubController {
     return new ArrayList<Map<String, Object>>();
   }
 
-  @GetMapping("/api/acceptance-tickets")
-  public List<Map<String, Object>> listAcceptanceTickets() {
-    return new ArrayList<Map<String, Object>>();
-  }
-
   @GetMapping("/api/dashboard/metrics")
   public Map<String, Object> dashboardMetrics() {
     DemoDataService.DemoMetrics metrics = demoDataService.metrics();

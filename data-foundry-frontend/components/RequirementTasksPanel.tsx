@@ -3991,7 +3991,8 @@ function buildTaskInstanceRowViews(params: {
   const indicatorGroupById = new Map(indicatorGroups.map((group) => [group.id, group] as const));
 
   return fetchTasks.map((fetchTask) => {
-    const record = (fetchTask.rowBindingKey && recordsByRowBindingKey.get(fetchTask.rowBindingKey))
+    const bindingKey = fetchTask.rowBindingKey ? String(fetchTask.rowBindingKey).trim() : "";
+    const record = (bindingKey ? recordsByRowBindingKey.get(bindingKey) : undefined)
       ?? recordsByRowId.get(fetchTask.rowId);
     const businessDate = record ? resolveTaskRecordBusinessDate(wideTable, record) : "";
     const matchedIndicatorGroup = indicatorGroupById.get(fetchTask.indicatorGroupId);
