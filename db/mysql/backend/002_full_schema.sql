@@ -340,6 +340,48 @@ CREATE TABLE metric_field_mappings (
   INDEX idx_metric_field_mappings_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE target_publish_jobs (
+  id              VARCHAR(128) NOT NULL PRIMARY KEY,
+  requirement_id  VARCHAR(64)  NOT NULL,
+  wide_table_id   VARCHAR(64)  NOT NULL,
+  task_group_id   VARCHAR(64)  NULL,
+  target_schema   VARCHAR(128) NOT NULL,
+  target_table    VARCHAR(255) NOT NULL,
+  status          VARCHAR(32)  NOT NULL DEFAULT 'running',
+  total_rows      INT          NOT NULL DEFAULT 0,
+  inserted_rows   INT          NOT NULL DEFAULT 0,
+  updated_rows    INT          NOT NULL DEFAULT 0,
+  skipped_rows    INT          NOT NULL DEFAULT 0,
+  failed_rows     INT          NOT NULL DEFAULT 0,
+  error_msg       TEXT         NULL,
+  approved_at     DATETIME     NULL,
+  published_at    DATETIME     NULL,
+  created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_target_publish_jobs_requirement (requirement_id),
+  INDEX idx_target_publish_jobs_wide_table (wide_table_id),
+  INDEX idx_target_publish_jobs_task_group (task_group_id),
+  INDEX idx_target_publish_jobs_status (status),
+  INDEX idx_target_publish_jobs_published_at (published_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE target_publish_row_logs (
+  id                    VARCHAR(160) NOT NULL PRIMARY KEY,
+  job_id                VARCHAR(128) NOT NULL,
+  requirement_id        VARCHAR(64)  NOT NULL,
+  wide_table_id         VARCHAR(64)  NOT NULL,
+  row_id                INT          NULL,
+  action                VARCHAR(32)  NOT NULL,
+  status                VARCHAR(32)  NOT NULL,
+  error_msg             TEXT         NULL,
+  dimension_values_json JSON         NULL,
+  target_values_json    JSON         NULL,
+  created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_target_publish_row_logs_job (job_id),
+  INDEX idx_target_publish_row_logs_wide_table_row (wide_table_id, row_id),
+  INDEX idx_target_publish_row_logs_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE retrieval_tasks (
   id             VARCHAR(128) NOT NULL PRIMARY KEY,
   sort_order     INT          NOT NULL DEFAULT 0,

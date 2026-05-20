@@ -13,7 +13,7 @@ import {
   fetchTaskGroups,
 } from "@/lib/api-client";
 
-type AcceptanceReviewStatus = "pending" | "approved" | "rejected";
+type AcceptanceReviewStatus = "pending" | "approved" | "partial_approved" | "rejected";
 
 type TaskGroupRow = {
   projectId: string;
@@ -31,12 +31,14 @@ type TaskGroupRow = {
 const reviewStatusLabel: Record<AcceptanceReviewStatus, string> = {
   pending: "待验收",
   approved: "已通过",
+  partial_approved: "部分通过",
   rejected: "已驳回",
 };
 
 const reviewStatusClass: Record<AcceptanceReviewStatus, string> = {
   pending: "bg-amber-100 text-amber-800",
   approved: "bg-emerald-100 text-emerald-700",
+  partial_approved: "bg-amber-100 text-amber-800",
   rejected: "bg-rose-100 text-rose-700",
 };
 
@@ -155,7 +157,9 @@ export default function AcceptancePage() {
       const status: AcceptanceReviewStatus =
         ticket?.status === "approved"
           ? "approved"
-          : ticket?.status === "rejected" || ticket?.status === "fixing"
+          : ticket?.status === "partial_approved"
+          ? "partial_approved"
+          : ticket?.status === "rejected" || ticket?.status === "fixing" || ticket?.status === "publish_failed"
           ? "rejected"
           : "pending";
       return { ...row, reviewStatus: status, ticket };

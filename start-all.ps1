@@ -144,7 +144,7 @@ if (-not $SkipBackend) {
     -Url "http://localhost:8000" `
     -Command @"
 $javaHomeLine
-& '$mavenPath' $mavenExtraLine -pl data-foundry-backend-service -am -DskipTests spring-boot:run
+& '$mavenPath' $mavenExtraLine -pl data-foundry-backend-service -am '-Dmaven.test.skip=true' spring-boot:run
 "@
 }
 
@@ -155,7 +155,7 @@ if (-not $SkipAgent) {
     -Url "http://localhost:8100" `
     -Command @"
 $javaHomeLine
-& '$mavenPath' $mavenExtraLine -pl data-foundry-agent-service -am -DskipTests spring-boot:run
+& '$mavenPath' $mavenExtraLine -pl data-foundry-agent-service -am '-Dmaven.test.skip=true' spring-boot:run
 "@
 }
 
@@ -166,7 +166,7 @@ if (-not $SkipScheduler) {
     -Url "http://localhost:8200" `
     -Command @"
 $javaHomeLine
-& '$mavenPath' $mavenExtraLine -pl data-foundry-scheduler-service -am -DskipTests spring-boot:run
+& '$mavenPath' $mavenExtraLine -pl data-foundry-scheduler-service -am '-Dmaven.test.skip=true' spring-boot:run
 "@
 }
 

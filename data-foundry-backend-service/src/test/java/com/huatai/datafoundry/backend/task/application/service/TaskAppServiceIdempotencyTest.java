@@ -6,10 +6,13 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huatai.datafoundry.backend.task.application.event.TaskExecuteRequestedEvent;
 import com.huatai.datafoundry.backend.task.application.event.TaskGroupExecuteRequestedEvent;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
+import com.huatai.datafoundry.backend.task.domain.repository.CollectionResultRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.backend.task.domain.service.TaskExecutionDomainService;
@@ -30,6 +33,8 @@ public class TaskAppServiceIdempotencyTest {
     FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
     TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+    CollectionSearchGateway collectionSearchGateway = Mockito.mock(CollectionSearchGateway.class);
+    CollectionResultRepository collectionResultRepository = Mockito.mock(CollectionResultRepository.class);
 
     TaskGroup tg = new TaskGroup();
     tg.setId("TG1");
@@ -43,7 +48,10 @@ public class TaskAppServiceIdempotencyTest {
             taskPlanAppService,
             new TaskExecutionDomainService(),
             new TaskExecutionProperties(),
-            publisher);
+            publisher,
+            collectionSearchGateway,
+            collectionResultRepository,
+            new ObjectMapper());
 
     String key = "K-123";
     svc.executeTaskGroup("TG1", new HashMap<String, Object>(), key);
@@ -63,6 +71,8 @@ public class TaskAppServiceIdempotencyTest {
     FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
     TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+    CollectionSearchGateway collectionSearchGateway = Mockito.mock(CollectionSearchGateway.class);
+    CollectionResultRepository collectionResultRepository = Mockito.mock(CollectionResultRepository.class);
 
     FetchTask task = new FetchTask();
     task.setId("T1");
@@ -77,7 +87,10 @@ public class TaskAppServiceIdempotencyTest {
             taskPlanAppService,
             new TaskExecutionDomainService(),
             new TaskExecutionProperties(),
-            publisher);
+            publisher,
+            collectionSearchGateway,
+            collectionResultRepository,
+            new ObjectMapper());
 
     String key = "K-456";
     svc.executeTask("T1", key);
