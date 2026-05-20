@@ -17,6 +17,9 @@ public interface CollectionSearchGateway {
   /** Query downstream completed task result. Returns null when the call is rejected/unavailable. */
   CollectionTaskResult getTaskResult(String taskId);
 
+  /** Cancel a downstream running task. Returns null when the call is rejected/unavailable. */
+  CollectionTaskCancelResult cancelTask(String taskId);
+
   class CollectionSearchResult {
     private final boolean success;
     private final String taskId;
@@ -117,6 +120,43 @@ public interface CollectionSearchGateway {
 
     public String getErrorMessage() {
       return errorMessage;
+    }
+  }
+
+  class CollectionTaskCancelResult {
+    private final boolean success;
+    private final String taskId;
+    private final String message;
+    private final String errorMessage;
+    private final Integer httpStatusCode;
+
+    public CollectionTaskCancelResult(
+        boolean success, String taskId, String message, String errorMessage, Integer httpStatusCode) {
+      this.success = success;
+      this.taskId = taskId;
+      this.message = message;
+      this.errorMessage = errorMessage;
+      this.httpStatusCode = httpStatusCode;
+    }
+
+    public boolean isSuccess() {
+      return success;
+    }
+
+    public String getTaskId() {
+      return taskId;
+    }
+
+    public String getMessage() {
+      return message;
+    }
+
+    public String getErrorMessage() {
+      return errorMessage;
+    }
+
+    public Integer getHttpStatusCode() {
+      return httpStatusCode;
     }
   }
 }

@@ -132,7 +132,16 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text}`);
+    let detail = "";
+    if (text.trim() !== "") {
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.detail ?? parsed?.message ?? parsed?.error ?? "";
+      } catch {
+        detail = text;
+      }
+    }
+    throw new Error(detail && String(detail).trim() !== "" ? String(detail).trim() : `API ${res.status}: ${text}`);
   }
   if (res.status === 204) return undefined as unknown as T;
   return res.json();
@@ -631,8 +640,12 @@ export function mapTaskGroup(raw: any): TaskGroup {
     deltaReason: raw.delta_reason,
     status: mapTaskGroupStatus(raw.status),
     totalTasks: raw.total_tasks ?? 0,
+    runningTasks: raw.running_tasks ?? 0,
+    pendingTasks: raw.pending_tasks ?? 0,
     completedTasks: raw.completed_tasks ?? 0,
     failedTasks: raw.failed_tasks ?? 0,
+    cancelledTasks: raw.cancelled_tasks ?? 0,
+    invalidatedTasks: raw.invalidated_tasks ?? 0,
     rowSnapshots,
     triggeredBy: raw.triggered_by ?? mapTriggeredBy(raw.source_type),
     createdAt: raw.created_at ?? new Date().toISOString(),
@@ -645,6 +658,7 @@ export function mapTaskGroupStatus(status: string): TaskGroup["status"] {
     pending: "pending",
     running: "running",
     failed: "failed",
+    cancelled: "cancelled",
     partial: "partial",
     completed: "completed",
     invalidated: "invalidated",
@@ -776,6 +790,7 @@ export function mapFetchTaskStatus(status: string): FetchTask["status"] {
     running: "running",
     completed: "completed",
     failed: "failed",
+    cancelled: "cancelled",
     invalidated: "invalidated",
   };
   return mapping[status] ?? "pending";
@@ -1139,8 +1154,12 @@ function toBackendWideTablePlanTaskGroups(
       partition_key: taskGroup.partitionKey ?? taskGroup.businessDate ?? "full_table",
       partition_label: taskGroup.partitionLabel ?? taskGroup.businessDateLabel ?? taskGroup.id,
       total_tasks: taskGroup.totalTasks,
+      running_tasks: taskGroup.runningTasks,
+      pending_tasks: taskGroup.pendingTasks,
       completed_tasks: taskGroup.completedTasks,
       failed_tasks: taskGroup.failedTasks,
+      cancelled_tasks: taskGroup.cancelledTasks,
+      invalidated_tasks: taskGroup.invalidatedTasks,
       triggered_by: taskGroup.triggeredBy,
       created_at: taskGroup.createdAt,
       updated_at: taskGroup.updatedAt,
@@ -2023,12 +2042,34 @@ export async function fetchWideTableTargetComparison(wideTableId: string): Promi
   };
 }
 
-export async function executeTask(taskId: string): Promise<void> {
-  await apiPost(`/api/tasks/${taskId}/execute`);
+export async function executeTask(taskId: string): Promise<{
+  taskId: string;
+  collectionTaskId?: string;
+  status?: FetchTask["status"];
+}> {
+  const raw = await apiPost<any>(`/api/tasks/${taskId}/execute`);
+  return {
+    taskId: String(raw.task_id ?? raw.taskId ?? taskId),
+    collectionTaskId: raw.collection_task_id ?? raw.collectionTaskId ?? undefined,
+    status: raw.status ? mapFetchTaskStatus(String(raw.status)) : undefined,
+  };
 }
 
-export async function retryTask(taskId: string): Promise<void> {
-  await apiPost(`/api/tasks/${taskId}/retry`);
+export async function retryTask(taskId: string): Promise<{
+  taskId: string;
+  collectionTaskId?: string;
+  status?: FetchTask["status"];
+}> {
+  const raw = await apiPost<any>(`/api/tasks/${taskId}/retry`);
+  return {
+    taskId: String(raw.task_id ?? raw.taskId ?? taskId),
+    collectionTaskId: raw.collection_task_id ?? raw.collectionTaskId ?? undefined,
+    status: raw.status ? mapFetchTaskStatus(String(raw.status)) : undefined,
+  };
+}
+
+export async function cancelTask(collectionTaskId: string): Promise<void> {
+  await apiPost(`/api/tasks/${encodeURIComponent(collectionTaskId)}/cancel`);
 }
 
 export async function executeTaskGroup(

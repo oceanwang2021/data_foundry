@@ -7,6 +7,8 @@ import java.util.List;
 public interface FetchTaskRepository {
   FetchTask getById(String taskId);
 
+  FetchTask getByCollectionTaskId(String collectionTaskId);
+
   List<FetchTask> listByRequirement(String requirementId);
 
   List<FetchTask> listByWideTable(String wideTableId);

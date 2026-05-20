@@ -24,6 +24,12 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   }
 
   @Override
+  public FetchTask getByCollectionTaskId(String collectionTaskId) {
+    FetchTaskRecord record = fetchTaskMapper.getByCollectionTaskId(collectionTaskId);
+    return record != null ? toDomain(record) : null;
+  }
+
+  @Override
   public List<FetchTask> listByRequirement(String requirementId) {
     List<FetchTaskRecord> records = fetchTaskMapper.listByRequirement(requirementId);
     return toDomainList(records);

@@ -50,6 +50,11 @@ public class TaskExecutionLegacyController {
     return taskAppService.retryTask(taskId, idempotencyKey);
   }
 
+  @PostMapping("/tasks/{collectionTaskId}/cancel")
+  public Map<String, Object> cancelTask(@PathVariable("collectionTaskId") String collectionTaskId) {
+    return taskAppService.cancelTask(collectionTaskId);
+  }
+
   @PostMapping("/tasks/wide-tables/{wideTableId}/sync-collection-statuses")
   public Map<String, Object> syncWideTableCollectionStatuses(@PathVariable("wideTableId") String wideTableId) {
     return taskAppService.syncWideTableCollectionStatuses(wideTableId);

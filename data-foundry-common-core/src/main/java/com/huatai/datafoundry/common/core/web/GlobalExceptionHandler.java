@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -26,6 +27,13 @@ public class GlobalExceptionHandler {
         .body(Response.failure(errorCode.getCode(), messageOrDefault(ex.getMessage(), errorCode.getMessage())));
   }
 
+  @ExceptionHandler(ResponseStatusException.class)
+  public ResponseEntity<Response<Object>> handleResponseStatusException(ResponseStatusException ex) {
+    HttpStatus status = ex.getStatus() != null ? ex.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    return ResponseEntity.status(status)
+        .body(Response.failure(status.value(), messageOrDefault(ex.getReason(), status.getReasonPhrase())));
+  }
+
   private static HttpStatus toHttpStatus(int status) {
     try {
       return HttpStatus.valueOf(status);
@@ -39,4 +47,3 @@ public class GlobalExceptionHandler {
     return message;
   }
 }
-

@@ -14,6 +14,7 @@ import type {
 import type { ScheduleJob } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import {
+  cancelTask,
   createTrialRun,
   executeTask,
   executeTaskGroup,
@@ -172,8 +173,10 @@ export default function RequirementTasksPanel({
   const [trialRunMessage, setTrialRunMessage] = useState("");
   const [isStartingTrialRun, setIsStartingTrialRun] = useState(false);
   const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
+  const [isTrialTaskListExpanded, setIsTrialTaskListExpanded] = useState(true);
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
   const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
+  const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
   const [activeTaskSubTab, setActiveTaskSubTab] = useState<TaskSubTabKey>(() => {
     if (requestedSubTab === "prompts" || requestedSubTab === "tasks" || requestedSubTab === "output") {
       return requestedSubTab;
@@ -209,6 +212,10 @@ export default function RequirementTasksPanel({
       setActiveTaskSubTab("tasks");
     }
   }, [requestedTaskGroupId, requestedTaskId]);
+
+  useEffect(() => {
+    setIsTrialTaskListExpanded(true);
+  }, [selectedWtId]);
 
   useEffect(() => {
     if (requestedSubTab === "prompts" || requestedSubTab === "tasks" || requestedSubTab === "output") {
@@ -638,10 +645,6 @@ export default function RequirementTasksPanel({
     () => buildTaskStatusLegend(expandedTaskCards),
     [expandedTaskCards],
   );
-  const expandedTaskInstanceStatusLegend = useMemo(
-    () => buildTaskStatusLegend(tgFetchTasks),
-    [tgFetchTasks],
-  );
   const trialTaskGroupRunViews = useMemo(
     () => taskGroupRunViews.filter((taskGroup) => taskGroup.triggeredBy === "trial"),
     [taskGroupRunViews],
@@ -666,6 +669,23 @@ export default function RequirementTasksPanel({
     ),
     [collectionTaskGroupRunViews, effectiveWideTable],
   );
+  const collectionTaskIndicatorLabelMap = useMemo(
+    () => new Map(
+      (taskPlan?.collectionTasks ?? []).map((task) => [
+        task.id,
+        task.indicatorLabels.join("、") || task.name || "未关联指标",
+      ] as const),
+    ),
+    [taskPlan],
+  );
+  const defaultCollectionTaskIndicatorLabel = useMemo(
+    () => (
+      taskPlan?.collectionTasks.length === 1
+        ? taskPlan.collectionTasks[0]?.indicatorLabels.join("、") || taskPlan.collectionTasks[0]?.name || "未关联指标"
+        : ""
+    ),
+    [taskPlan],
+  );
   const expandedTaskInstanceRows = useMemo(
     () => buildTaskInstanceRowViews({
       wideTable: selectedWt ?? effectiveWideTable ?? undefined,
@@ -673,8 +693,9 @@ export default function RequirementTasksPanel({
       wideTableRecords: currentWideTableRecords,
       indicatorGroups: effectiveWideTable?.indicatorGroups ?? selectedWt?.indicatorGroups ?? [],
       parameterColumns: returnContextColumns.filter((column) => !column.isBusinessDate),
+      overrideBusinessDateLabel: expandedTaskGroupView?.businessDateLabel ?? expandedTaskGroupView?.displayLabel ?? "",
     }),
-    [currentWideTableRecords, effectiveWideTable, returnContextColumns, selectedWt, tgFetchTasks],
+    [currentWideTableRecords, effectiveWideTable, expandedTaskGroupView?.businessDateLabel, expandedTaskGroupView?.displayLabel, returnContextColumns, selectedWt, tgFetchTasks],
   );
   const trialTaskInstanceRows = useMemo(
     () => buildTaskInstanceRowViews({
@@ -1332,58 +1353,87 @@ export default function RequirementTasksPanel({
     }
 
     const nextAttempt = targetTask.executionRecords.length + 1;
-    onFetchTasksChange(
-      fetchTasks.map((task) => (
-        task.id === taskId
-          ? {
-              ...task,
-              status: "running",
-              updatedAt: now,
-              executionRecords: [
-                ...task.executionRecords,
-                {
-                  id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
-                  fetchTaskId: task.id,
-                  attempt: nextAttempt,
-                  status: "running",
-                  triggeredBy: "manual_retry",
-                  startedAt: now,
-                },
-              ],
-            }
-          : task
-      )),
-    );
-    onTaskGroupsChange(
-      taskGroups.map((taskGroup) => (
-        taskGroup.id === targetTask.taskGroupId
-          ? {
-              ...taskGroup,
-              status: "running",
-              completedTasks: targetTask.status === "completed"
-                ? Math.max(taskGroup.completedTasks - 1, 0)
-                : taskGroup.completedTasks,
-              failedTasks: targetTask.status === "failed"
-                ? Math.max(taskGroup.failedTasks - 1, 0)
-                : taskGroup.failedTasks,
-              updatedAt: now,
-            }
-          : taskGroup
-      )),
-    );
+    const optimisticFetchTasks = fetchTasks.map((task) => (
+      task.id === taskId
+        ? {
+            ...task,
+            status: "running",
+            updatedAt: now,
+            executionRecords: [
+              ...task.executionRecords,
+              {
+                id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
+                fetchTaskId: task.id,
+                attempt: nextAttempt,
+                status: "running",
+                triggeredBy: "manual_retry",
+                startedAt: now,
+              },
+            ],
+          }
+        : task
+    ));
+    onFetchTasksChange(optimisticFetchTasks);
+    const optimisticTaskGroups = taskGroups.map((taskGroup) => (
+      taskGroup.id === targetTask.taskGroupId
+        ? {
+            ...taskGroup,
+            status: "running",
+            completedTasks: targetTask.status === "completed"
+              ? Math.max(taskGroup.completedTasks - 1, 0)
+              : taskGroup.completedTasks,
+            failedTasks: targetTask.status === "failed"
+              ? Math.max(taskGroup.failedTasks - 1, 0)
+              : taskGroup.failedTasks,
+            updatedAt: now,
+          }
+        : taskGroup
+    ));
+    onTaskGroupsChange(optimisticTaskGroups);
     setRunningTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
     setTaskActionMessage(`已发起任务 ${taskId}（${rowLabel}）的单任务执行，正在同步最新结果。`);
     try {
-      if (targetTask.status === "failed") {
-        await retryTask(taskId);
-      } else {
-        await executeTask(taskId);
+      const dispatchResult = targetTask.status === "failed"
+        ? await retryTask(taskId)
+        : await executeTask(taskId);
+      if (dispatchResult.collectionTaskId || dispatchResult.status) {
+        onFetchTasksChange(
+          optimisticFetchTasks.map((task) => (
+            task.id === taskId
+              ? {
+                  ...task,
+                  collectionTaskId: dispatchResult.collectionTaskId ?? task.collectionTaskId,
+                  status: dispatchResult.status ?? task.status,
+                  updatedAt: new Date().toISOString(),
+                }
+              : task
+          )),
+        );
       }
       await refreshAfterExecution();
     } catch (error) {
       setTaskActionMessage(`执行失败：${formatTaskActionError(error)}`);
     } finally {
       setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
+    }
+  };
+
+  const handleCancelTask = async (taskId: string, rowLabel: string) => {
+    const targetTask = fetchTasks.find((task) => task.id === taskId);
+    if (!targetTask || targetTask.status !== "running" || !targetTask.collectionTaskId) {
+      return;
+    }
+
+    setCancellingTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
+    setTaskActionMessage(`正在取消采集任务 ${taskId}（${rowLabel}）...`);
+    try {
+      await cancelTask(targetTask.collectionTaskId);
+      await refreshAfterExecution();
+      setTaskActionMessage(`已取消采集任务 ${taskId}（${rowLabel}）。`);
+    } catch (error) {
+      setTaskActionMessage(`取消失败：${formatTaskActionError(error)}`);
+    } finally {
+      setCancellingTaskIds((prev) => prev.filter((id) => id !== taskId));
     }
   };
 
@@ -1434,7 +1484,7 @@ export default function RequirementTasksPanel({
             <tbody className="divide-y">
               {rows.map((row) => {
                 const isRunning = row.status === "running";
-                const actionLabel = row.status === "failed" || row.status === "completed" ? "重采" : "采集";
+                const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
                 return (
                   <tr key={row.fetchTaskId}>
                     <td className="px-3 py-3 align-top text-slate-700">
@@ -1464,7 +1514,7 @@ export default function RequirementTasksPanel({
                         <button
                           type="button"
                           onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-                          disabled={runningTaskIds.includes(row.fetchTaskId) || isRunning}
+                          disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
                           className={cn(
                             "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
                             "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
@@ -1472,14 +1522,17 @@ export default function RequirementTasksPanel({
                         >
                           {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
                         </button>
-                        {isRunning ? (
+                        {isRunning && row.collectionTaskId ? (
                           <button
                             type="button"
-                            disabled
-                            title="暂未接入取消接口"
-                            className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-muted-foreground opacity-60"
+                            onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+                            disabled={cancellingTaskIds.includes(row.fetchTaskId)}
+                            className={cn(
+                              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+                            )}
                           >
-                            取消
+                            {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
                           </button>
                         ) : null}
                       </div>
@@ -1498,6 +1551,14 @@ export default function RequirementTasksPanel({
     <div className="rounded-xl border bg-background divide-y overflow-hidden">
       {taskGroupViews.map((tg) => {
         const isExpanded = expandedTgId === tg.id;
+        const taskGroupStatusLegend = buildTaskStatusLegendFromCounts({
+          completed: tg.completedTasks,
+          running: tg.runningTasks,
+          failed: tg.failedTasks,
+          cancelled: tg.cancelledTasks,
+          pending: tg.pendingTasks,
+          invalidated: tg.invalidatedTasks,
+        });
         return (
           <div
             key={tg.id}
@@ -1513,7 +1574,7 @@ export default function RequirementTasksPanel({
                 className="flex min-w-0 flex-1 items-center gap-3 text-left"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-sm">{tg.displayLabel}</span>
                     <StatusBadge
                       status={tg.displayStatus}
@@ -1522,10 +1583,22 @@ export default function RequirementTasksPanel({
                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded border bg-background")}>
                       {getTriggerDisplayLabel(tg.triggeredBy)}
                     </span>
+                    {taskGroupStatusLegend.map((item) => (
+                      <span
+                        key={`${tg.id}-${item.status}`}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px]",
+                          item.badgeClassName,
+                        )}
+                      >
+                        <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
+                        {item.label} {item.count}
+                      </span>
+                    ))}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     {tg.isReal
-                      ? `${tg.id} | total ${tg.totalTasks} | running ${tg.runningTasks} | completed ${tg.completedTasks} | failed ${tg.failedTasks}${tg.pendingTasks > 0 ? ` | pending ${tg.pendingTasks}` : ""}`
+                      ? `${tg.id} | total ${tg.totalTasks} | running ${tg.runningTasks} | completed ${tg.completedTasks} | failed ${tg.failedTasks}${tg.cancelledTasks > 0 ? ` | cancelled ${tg.cancelledTasks}` : ""}${tg.pendingTasks > 0 ? ` | pending ${tg.pendingTasks}` : ""}`
                       : isScheduledFutureTaskGroupView(tg)
                         ? `planned task group | total ${tg.totalTasks} | will be created and executed automatically when due`
                         : `planned task group | total ${tg.totalTasks} | no runtime records yet`}
@@ -1536,13 +1609,12 @@ export default function RequirementTasksPanel({
                     <div
                       className={cn(
                         "h-full rounded-full",
-                        tg.displayStatus === "running"
-                          ? "bg-blue-400"
-                          : tg.failedTasks > 0
-                            ? "bg-red-400"
-                            : "bg-emerald-400",
+                        "",
                       )}
-                      style={{ width: `${tg.progressPercent}%` }}
+                      style={{
+                        width: `${tg.progressPercent}%`,
+                        backgroundColor: getTaskStatusRailFillColor(tg.displayStatus),
+                      }}
                     />
                   </div>
                   <div className="text-[10px] text-muted-foreground text-right mt-0.5">
@@ -1561,20 +1633,6 @@ export default function RequirementTasksPanel({
                   <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集实例。</div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                      {expandedTaskInstanceStatusLegend.map((item) => (
-                        <span
-                          key={item.status}
-                          className={cn(
-                            "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                            item.badgeClassName,
-                          )}
-                        >
-                          <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
-                          {item.label} {item.count}
-                        </span>
-                      ))}
-                    </div>
                     <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                       <table className="w-full text-xs leading-5">
                         <thead>
@@ -1590,7 +1648,7 @@ export default function RequirementTasksPanel({
                         <tbody className="divide-y">
                           {expandedTaskInstanceRows.map((row) => {
                             const isRunning = row.status === "running";
-                            const actionLabel = row.status === "failed" || row.status === "completed" ? "重采" : "采集";
+                            const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
                             return (
                               <tr key={row.fetchTaskId}>
                                 <td className="px-3 py-3 align-top text-slate-700">
@@ -1620,7 +1678,7 @@ export default function RequirementTasksPanel({
                                     <button
                                       type="button"
                                       onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-                                      disabled={runningTaskIds.includes(row.fetchTaskId) || isRunning}
+                                      disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
                                       className={cn(
                                         "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
                                         "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
@@ -1628,14 +1686,17 @@ export default function RequirementTasksPanel({
                                     >
                                       {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
                                     </button>
-                                    {isRunning ? (
+                                    {isRunning && row.collectionTaskId ? (
                                       <button
                                         type="button"
-                                        disabled
-                                        title="暂未接入取消接口"
-                                        className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-muted-foreground opacity-60"
+                                        onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+                                        disabled={cancellingTaskIds.includes(row.fetchTaskId)}
+                                        className={cn(
+                                          "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                                          "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+                                        )}
                                       >
-                                        取消
+                                        {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
                                       </button>
                                     ) : null}
                                   </div>
@@ -2488,9 +2549,6 @@ export default function RequirementTasksPanel({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="font-semibold">任务计划</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                这里展示由当前范围和指标分组共同推导出的逻辑任务集合。执行动作不会改写任务定义，只改变任务组与任务的执行状态。
-              </p>
             </div>
             <div className="text-xs text-muted-foreground">{selectedWt.name}</div>
           </div>
@@ -2534,35 +2592,7 @@ export default function RequirementTasksPanel({
         <section className="rounded-xl border bg-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="font-semibold">{`任务运行记录 – ${selectedWt?.name ?? "-"}`}</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {usesBusinessDateAxis
-                ? "任务会按业务周期拆分任务实例；如启用指标分组，将先按指标组拆分，再按业务周期拆分；任务实例内子任务按维度组合展开。"
-                : "任务会按调度时间拆分全量快照任务实例；如启用指标分组，将先按指标组拆分，再按调度时间拆分；任务实例内子任务按维度组合展开。"}
-            </p>
-          </div>
-        </div>
-
-        <div className="text-right text-xs text-muted-foreground">
-          <div>
-            {taskPlan
-              ? usesBusinessDateAxis
-                ? `已建立 ${wtTaskGroups.length} 个任务实例 / 当前范围历史期数 ${taskPlan.historicalDateCount}`
-                : `已建立 ${wtTaskGroups.length} 个全量快照任务实例 / ${taskPlan.scheduleSummary}`
-              : `共 ${wtTaskGroups.length} 个任务实例`}
-          </div>
-          <div className="mt-1">
-            {needsScopeRefresh
-              ? "正式任务组待维度范围确认后生成"
-              : !isIndicatorGroupingComplete
-                ? "完成指标分组后才能生成任务组"
-              : usesBusinessDateAxis
-                ? dataUpdateEnabled
-                  ? "需求按“历史补数 + 未来调度”生成任务组"
-                  : "需求按当前固定范围生成一次性任务组"
-              : dataUpdateEnabled
-                ? "需求按调度规则持续生成全量快照任务组"
-                : "需求按当前快照范围生成一次性交付任务组"}
+            <h3 className="font-semibold">{`任务运行记录 - ${selectedWt?.name ?? "-"}`}</h3>
           </div>
         </div>
 
@@ -2586,26 +2616,36 @@ export default function RequirementTasksPanel({
           <div className="space-y-6">
             {trialTaskGroupRunViews.length > 0 ? (
               <div className="space-y-3">
-                <div className="px-1">
-                  <div className="text-base font-semibold text-foreground">试运行任务</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    这里展示试运行时生成的采集实例，包含采集参数、时间列、采集指标组、采集实例 ID、实例状态与操作。
+                <div className="flex flex-wrap items-start justify-between gap-3 px-1">
+                  <div>
+                    <div className="text-base font-semibold text-foreground">试运行任务</div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsTrialTaskListExpanded((current) => !current)}
+                    className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    {isTrialTaskListExpanded ? "收起" : "展开"}
+                  </button>
                 </div>
-                {renderTaskInstanceTable(trialTaskInstanceRows, trialTaskInstanceStatusLegend)}
+                {isTrialTaskListExpanded ? renderTaskInstanceTable(trialTaskInstanceRows, trialTaskInstanceStatusLegend) : null}
               </div>
             ) : null}
 
             {collectionTaskGroupSections.map((section, sectionIndex) => {
-              const displayGroupLabel = section.taskGroups[0]?.indicatorGroupName || "统一提示词";
+              const displayGroupLabel = collectionTaskIndicatorLabelMap.get(section.id)
+                ?? collectionTaskIndicatorLabelMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
+                ?? defaultCollectionTaskIndicatorLabel
+                ?? section.taskGroups[0]?.indicatorGroupName
+                ?? "未关联指标";
+              const collectionTaskTitle = collectionTaskGroupSections.length > 1
+                ? `采集任务${sectionIndex + 1}：${displayGroupLabel}`
+                : `采集任务：${displayGroupLabel}`;
 
               return (
                 <div key={section.id} className="space-y-3">
                   <div className="px-1">
-                    <div className="text-base font-semibold text-foreground">{`采集任务${sectionIndex + 1}：${displayGroupLabel}`}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      任务实例按业务周期拆分；子任务实例在展开或执行任务实例时按维度组合按需生成。
-                    </div>
+                    <div className="text-base font-semibold text-foreground">{collectionTaskTitle}</div>
                   </div>
                   {renderTaskGroupCards(section.taskGroups)}
                 </div>
@@ -2623,9 +2663,6 @@ export default function RequirementTasksPanel({
                 <div key={section.id} className="space-y-3">
                   <div className="px-1">
                     <div className="text-base font-semibold text-foreground">{`采集任务${sectionIndex + 1}：${displayGroupLabel}`}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      任务实例按业务周期拆分；子任务实例在展开或执行任务实例时按维度组合按需生成。
-                    </div>
                   </div>
                   <div className="rounded-xl border bg-background divide-y overflow-hidden">
                   {section.taskGroups.map((tg) => {
@@ -2658,7 +2695,7 @@ export default function RequirementTasksPanel({
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {tg.isReal
-                            ? `${tg.id} | 总计 ${tg.totalTasks} | 运行中 ${tg.runningTasks} | 已完成 ${tg.completedTasks} | 失败 ${tg.failedTasks}${tg.pendingTasks > 0 ? ` | 待执行 ${tg.pendingTasks}` : ""}`
+                            ? `${tg.id} | 总计 ${tg.totalTasks} | 运行中 ${tg.runningTasks} | 已完成 ${tg.completedTasks} | 失败 ${tg.failedTasks}${tg.cancelledTasks > 0 ? ` | 已取消 ${tg.cancelledTasks}` : ""}${tg.pendingTasks > 0 ? ` | 待执行 ${tg.pendingTasks}` : ""}`
                             : isScheduledFutureTaskGroupView(tg)
                               ? `待调度任务组 | 总计 ${tg.totalTasks} | 到期后由系统自动创建并执行`
                               : `计划任务组 | 总计 ${tg.totalTasks} | 尚未建立运行记录`}
@@ -2669,13 +2706,12 @@ export default function RequirementTasksPanel({
                           <div
                             className={cn(
                               "h-full rounded-full",
-                              tg.displayStatus === "running"
-                                ? "bg-blue-400"
-                                : tg.failedTasks > 0
-                                ? "bg-red-400"
-                                : "bg-emerald-400",
+                              "",
                             )}
-                            style={{ width: `${tg.progressPercent}%` }}
+                            style={{
+                              width: `${tg.progressPercent}%`,
+                              backgroundColor: getTaskStatusRailFillColor(tg.displayStatus),
+                            }}
                           />
                         </div>
                         <div className="text-[10px] text-muted-foreground text-right mt-0.5">
@@ -2869,7 +2905,7 @@ export default function RequirementTasksPanel({
                     </span>
                   </div>
                   <div className="text-muted-foreground">
-                    {tg.id} | 总计 {tg.totalTasks} | 已完成 {tg.completedTasks} | 失败 {tg.failedTasks}
+                    {tg.id} | 总计 {tg.totalTasks} | 已完成 {tg.completedTasks} | 失败 {tg.failedTasks}{tg.cancelledTasks > 0 ? ` | 已取消 ${tg.cancelledTasks}` : ""}
                   </div>
                 </div>
               ))}
@@ -3208,7 +3244,7 @@ function VersionTabContent({
                 </span>
               </div>
               <div className="text-muted-foreground">
-                {taskGroup.id} | 总计 {taskGroup.totalTasks} | 已完成 {taskGroup.completedTasks} | 失败 {taskGroup.failedTasks}
+                {taskGroup.id} | 总计 {taskGroup.totalTasks} | 已完成 {taskGroup.completedTasks} | 失败 {taskGroup.failedTasks}{taskGroup.cancelledTasks > 0 ? ` | 已取消 ${taskGroup.cancelledTasks}` : ""}
               </div>
               {taskGroup.deltaReason ? (
                 <div className="text-amber-700">{taskGroup.deltaReason}</div>
@@ -3248,13 +3284,33 @@ function buildTaskStatusLegend(tasks: Array<{ status: string }>): Array<{
   badgeClassName: string;
   dotClassName: string;
 }> {
-  const orderedStatuses = ["completed", "running", "failed", "pending", "invalidated"];
   const countMap = new Map<string, number>();
 
   for (const task of tasks) {
     countMap.set(task.status, (countMap.get(task.status) ?? 0) + 1);
   }
 
+  return buildTaskStatusLegendFromCountMap(countMap);
+}
+
+function buildTaskStatusLegendFromCounts(counts: Record<string, number>): Array<{
+  status: string;
+  label: string;
+  count: number;
+  badgeClassName: string;
+  dotClassName: string;
+}> {
+  return buildTaskStatusLegendFromCountMap(new Map(Object.entries(counts)));
+}
+
+function buildTaskStatusLegendFromCountMap(countMap: Map<string, number>): Array<{
+  status: string;
+  label: string;
+  count: number;
+  badgeClassName: string;
+  dotClassName: string;
+}> {
+  const orderedStatuses = ["completed", "running", "failed", "cancelled", "pending", "invalidated"];
   return orderedStatuses
     .filter((status) => (countMap.get(status) ?? 0) > 0)
     .map((status) => ({
@@ -3339,16 +3395,17 @@ function buildTaskGroupSummaryFromCards(
       running: 0,
       completed: 0,
       failed: 0,
+      cancelled: 0,
       invalidated: 0,
     } satisfies Record<FetchTask["status"], number>,
   );
   const totalTasks = Math.max(fallbackSummary.totalTasks, taskCards.length);
   const pendingTasks = Math.max(
-    totalTasks - counts.completed - counts.failed - counts.running - counts.invalidated,
+    totalTasks - counts.completed - counts.failed - counts.cancelled - counts.running - counts.invalidated,
     0,
   );
   const progressPercent = totalTasks > 0
-    ? Math.round(((counts.completed + counts.failed + counts.invalidated) / totalTasks) * 100)
+    ? Math.round(((counts.completed + counts.failed + counts.cancelled + counts.invalidated) / totalTasks) * 100)
     : 0;
   const lastUpdatedAt = taskCards.reduce((latest, taskCard) => {
     const candidate = taskCard.endedAt || taskCard.startedAt || fallbackSummary.lastUpdatedAt;
@@ -3361,6 +3418,7 @@ function buildTaskGroupSummaryFromCards(
       runningTasks: counts.running,
       completedTasks: counts.completed,
       failedTasks: counts.failed,
+      cancelledTasks: counts.cancelled,
       invalidatedTasks: counts.invalidated,
     }),
     totalTasks,
@@ -3368,6 +3426,7 @@ function buildTaskGroupSummaryFromCards(
     runningTasks: counts.running,
     completedTasks: counts.completed,
     failedTasks: counts.failed,
+    cancelledTasks: counts.cancelled,
     invalidatedTasks: counts.invalidated,
     progressPercent,
     lastUpdatedAt,
@@ -3381,18 +3440,28 @@ function resolveTaskGroupDisplayStatus(
     runningTasks: number;
     completedTasks: number;
     failedTasks: number;
+    cancelledTasks: number;
     invalidatedTasks: number;
   },
 ): TaskGroup["status"] {
   if (fallbackStatus === "invalidated") {
     return "invalidated";
   }
+  if (fallbackStatus === "cancelled" && counts.runningTasks === 0 && counts.pendingTasks === 0) {
+    return "cancelled";
+  }
   if (counts.runningTasks > 0) {
     return "running";
   }
   if (counts.failedTasks > 0 && counts.pendingTasks === 0) {
-    if (counts.completedTasks === 0 && counts.invalidatedTasks === 0) {
+    if (counts.completedTasks === 0 && counts.cancelledTasks === 0 && counts.invalidatedTasks === 0) {
       return "failed";
+    }
+    return "partial";
+  }
+  if (counts.cancelledTasks > 0 && counts.pendingTasks === 0) {
+    if (counts.completedTasks === 0 && counts.failedTasks === 0 && counts.invalidatedTasks === 0) {
+      return "cancelled";
     }
     return "partial";
   }
@@ -3441,6 +3510,7 @@ type HistoricalTaskGroupView = {
   runningTasks: number;
   completedTasks: number;
   failedTasks: number;
+  cancelledTasks: number;
   invalidatedTasks: number;
   progressPercent: number;
   triggeredBy: TaskGroup["triggeredBy"];
@@ -3637,6 +3707,7 @@ function buildTaskGroupRunViews(
           runningTasks: summary?.runningTasks ?? 0,
           completedTasks: summary?.completedTasks ?? taskGroup.completedTasks,
           failedTasks: summary?.failedTasks ?? taskGroup.failedTasks,
+          cancelledTasks: summary?.cancelledTasks ?? 0,
           invalidatedTasks: summary?.invalidatedTasks ?? 0,
           progressPercent: summary?.progressPercent ?? 0,
           triggeredBy: taskGroup.triggeredBy,
@@ -3702,6 +3773,7 @@ function buildTaskGroupRunViews(
             runningTasks: summary?.runningTasks ?? 0,
             completedTasks: summary?.completedTasks ?? taskGroup.completedTasks,
             failedTasks: summary?.failedTasks ?? taskGroup.failedTasks,
+            cancelledTasks: summary?.cancelledTasks ?? 0,
             invalidatedTasks: summary?.invalidatedTasks ?? 0,
             progressPercent: summary?.progressPercent ?? 0,
             triggeredBy: taskGroup.triggeredBy,
@@ -3735,6 +3807,7 @@ function buildTaskGroupRunViews(
           runningTasks: 0,
           completedTasks: 0,
           failedTasks: 0,
+          cancelledTasks: 0,
           invalidatedTasks: 0,
           progressPercent: 0,
           triggeredBy: plannedTriggerType,
@@ -3776,6 +3849,7 @@ function buildTaskGroupRunViews(
         runningTasks: 0,
         completedTasks: 0,
         failedTasks: 0,
+        cancelledTasks: 0,
         invalidatedTasks: 0,
         progressPercent: 0,
         triggeredBy: plannedTriggerType,
@@ -3896,8 +3970,9 @@ function buildTaskInstanceRowViews(params: {
   wideTableRecords: WideTableRecord[];
   indicatorGroups: WideTable["indicatorGroups"];
   parameterColumns: ColumnDefinition[];
+  overrideBusinessDateLabel?: string;
 }): TaskInstanceRowView[] {
-  const { wideTable, fetchTasks, wideTableRecords, indicatorGroups, parameterColumns } = params;
+  const { wideTable, fetchTasks, wideTableRecords, indicatorGroups, parameterColumns, overrideBusinessDateLabel } = params;
   if (!wideTable || fetchTasks.length === 0) {
     return [];
   }
@@ -3928,9 +4003,11 @@ function buildTaskInstanceRowViews(params: {
       fetchTaskId: fetchTask.id,
       rowLabel: buildTaskInstanceRowLabel(fetchTask, record),
       parameterLines: formatTaskInstanceParameterLines(parameterColumns, record),
-      businessDateLabel: businessDate
-        ? formatBusinessDateLabel(businessDate, wideTable.businessDateRange.frequency)
-        : fetchTask.id,
+      businessDateLabel: overrideBusinessDateLabel || (
+        businessDate
+          ? formatBusinessDateLabel(businessDate, wideTable.businessDateRange.frequency)
+          : fetchTask.id
+      ),
       indicatorGroupName: matchedIndicatorGroup?.name ?? fetchTask.indicatorGroupName ?? "统一提示词",
       indicatorLabels,
       collectionTaskId: fetchTask.collectionTaskId,

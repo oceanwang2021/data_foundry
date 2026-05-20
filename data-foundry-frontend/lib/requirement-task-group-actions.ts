@@ -15,6 +15,6 @@ export function canShowTaskGroupRunAction(params: {
   displayStatus: string;
 }): boolean {
   const { id, isReal, displayStatus } = params;
-  const runnableStatuses = new Set(["pending", "invalidated", "running", "completed", "failed", "partial"]);
+  const runnableStatuses = new Set(["pending", "invalidated", "running", "completed", "failed", "partial", "cancelled"]);
   return (isReal || isLocalTaskGroupId(id)) && runnableStatuses.has(displayStatus);
 }
