@@ -258,8 +258,12 @@ export type TaskGroup = {
   rowSnapshots?: WideTableRecord[];
   status: TaskGroupStatus;
   totalTasks: number;
+  runningTasks: number;
+  pendingTasks: number;
   completedTasks: number;
   failedTasks: number;
+  cancelledTasks: number;
+  invalidatedTasks: number;
   triggeredBy: "schedule" | "backfill" | "manual" | "trial";
   createdAt: string;
   updatedAt: string;

@@ -261,12 +261,54 @@ public class CollectionResultAppService {
           continue;
         }
         List<String> cells = splitMarkdownRow(line);
-        if (cells.size() > headers.size()) {
-          return Collections.emptyList();
+        cells = normalizeDataCells(cells, headers.size());
+        Map<String, String> row = new LinkedHashMap<String, String>();
+        for (int k = 0; k < outputHeaders.size(); k++) {
+          row.put(outputHeaders.get(k), cells.get(k));
         }
-        while (cells.size() < headers.size()) {
-          cells.add("");
+        rows.add(row);
+      }
+      return rows;
+    }
+    List<Map<String, String>> looseRows = parseFirstLooseMarkdownTable(lines, forcedHeaders);
+    if (!looseRows.isEmpty()) {
+      return looseRows;
+    }
+    return Collections.emptyList();
+  }
+
+  private List<Map<String, String>> parseFirstLooseMarkdownTable(String[] lines, List<String> forcedHeaders) {
+    if (lines == null || lines.length == 0) {
+      return Collections.emptyList();
+    }
+    for (int i = 0; i < lines.length - 1; i++) {
+      if (!looksLikeMarkdownRow(lines[i])) {
+        continue;
+      }
+      List<String> rawHeaders = splitMarkdownRow(lines[i]);
+      int firstDataIndex = findFirstLooseDataRow(lines, i + 1);
+      if (firstDataIndex < 0) {
+        continue;
+      }
+      List<String> firstDataCells = splitMarkdownRow(lines[firstDataIndex]);
+      List<String> headers = normalizeLooseHeaderCells(rawHeaders, firstDataCells.size());
+      if (!isLikelyMarkdownTableHeader(headers)) {
+        continue;
+      }
+      List<String> outputHeaders = forcedHeaders != null && !forcedHeaders.isEmpty() ? forcedHeaders : headers;
+      if (outputHeaders.size() != headers.size()) {
+        return Collections.emptyList();
+      }
+      List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+      for (int j = firstDataIndex; j < lines.length; j++) {
+        String line = lines[j];
+        if (!looksLikeMarkdownRow(line)) {
+          break;
         }
+        if (isMarkdownSeparator(line, splitMarkdownRow(line).size())) {
+          continue;
+        }
+        List<String> cells = normalizeDataCells(splitMarkdownRow(line), headers.size());
         Map<String, String> row = new LinkedHashMap<String, String>();
         for (int k = 0; k < outputHeaders.size(); k++) {
           row.put(outputHeaders.get(k), cells.get(k));
@@ -311,6 +353,16 @@ public class CollectionResultAppService {
     return headers;
   }
 
+  private List<String> normalizeLooseHeaderCells(List<String> headers, int dataColumns) {
+    if (headers == null || headers.isEmpty()) {
+      return Collections.emptyList();
+    }
+    if (isTableMetadataHeader(headers.get(0)) && headers.size() == dataColumns + 1) {
+      return new ArrayList<String>(headers.subList(1, headers.size()));
+    }
+    return headers;
+  }
+
   private boolean isTableMetadataHeader(String value) {
     if (value == null) {
       return false;
@@ -349,6 +401,73 @@ public class CollectionResultAppService {
       }
     }
     return true;
+  }
+
+  private int findFirstLooseDataRow(String[] lines, int start) {
+    for (int i = start; i < lines.length; i++) {
+      if (!looksLikeMarkdownRow(lines[i])) {
+        return -1;
+      }
+      List<String> cells = splitMarkdownRow(lines[i]);
+      if (isMarkdownSeparator(lines[i], cells.size())) {
+        continue;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  private boolean isLikelyMarkdownTableHeader(List<String> headers) {
+    if (headers == null || headers.size() < 2) {
+      return false;
+    }
+    int score = 0;
+    for (String header : headers) {
+      String value = header == null ? "" : header.trim();
+      String lower = value.toLowerCase(Locale.ROOT);
+      String compact = lower.replace(" ", "").replace("_", "").replace("-", "");
+      if ("comcode".equals(compact)
+          || compact.contains("metricname")
+          || compact.contains("metricvalue")
+          || compact.contains("dataperiod")
+          || compact.contains("datasource")
+          || compact.contains("sourceurl")
+          || compact.contains("sourceevidence")
+          || "unit".equals(compact)
+          || "minvalue".equals(compact)
+          || "maxvalue".equals(compact)
+          || value.contains("\u6307\u6807\u540d")
+          || value.contains("\u6307\u6807\u503c")
+          || value.contains("\u6570\u636e\u65f6\u95f4")
+          || value.contains("\u6570\u636e\u6765\u6e90")
+          || value.contains("\u5355\u4f4d")) {
+        score++;
+      }
+    }
+    return score >= 2;
+  }
+
+  private List<String> normalizeDataCells(List<String> cells, int expectedColumns) {
+    List<String> normalized = new ArrayList<String>(cells != null ? cells : Collections.<String>emptyList());
+    if (expectedColumns <= 0) {
+      return normalized;
+    }
+    while (normalized.size() < expectedColumns) {
+      normalized.add("");
+    }
+    if (normalized.size() <= expectedColumns) {
+      return normalized;
+    }
+    List<String> aligned = new ArrayList<String>(normalized.subList(0, expectedColumns - 1));
+    StringBuilder tail = new StringBuilder();
+    for (int i = expectedColumns - 1; i < normalized.size(); i++) {
+      if (tail.length() > 0) {
+        tail.append(" | ");
+      }
+      tail.append(normalized.get(i));
+    }
+    aligned.add(tail.toString());
+    return aligned;
   }
 
   private RowBuildResult buildResultRow(

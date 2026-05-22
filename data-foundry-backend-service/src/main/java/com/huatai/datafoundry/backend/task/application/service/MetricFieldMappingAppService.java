@@ -192,7 +192,8 @@ public class MetricFieldMappingAppService {
           || compact.contains("metricname")
           || normalized.equals("metric")
           || key.contains("\u6307\u6807\u540d\u79f0")
-          || key.contains("\u6307\u6807\u540d")) {
+          || key.contains("\u6307\u6807\u540d")
+          || (key.contains("\u6307\u6807") && key.contains("\u540d\u79f0"))) {
         return key;
       }
       if (normalized.contains("metric name") || normalized.equals("metric") || key.contains("指标名称")) {
