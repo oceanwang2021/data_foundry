@@ -1,5 +1,6 @@
 package com.huatai.datafoundry.backend.task.application.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -8,8 +9,10 @@ import static org.mockito.Mockito.when;
 
 import com.huatai.datafoundry.backend.task.application.event.TaskExecuteRequestedEvent;
 import com.huatai.datafoundry.backend.task.application.event.TaskGroupExecuteRequestedEvent;
+import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
+import com.huatai.datafoundry.backend.task.domain.repository.CollectionResultRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.backend.task.domain.service.TaskExecutionDomainService;
@@ -30,11 +33,18 @@ public class TaskAppServiceIdempotencyTest {
     FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
     TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+    TaskGroupAggregateService taskGroupAggregateService = Mockito.mock(TaskGroupAggregateService.class);
+    when(taskPlanAppService.refreshPromptSnapshotsForCollection(any())).thenAnswer((invocation) -> invocation.getArgument(0));
 
     TaskGroup tg = new TaskGroup();
     tg.setId("TG1");
     tg.setStatus("pending");
     when(taskGroupRepository.getById("TG1")).thenReturn(tg);
+    FetchTask queuedTask = new FetchTask();
+    queuedTask.setId("T1");
+    queuedTask.setTaskGroupId("TG1");
+    queuedTask.setStatus("pending");
+    when(fetchTaskRepository.listByTaskGroup("TG1")).thenReturn(java.util.Collections.singletonList(queuedTask));
 
     TaskAppService svc =
         new TaskAppService(
@@ -43,7 +53,11 @@ public class TaskAppServiceIdempotencyTest {
             taskPlanAppService,
             new TaskExecutionDomainService(),
             new TaskExecutionProperties(),
-            publisher);
+            publisher,
+            Mockito.mock(CollectionSearchGateway.class),
+            Mockito.mock(CollectionResultRepository.class),
+            taskGroupAggregateService,
+            new ObjectMapper());
 
     String key = "K-123";
     svc.executeTaskGroup("TG1", new HashMap<String, Object>(), key);
@@ -63,6 +77,8 @@ public class TaskAppServiceIdempotencyTest {
     FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
     TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+    TaskGroupAggregateService taskGroupAggregateService = Mockito.mock(TaskGroupAggregateService.class);
+    when(taskPlanAppService.refreshPromptSnapshotsForCollection(any())).thenAnswer((invocation) -> invocation.getArgument(0));
 
     FetchTask task = new FetchTask();
     task.setId("T1");
@@ -77,7 +93,11 @@ public class TaskAppServiceIdempotencyTest {
             taskPlanAppService,
             new TaskExecutionDomainService(),
             new TaskExecutionProperties(),
-            publisher);
+            publisher,
+            Mockito.mock(CollectionSearchGateway.class),
+            Mockito.mock(CollectionResultRepository.class),
+            taskGroupAggregateService,
+            new ObjectMapper());
 
     String key = "K-456";
     svc.executeTask("T1", key);

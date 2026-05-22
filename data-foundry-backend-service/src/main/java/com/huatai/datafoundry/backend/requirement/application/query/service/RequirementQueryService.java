@@ -7,6 +7,7 @@ import com.huatai.datafoundry.backend.requirement.application.query.dto.Collecti
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskResultsReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.MetricFieldMappingReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementTaskRuntimeReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchItemReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementSearchPageReadDto;
@@ -31,10 +32,14 @@ import com.huatai.datafoundry.backend.task.domain.model.MetricFieldMapping;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
+import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -137,8 +142,13 @@ public class RequirementQueryService {
     List<TaskGroup> records = taskGroupRepository.listByRequirement(requirementId);
     List<TaskGroupReadDto> out = new ArrayList<TaskGroupReadDto>();
     if (records == null) return out;
+    Map<String, WideTablePlanContext> contextByWideTableId = buildWideTablePlanContextByTaskGroups(requirementId, records);
     for (TaskGroup record : records) {
       if (record == null) continue;
+      WideTablePlanContext context = contextByWideTableId.get(record.getWideTableId());
+      if (!isCurrentLegalTaskGroup(record, context)) {
+        continue;
+      }
       TaskGroupReadDto dto = new TaskGroupReadDto();
       dto.setId(record.getId());
       dto.setSortOrder(record.getSortOrder());
@@ -156,9 +166,14 @@ public class RequirementQueryService {
       dto.setPartitionKey(record.getPartitionKey());
       dto.setPartitionLabel(record.getPartitionLabel());
       dto.setTotalTasks(record.getTotalTasks());
+      dto.setPendingTasks(record.getPendingTasks());
+      dto.setRunningTasks(record.getRunningTasks());
       dto.setCompletedTasks(record.getCompletedTasks());
       dto.setFailedTasks(record.getFailedTasks());
+      dto.setCancelledTasks(record.getCancelledTasks());
+      dto.setInvalidatedTasks(record.getInvalidatedTasks());
       dto.setTriggeredBy(record.getTriggeredBy());
+      dto.setLastAggregatedAt(record.getLastAggregatedAt());
       dto.setCreatedAt(record.getCreatedAt());
       dto.setUpdatedAt(record.getUpdatedAt());
       out.add(dto);
@@ -168,11 +183,33 @@ public class RequirementQueryService {
 
   public List<FetchTaskReadDto> listFetchTasks(String projectId, String requirementId) {
     assertRequirementExists(projectId, requirementId);
+    List<TaskGroup> taskGroups = taskGroupRepository.listByRequirement(requirementId);
+    Map<String, WideTablePlanContext> contextByWideTableId = buildWideTablePlanContextByTaskGroups(requirementId, taskGroups);
+    Map<String, TaskGroup> legalTaskGroupById = new LinkedHashMap<String, TaskGroup>();
+    if (taskGroups != null) {
+      for (TaskGroup taskGroup : taskGroups) {
+        if (taskGroup == null) {
+          continue;
+        }
+        WideTablePlanContext context = contextByWideTableId.get(taskGroup.getWideTableId());
+        if (isCurrentLegalTaskGroup(taskGroup, context)) {
+          legalTaskGroupById.put(taskGroup.getId(), taskGroup);
+        }
+      }
+    }
     List<FetchTask> records = fetchTaskRepository.listByRequirement(requirementId);
     List<FetchTaskReadDto> out = new ArrayList<FetchTaskReadDto>();
     if (records == null) return out;
     for (FetchTask record : records) {
       if (record == null) continue;
+      TaskGroup taskGroup = legalTaskGroupById.get(record.getTaskGroupId());
+      if (taskGroup == null) {
+        continue;
+      }
+      WideTablePlanContext context = contextByWideTableId.get(record.getWideTableId());
+      if (!isCurrentLegalFetchTask(record, taskGroup, context)) {
+        continue;
+      }
       FetchTaskReadDto dto = new FetchTaskReadDto();
       dto.setId(record.getId());
       dto.setSortOrder(record.getSortOrder());
@@ -188,6 +225,8 @@ public class RequirementQueryService {
       dto.setExecutionMode(record.getExecutionMode());
       dto.setIndicatorKeysJson(record.getIndicatorKeysJson());
       dto.setDimensionValuesJson(record.getDimensionValuesJson());
+      dto.setIndicatorKeys(parseJsonStringList(record.getIndicatorKeysJson()));
+      dto.setDimensionValues(parseJsonStringMap(record.getDimensionValuesJson()));
       dto.setCollectionTaskId(record.getCollectionTaskId());
       dto.setBusinessDate(record.getBusinessDate());
       dto.setStatus(record.getStatus());
@@ -203,6 +242,211 @@ public class RequirementQueryService {
       out.add(dto);
     }
     return out;
+  }
+
+  public RequirementTaskRuntimeReadDto getTaskRuntime(String projectId, String requirementId) {
+    RequirementTaskRuntimeReadDto dto = new RequirementTaskRuntimeReadDto();
+    dto.setTaskGroups(listTaskGroups(projectId, requirementId));
+    dto.setFetchTasks(listFetchTasks(projectId, requirementId));
+    return dto;
+  }
+
+  private Map<String, WideTablePlanContext> buildWideTablePlanContextByTaskGroups(
+      String requirementId,
+      List<TaskGroup> taskGroups) {
+    if (taskGroups == null || taskGroups.isEmpty()) {
+      return Collections.emptyMap();
+    }
+    Map<String, Integer> currentPlanVersionByWideTableId = new LinkedHashMap<String, Integer>();
+    for (TaskGroup taskGroup : taskGroups) {
+      if (taskGroup == null || taskGroup.getWideTableId() == null) {
+        continue;
+      }
+      int planVersion = taskGroup.getPlanVersion() != null ? taskGroup.getPlanVersion().intValue() : 1;
+      Integer current = currentPlanVersionByWideTableId.get(taskGroup.getWideTableId());
+      if (current == null || planVersion > current.intValue()) {
+        currentPlanVersionByWideTableId.put(taskGroup.getWideTableId(), Integer.valueOf(planVersion));
+      }
+    }
+    if (currentPlanVersionByWideTableId.isEmpty()) {
+      return Collections.emptyMap();
+    }
+    Map<String, WideTablePlanContext> out = new LinkedHashMap<String, WideTablePlanContext>();
+    for (Map.Entry<String, Integer> entry : currentPlanVersionByWideTableId.entrySet()) {
+      String wideTableId = entry.getKey();
+      if (wideTableId == null || wideTableId.trim().isEmpty()) {
+        continue;
+      }
+      WideTable wideTable = requirementRepository.getWideTableByIdForRequirement(requirementId, wideTableId);
+      WideTablePlanContext context = new WideTablePlanContext();
+      context.currentPlanVersion = entry.getValue().intValue();
+      context.indicatorGroups = parseIndicatorGroups(wideTable != null ? wideTable.getIndicatorGroupsJson() : null);
+      context.indicatorGroupKeys = new LinkedHashSet<String>(context.indicatorGroups.keySet());
+      out.put(wideTableId, context);
+    }
+    return out;
+  }
+
+  private boolean isCurrentLegalTaskGroup(TaskGroup taskGroup, WideTablePlanContext context) {
+    if (taskGroup == null || context == null) {
+      return false;
+    }
+    int planVersion = taskGroup.getPlanVersion() != null ? taskGroup.getPlanVersion().intValue() : 1;
+    if (planVersion != context.currentPlanVersion) {
+      return false;
+    }
+    String status = taskGroup.getStatus();
+    if (status != null && "invalidated".equalsIgnoreCase(status)) {
+      return false;
+    }
+    if (context.indicatorGroupKeys.isEmpty()) {
+      return true;
+    }
+    String partitionKey = taskGroup.getPartitionKey();
+    if (context.indicatorGroupKeys.size() == 1 && (partitionKey == null || partitionKey.trim().isEmpty())) {
+      return true;
+    }
+    return partitionKey != null && context.indicatorGroupKeys.contains(partitionKey);
+  }
+
+  private boolean isCurrentLegalFetchTask(
+      FetchTask fetchTask,
+      TaskGroup taskGroup,
+      WideTablePlanContext context) {
+    if (fetchTask == null || taskGroup == null || context == null) {
+      return false;
+    }
+    int planVersion = fetchTask.getPlanVersion() != null ? fetchTask.getPlanVersion().intValue() : 1;
+    if (planVersion != context.currentPlanVersion) {
+      return false;
+    }
+    String indicatorGroupId = fetchTask.getIndicatorGroupId();
+    if (indicatorGroupId == null || !context.indicatorGroups.containsKey(indicatorGroupId)) {
+      return false;
+    }
+    String taskGroupPartitionKey = taskGroup.getPartitionKey();
+    if (taskGroupPartitionKey != null && !taskGroupPartitionKey.trim().isEmpty() && !taskGroupPartitionKey.equals(indicatorGroupId)) {
+      return false;
+    }
+    String fetchTaskBusinessDate = normalizeString(fetchTask.getBusinessDate());
+    String taskGroupBusinessDate = normalizeString(taskGroup.getBusinessDate());
+    if (!taskGroupBusinessDate.isEmpty() && !fetchTaskBusinessDate.isEmpty() && !taskGroupBusinessDate.equals(fetchTaskBusinessDate)) {
+      return false;
+    }
+    Set<String> expectedIndicatorKeys = context.indicatorGroups.get(indicatorGroupId);
+    Set<String> actualIndicatorKeys = parseJsonStringSet(fetchTask.getIndicatorKeysJson());
+    return expectedIndicatorKeys.equals(actualIndicatorKeys);
+  }
+
+  private Map<String, Set<String>> parseIndicatorGroups(String indicatorGroupsJson) {
+    if (indicatorGroupsJson == null || indicatorGroupsJson.trim().isEmpty()) {
+      return Collections.emptyMap();
+    }
+    try {
+      List<?> rawGroups = objectMapper.readValue(indicatorGroupsJson, new TypeReference<List<?>>() {});
+      Map<String, Set<String>> out = new LinkedHashMap<String, Set<String>>();
+      for (Object rawGroup : rawGroups) {
+        if (!(rawGroup instanceof Map)) {
+          continue;
+        }
+        Map<?, ?> raw = (Map<?, ?>) rawGroup;
+        String id = normalizeString(raw.get("id"));
+        if (id.isEmpty()) {
+          continue;
+        }
+        Object indicatorColumns = raw.get("indicator_columns");
+        if (!(indicatorColumns instanceof List)) {
+          indicatorColumns = raw.get("indicatorColumns");
+        }
+        if (!(indicatorColumns instanceof List)) {
+          indicatorColumns = raw.get("indicator_keys");
+        }
+        out.put(id, normalizeStringSet((List<?>) indicatorColumns));
+      }
+      return out;
+    } catch (Exception ex) {
+      return Collections.emptyMap();
+    }
+  }
+
+  private Set<String> parseJsonStringSet(String rawJson) {
+    if (rawJson == null || rawJson.trim().isEmpty()) {
+      return Collections.emptySet();
+    }
+    try {
+      List<?> raw = objectMapper.readValue(rawJson, new TypeReference<List<?>>() {});
+      return normalizeStringSet(raw);
+    } catch (Exception ex) {
+      return Collections.emptySet();
+    }
+  }
+
+  private List<String> parseJsonStringList(String rawJson) {
+    if (rawJson == null || rawJson.trim().isEmpty()) {
+      return Collections.emptyList();
+    }
+    try {
+      List<?> raw = objectMapper.readValue(rawJson, new TypeReference<List<?>>() {});
+      List<String> out = new ArrayList<String>(raw.size());
+      for (Object item : raw) {
+        if (item != null) {
+          String value = String.valueOf(item).trim();
+          if (!value.isEmpty()) {
+            out.add(value);
+          }
+        }
+      }
+      return out;
+    } catch (Exception ex) {
+      return Collections.emptyList();
+    }
+  }
+
+  private Map<String, String> parseJsonStringMap(String rawJson) {
+    if (rawJson == null || rawJson.trim().isEmpty()) {
+      return Collections.emptyMap();
+    }
+    try {
+      Map<String, Object> raw =
+          objectMapper.readValue(rawJson, new TypeReference<Map<String, Object>>() {});
+      Map<String, String> out = new LinkedHashMap<String, String>();
+      for (Map.Entry<String, Object> entry : raw.entrySet()) {
+        if (entry.getKey() == null) {
+          continue;
+        }
+        out.put(entry.getKey(), entry.getValue() == null ? "" : String.valueOf(entry.getValue()));
+      }
+      return out;
+    } catch (Exception ex) {
+      return Collections.emptyMap();
+    }
+  }
+
+  private Set<String> normalizeStringSet(List<?> rawValues) {
+    if (rawValues == null || rawValues.isEmpty()) {
+      return Collections.emptySet();
+    }
+    Set<String> normalized = new LinkedHashSet<String>();
+    for (Object rawValue : rawValues) {
+      String value = normalizeString(rawValue);
+      if (!value.isEmpty()) {
+        normalized.add(value);
+      }
+    }
+    return normalized;
+  }
+
+  private String normalizeString(Object rawValue) {
+    if (rawValue == null) {
+      return "";
+    }
+    return String.valueOf(rawValue).trim();
+  }
+
+  private static final class WideTablePlanContext {
+    private int currentPlanVersion;
+    private Map<String, Set<String>> indicatorGroups = Collections.emptyMap();
+    private Set<String> indicatorGroupKeys = Collections.emptySet();
   }
 
   public FetchTaskResultsReadDto getTaskResults(String taskId) {

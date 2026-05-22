@@ -100,100 +100,35 @@ export function buildFetchTaskCardViews(params: {
     wideTable,
     taskGroup,
     fetchTasks,
-    wideTableRecords,
   } = params;
   if (!wideTable || !taskGroup) {
     return [];
   }
 
-  const indicatorGroups = buildIndicatorGroups(wideTable);
-  const usesBusinessDateAxis = hasWideTableBusinessDateDimension(wideTable);
-  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "BIZ_DATE";
-  const explicitTasks = fetchTasks.filter((task) => task.taskGroupId === taskGroup.id);
-  const taskGroupExecution = buildTaskGroupExecutionSummary(taskGroup, explicitTasks);
-  const explicitTaskMap = new Map(explicitTasks.map((task) => [makeTaskKey(task.rowId, task.indicatorGroupId), task]));
-  const recordMap = new Map<number, WideTableRecord>();
-  const snapshotRecords = taskGroup.rowSnapshots ?? [];
-
-  for (const record of snapshotRecords) {
-    recordMap.set(getRecordRowId(record), record);
-  }
-
-  for (const record of wideTableRecords) {
-    if (record.wideTableId !== wideTable.id) {
-      continue;
-    }
-    if (
-      usesBusinessDateAxis
-      && normalizeDate(String(record[businessDateFieldName] ?? "")) !== normalizeDate(taskGroup.businessDate)
-    ) {
-      continue;
-    }
-    const rowId = getRecordRowId(record);
-    recordMap.set(rowId, mergeWideTableRecord(recordMap.get(rowId), record));
-  }
-
-  const rowIds = Array.from(
-    new Set([
-      ...explicitTasks.map((task) => task.rowId),
-      ...Array.from(recordMap.keys()),
-    ]),
-  ).sort((left, right) => left - right);
-
-  const candidateTasks = rowIds.flatMap((rowId) => {
-    const record = recordMap.get(rowId);
-    return indicatorGroups.map((group) => ({
-      rowId,
-      record,
-      group,
-      explicitTask: explicitTaskMap.get(makeTaskKey(rowId, group.id)),
-    }));
-  }).filter((item) => item.explicitTask || item.record);
-  const syntheticStatuses = buildSyntheticTaskStatuses(
-    taskGroupExecution,
-    explicitTasks,
-    candidateTasks.filter((item) => !item.explicitTask).length,
+  const indicatorGroupById = new Map(
+    buildIndicatorGroups(wideTable).map((group) => [group.id, group] as const),
   );
-
-  const cards: FetchTaskCardView[] = [];
-  let syntheticTaskIndex = 0;
-
-  for (const rowId of rowIds) {
-    const record = recordMap.get(rowId);
-
-    for (const group of indicatorGroups) {
-      const explicitTask = explicitTaskMap.get(makeTaskKey(rowId, group.id));
-      if (!explicitTask && !record) {
-        continue;
+  return [...fetchTasks]
+    .filter((task) => task.taskGroupId === taskGroup.id)
+    .sort((left, right) => {
+      if (left.rowId !== right.rowId) {
+        return left.rowId - right.rowId;
       }
-
-      const hydratedTask = explicitTask
-        ? hydrateExplicitTaskForDisplay(explicitTask, wideTable, record, group.indicatorColumns)
-        : buildSyntheticTask(
-          wideTable,
-          taskGroupExecution.status,
-          taskGroup,
-          rowId,
-          group.id,
-          group.name,
-          group.indicatorColumns,
-          syntheticStatuses[syntheticTaskIndex++] ?? inferFallbackSyntheticStatus(taskGroupExecution.status),
-          record,
-        );
-      cards.push(
-        buildTaskCardView(
-          hydratedTask,
-          group,
-          requirement,
-          wideTable,
-          taskGroup,
-          record,
-        ),
+      return left.indicatorGroupName.localeCompare(right.indicatorGroupName);
+    })
+    .map((task) => {
+      const group = indicatorGroupById.get(task.indicatorGroupId)
+        ?? buildFallbackTaskCardGroup(task);
+      const record = buildTaskContextRecord(task, wideTable);
+      return buildTaskCardView(
+        task,
+        group,
+        requirement,
+        wideTable,
+        taskGroup,
+        record,
       );
-    }
-  }
-
-  return cards;
+    });
 }
 
 function buildTaskCardView(
@@ -367,6 +302,37 @@ function buildIndicatorGroups(wideTable: WideTable) {
   }
 
   return [];
+}
+
+function buildFallbackTaskCardGroup(task: FetchTask) {
+  return {
+    id: task.indicatorGroupId,
+    name: task.indicatorGroupName,
+    agent: undefined,
+    promptTemplate: undefined,
+    promptConfig: undefined,
+    indicatorColumns: task.indicatorKeys ?? [],
+    description: "",
+  };
+}
+
+function buildTaskContextRecord(task: FetchTask, wideTable: WideTable): WideTableRecord {
+  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "BIZ_DATE";
+  const record: WideTableRecord = {
+    id: task.rowId,
+    wideTableId: task.wideTableId,
+    rowBindingKey: task.rowBindingKey,
+    ROW_ID: task.rowId,
+  };
+  for (const [key, value] of Object.entries(task.dimensionValues ?? {})) {
+    record[key] = value;
+  }
+  if (task.businessDate) {
+    record.business_date = task.businessDate;
+    record.BIZ_DATE = task.businessDate;
+    record[businessDateFieldName] = task.businessDate;
+  }
+  return record;
 }
 
 function buildSyntheticTask(

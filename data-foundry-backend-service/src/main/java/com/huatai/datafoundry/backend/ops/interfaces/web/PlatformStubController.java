@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.ops.interfaces.web;
 
 import com.huatai.datafoundry.backend.ops.application.service.DemoDataService;
+import com.huatai.datafoundry.backend.task.application.service.TaskRuntimeBackfillAppService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,12 +23,15 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 public class PlatformStubController {
   private final DemoDataService demoDataService;
+  private final TaskRuntimeBackfillAppService taskRuntimeBackfillAppService;
   private final boolean adminEnabled;
 
   public PlatformStubController(
       DemoDataService demoDataService,
+      TaskRuntimeBackfillAppService taskRuntimeBackfillAppService,
       @Value("${datafoundry.admin.enabled:false}") boolean adminEnabled) {
     this.demoDataService = demoDataService;
+    this.taskRuntimeBackfillAppService = taskRuntimeBackfillAppService;
     this.adminEnabled = adminEnabled;
   }
 
@@ -115,6 +119,12 @@ public class PlatformStubController {
       out.put("at", Instant.now().toString());
       return out;
     }
+  }
+
+  @PostMapping("/api/admin/task-runtime/backfill")
+  public Map<String, Object> backfillTaskRuntimeData() {
+    ensureAdminEnabled();
+    return taskRuntimeBackfillAppService.backfillRuntimeData();
   }
 
   private void ensureAdminEnabled() {

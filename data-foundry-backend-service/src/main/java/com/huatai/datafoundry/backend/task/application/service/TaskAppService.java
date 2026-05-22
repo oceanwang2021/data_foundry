@@ -43,6 +43,7 @@ public class TaskAppService {
   private final ApplicationEventPublisher eventPublisher;
   private final CollectionSearchGateway collectionSearchGateway;
   private final CollectionResultRepository collectionResultRepository;
+  private final TaskGroupAggregateService taskGroupAggregateService;
   private final ObjectMapper objectMapper;
 
   public TaskAppService(
@@ -54,6 +55,7 @@ public class TaskAppService {
       ApplicationEventPublisher eventPublisher,
       CollectionSearchGateway collectionSearchGateway,
       CollectionResultRepository collectionResultRepository,
+      TaskGroupAggregateService taskGroupAggregateService,
       ObjectMapper objectMapper) {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
@@ -63,6 +65,7 @@ public class TaskAppService {
     this.eventPublisher = eventPublisher;
     this.collectionSearchGateway = collectionSearchGateway;
     this.collectionResultRepository = collectionResultRepository;
+    this.taskGroupAggregateService = taskGroupAggregateService;
     this.objectMapper = objectMapper;
   }
 
@@ -361,74 +364,7 @@ public class TaskAppService {
   }
 
   private void refreshTaskGroupAggregates(List<String> taskGroupIds) {
-    if (taskGroupIds == null || taskGroupIds.isEmpty()) {
-      return;
-    }
-    for (String taskGroupId : taskGroupIds) {
-      if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
-        continue;
-      }
-      TaskGroup taskGroup = taskGroupRepository.getById(taskGroupId);
-      if (taskGroup == null) {
-        continue;
-      }
-      List<FetchTask> tasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
-      int total = tasks != null ? tasks.size() : 0;
-      int running = 0;
-      int completed = 0;
-      int failed = 0;
-      int cancelled = 0;
-      int invalidated = 0;
-      if (tasks != null) {
-        for (FetchTask task : tasks) {
-          String status = normalize(task != null ? task.getStatus() : null);
-          if (TaskStatus.RUNNING.equals(status)) {
-            running++;
-          } else if (TaskStatus.COMPLETED.equals(status)) {
-            completed++;
-          } else if (TaskStatus.FAILED.equals(status)) {
-            failed++;
-          } else if (TaskStatus.CANCELLED.equals(status)) {
-            cancelled++;
-          } else if (TaskStatus.INVALIDATED.equals(status)) {
-            invalidated++;
-          }
-        }
-      }
-      int pending = Math.max(total - running - completed - failed - cancelled - invalidated, 0);
-      taskGroup.setTotalTasks(total);
-      taskGroup.setCompletedTasks(completed);
-      taskGroup.setFailedTasks(failed);
-      taskGroup.setStatus(
-          resolveAggregateTaskGroupStatus(pending, running, completed, failed, cancelled, invalidated));
-      taskGroupRepository.upsert(taskGroup);
-    }
-  }
-
-  private String resolveAggregateTaskGroupStatus(
-      int pending, int running, int completed, int failed, int cancelled, int invalidated) {
-    if (running > 0) {
-      return TaskStatus.RUNNING;
-    }
-    if (pending > 0 && completed == 0 && failed == 0 && cancelled == 0 && invalidated == 0) {
-      return TaskStatus.PENDING;
-    }
-    if (completed > 0 && failed == 0 && cancelled == 0 && pending == 0) {
-      return TaskStatus.COMPLETED;
-    }
-    if (cancelled > 0 && completed == 0 && failed == 0 && pending == 0 && invalidated == 0) {
-      return TaskStatus.CANCELLED;
-    }
-    if (failed > 0 && completed == 0 && cancelled == 0 && pending == 0) {
-      return TaskStatus.FAILED;
-    }
-    if (failed > 0 || completed > 0 || cancelled > 0) {
-      return "partial";
-    }
-    if (invalidated > 0 && pending == 0) {
-      return TaskStatus.INVALIDATED;
-    }
-    return TaskStatus.PENDING;
+    taskGroupAggregateService.refreshTaskGroups(taskGroupIds);
   }
 
   private String mapExternalTaskStatus(String rawStatus) {

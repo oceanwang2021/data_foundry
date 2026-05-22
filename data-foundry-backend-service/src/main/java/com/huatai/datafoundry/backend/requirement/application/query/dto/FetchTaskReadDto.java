@@ -3,7 +3,9 @@ package com.huatai.datafoundry.backend.requirement.application.query.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class FetchTaskReadDto {
@@ -21,6 +23,8 @@ public class FetchTaskReadDto {
   private String executionMode;
   private String indicatorKeysJson;
   private String dimensionValuesJson;
+  private List<String> indicatorKeys = new ArrayList<String>();
+  private Map<String, String> dimensionValues = new LinkedHashMap<String, String>();
   private String collectionTaskId;
   private String businessDate;
   private String status;
@@ -145,6 +149,22 @@ public class FetchTaskReadDto {
 
   public void setDimensionValuesJson(String dimensionValuesJson) {
     this.dimensionValuesJson = dimensionValuesJson;
+  }
+
+  public List<String> getIndicatorKeys() {
+    return indicatorKeys;
+  }
+
+  public void setIndicatorKeys(List<String> indicatorKeys) {
+    this.indicatorKeys = indicatorKeys;
+  }
+
+  public Map<String, String> getDimensionValues() {
+    return dimensionValues;
+  }
+
+  public void setDimensionValues(Map<String, String> dimensionValues) {
+    this.dimensionValues = dimensionValues;
   }
 
   public String getCollectionTaskId() {

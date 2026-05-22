@@ -1,5 +1,12 @@
-import { formatBusinessDate, formatBusinessDateLabel } from "@/lib/business-date";
-import type { FetchTask, Requirement, TaskGroup, WideTable, WideTableRecord } from "@/lib/types";
+import { formatBusinessDate, formatBusinessDateLabel, normalizeBusinessDateToken } from "@/lib/business-date";
+import type {
+  BusinessDateFrequency,
+  FetchTask,
+  Requirement,
+  TaskGroup,
+  WideTable,
+  WideTableRecord,
+} from "@/lib/types";
 import { getWideTableDimensionBindingKey } from "@/lib/wide-table-preview";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
 
@@ -20,6 +27,20 @@ export type TaskPlanReconcileResult = {
   generatedTaskCount: number;
   invalidatedTaskGroupCount: number;
 };
+
+export function countExpectedFetchTasksForBusinessDate(
+  wideTable: Pick<WideTable, "parameterRows" | "businessDateRange">,
+  businessDate: string,
+  fallbackCount: number,
+): number {
+  const parameterRows = wideTable.parameterRows ?? [];
+  if (parameterRows.length === 0) {
+    return fallbackCount;
+  }
+
+  return parameterRows.filter((row) =>
+    matchesParameterRowBusinessDate(row.businessDate, businessDate, wideTable.businessDateRange.frequency)).length;
+}
 
 function resolveIndicatorGroupsForTaskGroup(
   taskGroup: Pick<TaskGroup, "partitionKey">,
@@ -315,7 +336,7 @@ function buildTaskGroup(params: {
 }): TaskGroup {
   const { wideTable, businessDate, planVersion, rowSnapshots, indicatorGroup, indicatorGroupingEnabled, now } = params;
   const timestamp = now.toISOString();
-  const totalTasks = rowSnapshots.length;
+  const totalTasks = countExpectedFetchTasksForBusinessDate(wideTable, businessDate, rowSnapshots.length);
   const isFullTablePartition = !hasWideTableBusinessDateDimension(wideTable);
   if (isFullTablePartition) {
     const triggeredBy = "schedule";
@@ -336,8 +357,12 @@ function buildTaskGroup(params: {
       rowSnapshots,
       status: "pending",
       totalTasks,
+      pendingTasks: totalTasks,
+      runningTasks: 0,
       completedTasks: 0,
       failedTasks: 0,
+      cancelledTasks: 0,
+      invalidatedTasks: 0,
       triggeredBy,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -360,8 +385,12 @@ function buildTaskGroup(params: {
     rowSnapshots,
     status: "pending",
     totalTasks,
+    pendingTasks: totalTasks,
+    runningTasks: 0,
     completedTasks: 0,
     failedTasks: 0,
+    cancelledTasks: 0,
+    invalidatedTasks: 0,
     triggeredBy,
     partitionType: "business_date",
     partitionKey: indicatorGroup.id,
@@ -369,6 +398,62 @@ function buildTaskGroup(params: {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+function matchesParameterRowBusinessDate(
+  rowBusinessDate: string | undefined,
+  taskGroupBusinessDate: string,
+  frequency: BusinessDateFrequency,
+): boolean {
+  if (!taskGroupBusinessDate) {
+    return true;
+  }
+
+  const rowValue = String(rowBusinessDate ?? "").trim();
+  if (!rowValue) {
+    return true;
+  }
+
+  const normalizedRowSlot = normalizeBusinessDateSlot(rowValue, frequency);
+  const normalizedTaskGroupSlot = normalizeBusinessDateSlot(taskGroupBusinessDate, frequency);
+
+  if (!normalizedRowSlot || !normalizedTaskGroupSlot) {
+    return rowValue === taskGroupBusinessDate;
+  }
+
+  return normalizedRowSlot === normalizedTaskGroupSlot;
+}
+
+function normalizeBusinessDateSlot(
+  value: string,
+  frequency: BusinessDateFrequency,
+): string {
+  const normalized = normalizeBusinessDateToken(String(value).trim());
+  if (!normalized) {
+    return "";
+  }
+
+  if (frequency === "yearly") {
+    return normalized.slice(0, 4);
+  }
+
+  if (frequency === "monthly") {
+    return normalized.slice(0, 7);
+  }
+
+  if (frequency === "quarterly") {
+    const matched = normalized.match(/^(\d{4})-(\d{2})-\d{2}$/);
+    if (!matched) {
+      return normalized;
+    }
+    const month = Number(matched[2]);
+    if (!Number.isFinite(month) || month < 1 || month > 12) {
+      return normalized;
+    }
+    return `${matched[1]}-Q${Math.floor((month - 1) / 3) + 1}`;
+  }
+
+  return normalized;
 }
 
 function buildExplicitFetchTasks(

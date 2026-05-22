@@ -80,6 +80,29 @@ function safeParseObject(value: unknown): Record<string, string> | undefined {
   }
 }
 
+function safeParseStringArray(value: unknown): string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item !== "");
+    return items.length > 0 ? items : undefined;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item ?? "").trim()).filter((item) => item !== "")
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readRaw(raw: any, snakeKey: string, camelKey: string = snakeKey): any {
   return raw?.[snakeKey] ?? raw?.[camelKey];
 }
@@ -638,10 +661,15 @@ export function mapTaskGroup(raw: any): TaskGroup {
     deltaReason: raw.delta_reason,
     status: mapTaskGroupStatus(raw.status),
     totalTasks: raw.total_tasks ?? 0,
+    pendingTasks: raw.pending_tasks ?? 0,
+    runningTasks: raw.running_tasks ?? 0,
     completedTasks: raw.completed_tasks ?? 0,
     failedTasks: raw.failed_tasks ?? 0,
+    cancelledTasks: raw.cancelled_tasks ?? 0,
+    invalidatedTasks: raw.invalidated_tasks ?? 0,
     rowSnapshots,
     triggeredBy: raw.triggered_by ?? mapTriggeredBy(raw.source_type),
+    lastAggregatedAt: raw.last_aggregated_at ?? undefined,
     createdAt: raw.created_at ?? new Date().toISOString(),
     updatedAt: raw.updated_at ?? new Date().toISOString(),
   };
@@ -667,7 +695,7 @@ function mapTriggeredBy(sourceType: string): TaskGroup["triggeredBy"] {
 }
 
 /** 后端 FetchTask → 前端 FetchTask */
-function mapFetchTask(raw: any): FetchTask {
+export function mapFetchTask(raw: any): FetchTask {
   return {
     id: raw.id,
     taskGroupId: raw.task_group_id,
@@ -677,7 +705,12 @@ function mapFetchTask(raw: any): FetchTask {
     planVersion: raw.plan_version,
     rowBindingKey: raw.row_binding_key,
     indicatorGroupId: raw.indicator_group_id,
-    indicatorGroupName: raw.name ?? raw.indicator_group_id,
+    indicatorGroupName: raw.indicator_group_name ?? raw.indicatorGroupName ?? raw.name ?? raw.indicator_group_id,
+    indicatorKeys: safeParseStringArray(readRaw(raw, "indicator_keys", "indicatorKeys"))
+      ?? safeParseStringArray(raw.indicator_keys_json ?? raw.indicatorKeysJson),
+    dimensionValues: safeParseObject(readRaw(raw, "dimension_values", "dimensionValues"))
+      ?? safeParseObject(raw.dimension_values_json ?? raw.dimensionValuesJson),
+    businessDate: raw.business_date ?? raw.businessDate ?? undefined,
     collectionTaskId: raw.collection_task_id ?? raw.collectionTaskId ?? undefined,
     status: mapFetchTaskStatus(raw.status),
     confidence: raw.confidence,
@@ -1631,6 +1664,7 @@ export async function persistWideTablePlan(
   await apiPost(`/api/requirements/${requirementId}/wide-tables/${normalizedWideTable.id}/plan`, {
     schema: toBackendWideTableSchema(normalizedWideTable),
     scope: toBackendWideTableScope(normalizedWideTable),
+    invalidate_missing: true,
     indicator_groups: normalizedWideTable.indicatorGroups.map((group) => ({
       id: group.id,
       name: group.name,
@@ -1826,6 +1860,22 @@ export async function fetchFetchTasks(
   );
   // 后端返回 TaskSummary[]，task 在 .task 字段
   return raw.map((item) => mapFetchTask(item.task ?? item));
+}
+
+export async function fetchRequirementTaskRuntime(
+  projectId: string,
+  requirementId: string,
+): Promise<{
+  taskGroups: TaskGroup[];
+  fetchTasks: FetchTask[];
+}> {
+  const raw = await apiGet<any>(
+    `/api/projects/${projectId}/requirements/${requirementId}/task-runtime`,
+  );
+  return {
+    taskGroups: (raw.task_groups ?? raw.taskGroups ?? []).map(mapTaskGroup),
+    fetchTasks: (raw.fetch_tasks ?? raw.fetchTasks ?? []).map((item: any) => mapFetchTask(item.task ?? item)),
+  };
 }
 
 export async function fetchTaskResults(taskId: string): Promise<FetchTaskResults> {
@@ -2147,11 +2197,13 @@ export async function loadRequirementDetailData(
   acceptanceTickets: AcceptanceTicket[];
   scheduleJobs: ScheduleJob[];
 }> {
-  const [project, reqData, taskGroups, fetchTasks, acceptanceTickets] = await Promise.all([
+  const [project, reqData, runtimeData, acceptanceTickets] = await Promise.all([
     fetchProject(projectId),
     fetchRequirementWideTables(projectId),
-    fetchTaskGroups(projectId, requirementId).catch(() => [] as TaskGroup[]),
-    fetchFetchTasks(projectId, requirementId).catch(() => [] as FetchTask[]),
+    fetchRequirementTaskRuntime(projectId, requirementId).catch(() => ({
+      taskGroups: [] as TaskGroup[],
+      fetchTasks: [] as FetchTask[],
+    })),
     fetchAcceptanceTickets().catch(() => [] as AcceptanceTicket[]),
   ]);
 
@@ -2175,8 +2227,8 @@ export async function loadRequirementDetailData(
     })),
     wideTables: hydratedWideTables,
     wideTableRecords,
-    taskGroups,
-    fetchTasks,
+    taskGroups: runtimeData.taskGroups,
+    fetchTasks: runtimeData.fetchTasks,
     acceptanceTickets: acceptanceTickets.filter((t) => t.requirementId === requirementId),
     scheduleJobs: await fetchScheduleJobs(), // Load from backend API
   };

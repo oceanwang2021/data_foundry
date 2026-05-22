@@ -56,6 +56,7 @@ import {
 import {
   annotateCurrentPlanRecords,
   buildTaskPlanFingerprint,
+  countExpectedFetchTasksForBusinessDate,
   reconcileTaskPlanChange,
   resolveRecordPlanVersion,
   resolveCurrentPlanVersion,
@@ -578,25 +579,11 @@ export default function RequirementTasksPanel({
         : new Map(
             wtTaskGroups.map((taskGroup) => {
               const scopedFetchTasks = fetchTasks.filter((task) => task.taskGroupId === taskGroup.id);
-              const fallbackSummary = buildTaskGroupExecutionSummary(taskGroup, scopedFetchTasks);
-              const taskCards = buildFetchTaskCardViews({
-                requirement,
-                wideTable: effectiveWideTable ?? undefined,
-                taskGroup,
-                fetchTasks: scopedFetchTasks,
-                wideTableRecords: currentWideTableRecords,
-              });
-
-              if (taskCards.length === 0) {
-                return [taskGroup.id, fallbackSummary] as const;
-              }
-
-              const summary = buildTaskGroupSummaryFromCards(taskGroup, fallbackSummary, taskCards);
-              return [taskGroup.id, summary] as const;
+              return [taskGroup.id, buildTaskGroupExecutionSummary(taskGroup, scopedFetchTasks)] as const;
             }),
           )
     ),
-    [currentWideTableRecords, effectiveWideTable, fetchTasks, wtTaskGroups],
+    [fetchTasks, wtTaskGroups],
   );
   const taskPlan = useMemo(
     () => (effectiveWideTable && isIndicatorGroupingComplete ? buildTaskPlanView(effectiveWideTable) : null),
@@ -690,22 +677,20 @@ export default function RequirementTasksPanel({
     () => buildTaskInstanceRowViews({
       wideTable: selectedWt ?? effectiveWideTable ?? undefined,
       fetchTasks: tgFetchTasks,
-      wideTableRecords: currentWideTableRecords,
       indicatorGroups: effectiveWideTable?.indicatorGroups ?? selectedWt?.indicatorGroups ?? [],
       parameterColumns: returnContextColumns.filter((column) => !column.isBusinessDate),
       overrideBusinessDateLabel: expandedTaskGroupView?.businessDateLabel ?? expandedTaskGroupView?.displayLabel ?? "",
     }),
-    [currentWideTableRecords, effectiveWideTable, expandedTaskGroupView?.businessDateLabel, expandedTaskGroupView?.displayLabel, returnContextColumns, selectedWt, tgFetchTasks],
+    [effectiveWideTable, expandedTaskGroupView?.businessDateLabel, expandedTaskGroupView?.displayLabel, returnContextColumns, selectedWt, tgFetchTasks],
   );
   const trialTaskInstanceRows = useMemo(
     () => buildTaskInstanceRowViews({
       wideTable: selectedWt ?? effectiveWideTable ?? undefined,
       fetchTasks: trialFetchTasks,
-      wideTableRecords: currentWideTableRecords,
       indicatorGroups: effectiveWideTable?.indicatorGroups ?? selectedWt?.indicatorGroups ?? [],
       parameterColumns: returnContextColumns.filter((column) => !column.isBusinessDate),
     }),
-    [currentWideTableRecords, effectiveWideTable, returnContextColumns, selectedWt, trialFetchTasks],
+    [effectiveWideTable, returnContextColumns, selectedWt, trialFetchTasks],
   );
   const hasRunningCollectionInstances = useMemo(
     () => Boolean(
@@ -1353,11 +1338,11 @@ export default function RequirementTasksPanel({
     }
 
     const nextAttempt = targetTask.executionRecords.length + 1;
-    const optimisticFetchTasks = fetchTasks.map((task) => (
+    const optimisticFetchTasks: FetchTask[] = fetchTasks.map((task) => (
       task.id === taskId
         ? {
             ...task,
-            status: "running",
+            status: "running" as const,
             updatedAt: now,
             executionRecords: [
               ...task.executionRecords,
@@ -1365,8 +1350,8 @@ export default function RequirementTasksPanel({
                 id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
                 fetchTaskId: task.id,
                 attempt: nextAttempt,
-                status: "running",
-                triggeredBy: "manual_retry",
+                status: "running" as const,
+                triggeredBy: "manual_retry" as const,
                 startedAt: now,
               },
             ],
@@ -1374,11 +1359,13 @@ export default function RequirementTasksPanel({
         : task
     ));
     onFetchTasksChange(optimisticFetchTasks);
-    const optimisticTaskGroups = taskGroups.map((taskGroup) => (
+    const optimisticTaskGroups: TaskGroup[] = taskGroups.map((taskGroup) => (
       taskGroup.id === targetTask.taskGroupId
         ? {
             ...taskGroup,
-            status: "running",
+            status: "running" as const,
+            pendingTasks: Math.max(taskGroup.pendingTasks - 1, 0),
+            runningTasks: taskGroup.runningTasks + 1,
             completedTasks: targetTask.status === "completed"
               ? Math.max(taskGroup.completedTasks - 1, 0)
               : taskGroup.completedTasks,
@@ -3003,11 +2990,15 @@ export default function RequirementTasksPanel({
     const completedTaskCount = scopedTasks.length;
     const nextTaskGroup: TaskGroup = {
       ...localArtifacts.taskGroup,
-      status: "completed",
-      triggeredBy: "manual",
+      status: "completed" as const,
+      triggeredBy: "manual" as const,
       totalTasks: completedTaskCount,
+      pendingTasks: 0,
+      runningTasks: 0,
       completedTasks: completedTaskCount,
       failedTasks: 0,
+      cancelledTasks: 0,
+      invalidatedTasks: 0,
       updatedAt: endedAt,
     };
 
@@ -3082,7 +3073,9 @@ export default function RequirementTasksPanel({
         taskGroup.id === targetTask.taskGroupId
           ? {
               ...taskGroup,
-              status: "completed",
+              status: "completed" as const,
+              pendingTasks: Math.max(taskGroup.pendingTasks - 1, 0),
+              runningTasks: Math.max(taskGroup.runningTasks - 1, 0),
               completedTasks: Math.max(taskGroup.completedTasks, 1),
               failedTasks: 0,
               updatedAt: endedAt,
@@ -3559,7 +3552,7 @@ function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
     const dimensionCombinationCount = calculateDimensionCombinationCount(wideTable, dimensionColumns);
     const indicatorGroupLabels = resolveIndicatorGroupLabels(wideTable);
     const indicatorGroupCount = indicatorGroupLabels.length;
-    const plannedRowCount = wideTable.recordCount > 0 ? wideTable.recordCount : dimensionCombinationCount;
+    const plannedRowCount = countExpectedFetchTasksForBusinessDate(wideTable, "", wideTable.recordCount > 0 ? wideTable.recordCount : dimensionCombinationCount);
     return {
       businessDates: [],
       businessDateCount: 0,
@@ -3588,11 +3581,16 @@ function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
   const dimensionCombinationCount = calculateDimensionCombinationCount(wideTable, dimensionColumns);
   const indicatorGroupLabels = resolveIndicatorGroupLabels(wideTable);
   const indicatorGroupCount = indicatorGroupLabels.length;
-  const computedRowCount = businessDates.length * dimensionCombinationCount;
+  const computedRowCount = businessDates.reduce(
+    (sum, businessDate) => sum + countExpectedFetchTasksForBusinessDate(wideTable, businessDate, dimensionCombinationCount),
+    0,
+  );
   const isOpenEnded = isOpenEndedBusinessDateRange(wideTable.businessDateRange);
   const plannedRowCount = isOpenEndedBusinessDateRange(wideTable.businessDateRange)
     ? computedRowCount
-    : wideTable.recordCount > 0
+    : (wideTable.parameterRows?.length ?? 0) > 0
+      ? computedRowCount
+      : wideTable.recordCount > 0
       ? wideTable.recordCount
       : computedRowCount;
   const plannedTaskCount = plannedRowCount * indicatorGroupCount;
@@ -3721,7 +3719,6 @@ function buildTaskGroupRunViews(
       });
   }
 
-  const totalTasksPerTaskInstance = taskPlan.dimensionCombinationCount;
   const taskGroupsByDate = new Map<string, TaskGroup[]>();
   const today = formatBusinessDate(new Date());
   for (const taskGroup of taskGroups) {
@@ -3793,6 +3790,11 @@ function buildTaskGroupRunViews(
 
       const businessDateLabel = formatBusinessDateLabel(businessDate, wideTable.businessDateRange.frequency);
       const plannedTriggerType = resolvePlannedTriggerType(businessDate, today);
+      const totalTasksPerTimeGroup = countExpectedFetchTasksForBusinessDate(
+        wideTable,
+        businessDate,
+        taskPlan.dimensionCombinationCount,
+      );
 
       if (indicatorGroupingEnabled) {
         return sortedIndicatorGroups.map((group) => ({
@@ -3802,8 +3804,8 @@ function buildTaskGroupRunViews(
           displayLabel: businessDateLabel,
           indicatorGroupId: group.id,
           indicatorGroupName: group.name,
-          totalTasks: totalTasksPerTaskInstance,
-          pendingTasks: totalTasksPerTaskInstance,
+          totalTasks: totalTasksPerTimeGroup,
+          pendingTasks: totalTasksPerTimeGroup,
           runningTasks: 0,
           completedTasks: 0,
           failedTasks: 0,
@@ -3826,9 +3828,13 @@ function buildTaskGroupRunViews(
             groupKind: "baseline",
             coverageStatus: "current",
             status: "pending",
-            totalTasks: totalTasksPerTaskInstance,
+            totalTasks: totalTasksPerTimeGroup,
+            pendingTasks: totalTasksPerTimeGroup,
+            runningTasks: 0,
             completedTasks: 0,
             failedTasks: 0,
+            cancelledTasks: 0,
+            invalidatedTasks: 0,
             triggeredBy: plannedTriggerType,
             partitionType: "business_date",
             partitionKey: group.id,
@@ -3844,8 +3850,8 @@ function buildTaskGroupRunViews(
         businessDate,
         businessDateLabel,
         displayLabel: businessDateLabel,
-        totalTasks: totalTasksPerTaskInstance,
-        pendingTasks: totalTasksPerTaskInstance,
+        totalTasks: totalTasksPerTimeGroup,
+        pendingTasks: totalTasksPerTimeGroup,
         runningTasks: 0,
         completedTasks: 0,
         failedTasks: 0,
@@ -3868,9 +3874,13 @@ function buildTaskGroupRunViews(
           groupKind: "baseline",
           coverageStatus: "current",
           status: "pending",
-          totalTasks: totalTasksPerTaskInstance,
+          totalTasks: totalTasksPerTimeGroup,
+          pendingTasks: totalTasksPerTimeGroup,
+          runningTasks: 0,
           completedTasks: 0,
           failedTasks: 0,
+          cancelledTasks: 0,
+          invalidatedTasks: 0,
           triggeredBy: plannedTriggerType,
           createdAt: "",
           updatedAt: "",
@@ -3967,44 +3977,30 @@ function resolveCollectionTaskSummaries(
 function buildTaskInstanceRowViews(params: {
   wideTable?: WideTable;
   fetchTasks: FetchTask[];
-  wideTableRecords: WideTableRecord[];
   indicatorGroups: WideTable["indicatorGroups"];
   parameterColumns: ColumnDefinition[];
   overrideBusinessDateLabel?: string;
 }): TaskInstanceRowView[] {
-  const { wideTable, fetchTasks, wideTableRecords, indicatorGroups, parameterColumns, overrideBusinessDateLabel } = params;
+  const { wideTable, fetchTasks, indicatorGroups, parameterColumns, overrideBusinessDateLabel } = params;
   if (!wideTable || fetchTasks.length === 0) {
     return [];
-  }
-
-  const recordsByRowBindingKey = new Map<string, WideTableRecord>();
-  const recordsByRowId = new Map<number, WideTableRecord>();
-  for (const record of wideTableRecords) {
-    const rowBindingKey = String(record.rowBindingKey ?? "").trim();
-    if (rowBindingKey) {
-      recordsByRowBindingKey.set(rowBindingKey, record);
-    }
-    recordsByRowId.set(record.id, record);
   }
 
   const indicatorColumns = wideTable.schema.columns.filter((column) => column.category === "indicator");
   const indicatorGroupById = new Map(indicatorGroups.map((group) => [group.id, group] as const));
 
   return fetchTasks.map((fetchTask) => {
-    const record = (fetchTask.rowBindingKey && recordsByRowBindingKey.get(fetchTask.rowBindingKey))
-      ?? recordsByRowId.get(fetchTask.rowId);
-    const businessDate = record ? resolveTaskRecordBusinessDate(wideTable, record) : "";
     const matchedIndicatorGroup = indicatorGroupById.get(fetchTask.indicatorGroupId);
     const indicatorLabels = (matchedIndicatorGroup?.indicatorColumns ?? [])
       .map((columnName) => findIndicatorColumnLabel(indicatorColumns, columnName));
 
     return {
       fetchTaskId: fetchTask.id,
-      rowLabel: buildTaskInstanceRowLabel(fetchTask, record),
-      parameterLines: formatTaskInstanceParameterLines(parameterColumns, record),
+      rowLabel: buildTaskInstanceRowLabelFromTask(fetchTask),
+      parameterLines: formatTaskInstanceParameterLinesFromTask(parameterColumns, fetchTask),
       businessDateLabel: overrideBusinessDateLabel || (
-        businessDate
-          ? formatBusinessDateLabel(businessDate, wideTable.businessDateRange.frequency)
+        fetchTask.businessDate
+          ? formatBusinessDateLabel(fetchTask.businessDate, wideTable.businessDateRange.frequency)
           : fetchTask.id
       ),
       indicatorGroupName: matchedIndicatorGroup?.name ?? fetchTask.indicatorGroupName ?? "统一提示词",
@@ -4041,6 +4037,33 @@ function buildTaskInstanceRowLabel(fetchTask: FetchTask, record?: WideTableRecor
   }
   if (record) {
     return `row-${record.id}`;
+  }
+  return fetchTask.id;
+}
+
+function formatTaskInstanceParameterLinesFromTask(
+  parameterColumns: ColumnDefinition[],
+  fetchTask: FetchTask,
+): string[] {
+  const dimensionValues = fetchTask.dimensionValues ?? {};
+  const lines = parameterColumns
+    .map((column) => {
+      const label = column.chineseName || column.name;
+      const value = dimensionValues[column.name];
+      const text = value == null ? "" : String(value).trim();
+      return text ? `${label}: ${text}` : "";
+    })
+    .filter(Boolean);
+
+  return lines.length > 0 ? lines : [`rowId: ${fetchTask.rowId}`];
+}
+
+function buildTaskInstanceRowLabelFromTask(fetchTask: FetchTask): string {
+  if (fetchTask.rowBindingKey) {
+    return fetchTask.rowBindingKey;
+  }
+  if (fetchTask.rowId > 0) {
+    return `row-${fetchTask.rowId}`;
   }
   return fetchTask.id;
 }
@@ -4203,6 +4226,7 @@ function buildLocalFetchTasks(
   timestamp: string,
   indicatorGroupId?: string,
 ): FetchTask[] {
+  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "BIZ_DATE";
   const indicatorGroups = resolveRunnableIndicatorGroups(wideTable);
   const scopedIndicatorGroups = indicatorGroups.length > 1 && indicatorGroupId
     ? indicatorGroups.filter((group) => group.id === indicatorGroupId)
@@ -4210,6 +4234,7 @@ function buildLocalFetchTasks(
 
   return scopedRecords.flatMap((record) => {
     const rowId = getWideTableRecordRowId(record);
+    const businessDate = String(record[businessDateFieldName] ?? record.business_date ?? "");
     return scopedIndicatorGroups.map((indicatorGroup) => ({
       id: `${LOCAL_FETCH_TASK_PREFIX}${taskGroupId}_${indicatorGroup.id}_${rowId}`,
       taskGroupId,
@@ -4218,6 +4243,12 @@ function buildLocalFetchTasks(
       planVersion,
       indicatorGroupId: indicatorGroup.id,
       indicatorGroupName: indicatorGroup.name,
+      dimensionValues: Object.fromEntries(
+        getVisibleNarrowTableContextColumns(wideTable)
+          .filter((column) => !column.isBusinessDate)
+          .map((column) => [column.name, String(record[column.name] ?? "")]),
+      ),
+      businessDate: businessDate || undefined,
       status: "pending" as const,
       executionRecords: [],
       createdAt: timestamp,
