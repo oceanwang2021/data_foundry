@@ -1353,7 +1353,7 @@ export default function RequirementTasksPanel({
     }
 
     const nextAttempt = targetTask.executionRecords.length + 1;
-    const optimisticFetchTasks = fetchTasks.map((task) => (
+    const optimisticFetchTasks: FetchTask[] = fetchTasks.map((task) => (
       task.id === taskId
         ? {
             ...task,
@@ -1374,7 +1374,7 @@ export default function RequirementTasksPanel({
         : task
     ));
     onFetchTasksChange(optimisticFetchTasks);
-    const optimisticTaskGroups = taskGroups.map((taskGroup) => (
+    const optimisticTaskGroups: TaskGroup[] = taskGroups.map((taskGroup) => (
       taskGroup.id === targetTask.taskGroupId
         ? {
             ...taskGroup,
@@ -3827,8 +3827,12 @@ function buildTaskGroupRunViews(
             coverageStatus: "current",
             status: "pending",
             totalTasks: totalTasksPerTaskInstance,
+            pendingTasks: totalTasksPerTaskInstance,
+            runningTasks: 0,
             completedTasks: 0,
             failedTasks: 0,
+            cancelledTasks: 0,
+            invalidatedTasks: 0,
             triggeredBy: plannedTriggerType,
             partitionType: "business_date",
             partitionKey: group.id,
@@ -3869,8 +3873,12 @@ function buildTaskGroupRunViews(
           coverageStatus: "current",
           status: "pending",
           totalTasks: totalTasksPerTaskInstance,
+          pendingTasks: totalTasksPerTaskInstance,
+          runningTasks: 0,
           completedTasks: 0,
           failedTasks: 0,
+          cancelledTasks: 0,
+          invalidatedTasks: 0,
           triggeredBy: plannedTriggerType,
           createdAt: "",
           updatedAt: "",

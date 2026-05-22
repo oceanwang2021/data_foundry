@@ -250,7 +250,8 @@ public class MappedResultMaterializationAppService {
             || compact.equals("metric")
             || compact.contains("metricname")
             || raw.contains("\u6307\u6807\u540d\u79f0")
-            || raw.contains("\u6307\u6807\u540d");
+            || raw.contains("\u6307\u6807\u540d")
+            || (raw.contains("\u6307\u6807") && raw.contains("\u540d\u79f0"));
       case VALUE:
         return lower.equals("value")
             || lower.contains("metric value")
