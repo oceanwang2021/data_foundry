@@ -1,12 +1,12 @@
 package com.huatai.datafoundry.backend.task.application.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huatai.datafoundry.backend.task.application.event.TaskExecuteRequestedEvent;
 import com.huatai.datafoundry.backend.task.application.event.TaskGroupExecuteRequestedEvent;
 import com.huatai.datafoundry.backend.task.domain.gateway.CollectionSearchGateway;
@@ -35,6 +35,8 @@ public class TaskAppServiceIdempotencyTest {
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
     TaskGroupAggregateService taskGroupAggregateService = Mockito.mock(TaskGroupAggregateService.class);
     when(taskPlanAppService.refreshPromptSnapshotsForCollection(any())).thenAnswer((invocation) -> invocation.getArgument(0));
+    CollectionSearchGateway collectionSearchGateway = Mockito.mock(CollectionSearchGateway.class);
+    CollectionResultRepository collectionResultRepository = Mockito.mock(CollectionResultRepository.class);
 
     TaskGroup tg = new TaskGroup();
     tg.setId("TG1");
@@ -54,8 +56,8 @@ public class TaskAppServiceIdempotencyTest {
             new TaskExecutionDomainService(),
             new TaskExecutionProperties(),
             publisher,
-            Mockito.mock(CollectionSearchGateway.class),
-            Mockito.mock(CollectionResultRepository.class),
+            collectionSearchGateway,
+            collectionResultRepository,
             taskGroupAggregateService,
             new ObjectMapper());
 
@@ -79,6 +81,8 @@ public class TaskAppServiceIdempotencyTest {
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
     TaskGroupAggregateService taskGroupAggregateService = Mockito.mock(TaskGroupAggregateService.class);
     when(taskPlanAppService.refreshPromptSnapshotsForCollection(any())).thenAnswer((invocation) -> invocation.getArgument(0));
+    CollectionSearchGateway collectionSearchGateway = Mockito.mock(CollectionSearchGateway.class);
+    CollectionResultRepository collectionResultRepository = Mockito.mock(CollectionResultRepository.class);
 
     FetchTask task = new FetchTask();
     task.setId("T1");
@@ -94,8 +98,8 @@ public class TaskAppServiceIdempotencyTest {
             new TaskExecutionDomainService(),
             new TaskExecutionProperties(),
             publisher,
-            Mockito.mock(CollectionSearchGateway.class),
-            Mockito.mock(CollectionResultRepository.class),
+            collectionSearchGateway,
+            collectionResultRepository,
             taskGroupAggregateService,
             new ObjectMapper());
 

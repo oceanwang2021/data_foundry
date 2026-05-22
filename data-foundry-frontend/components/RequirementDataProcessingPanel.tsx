@@ -1260,9 +1260,19 @@ function NarrowTableViewSection({
     );
     return values.sort((left, right) => right.localeCompare(left));
   }, [businessDateColumnName, usesBusinessDateAxis, wideTableRecords]);
+  const fetchTasksByTaskGroupId = useMemo(() => {
+    const grouped = new Map<string, FetchTask[]>();
+    for (const task of fetchTasks) {
+      grouped.set(task.taskGroupId, [...(grouped.get(task.taskGroupId) ?? []), task]);
+    }
+    return grouped;
+  }, [fetchTasks]);
   const trialTaskGroups = useMemo(
-    () => taskGroups.filter((taskGroup) => taskGroup.triggeredBy === "trial" && taskGroup.rowSnapshots?.length),
-    [taskGroups],
+    () => taskGroups.filter((taskGroup) => (
+      taskGroup.triggeredBy === "trial"
+      && (Boolean(taskGroup.rowSnapshots?.length) || Boolean(fetchTasksByTaskGroupId.get(taskGroup.id)?.length))
+    )),
+    [fetchTasksByTaskGroupId, taskGroups],
   );
 
   const visibleAllBusinessDates = useMemo(
@@ -1862,9 +1872,19 @@ function WideTableViewSection({
     );
     return values.sort((left, right) => right.localeCompare(left));
   }, [businessDateColumnName, rawRows, usesBusinessDateAxis]);
+  const fetchTasksByTaskGroupId = useMemo(() => {
+    const grouped = new Map<string, FetchTask[]>();
+    for (const task of fetchTasks) {
+      grouped.set(task.taskGroupId, [...(grouped.get(task.taskGroupId) ?? []), task]);
+    }
+    return grouped;
+  }, [fetchTasks]);
   const trialTaskGroups = useMemo(
-    () => taskGroups.filter((taskGroup) => taskGroup.triggeredBy === "trial" && taskGroup.rowSnapshots?.length),
-    [taskGroups],
+    () => taskGroups.filter((taskGroup) => (
+      taskGroup.triggeredBy === "trial"
+      && (Boolean(taskGroup.rowSnapshots?.length) || Boolean(fetchTasksByTaskGroupId.get(taskGroup.id)?.length))
+    )),
+    [fetchTasksByTaskGroupId, taskGroups],
   );
   const visibleAllBusinessDates = useMemo(
     () => limitFutureBusinessDates(businessDates, { now: new Date(), maxFuturePeriods: 1 }),
@@ -1980,6 +2000,36 @@ function WideTableViewSection({
     return buildWideTableProcessingDiffRowMap(wideTable, previousRecords, enabledCategories);
   }, [activeSnapshotPage, enabledCategories, fullSnapshotPages, taskGroups, usesBusinessDateAxis, wideTable, wideTableRecords]);
 
+  const activeBusinessDateTaskGroups = useMemo(
+    () => {
+      if (!usesBusinessDateAxis || !selectedBusinessDate) {
+        return [];
+      }
+      return taskGroups
+        .filter((taskGroup) => taskGroup.businessDate === selectedBusinessDate && taskGroup.triggeredBy !== "trial")
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    },
+    [selectedBusinessDate, taskGroups, usesBusinessDateAxis],
+  );
+  const activeBusinessDateTaskGroupIds = useMemo(
+    () => new Set(activeBusinessDateTaskGroups.map((taskGroup) => taskGroup.id)),
+    [activeBusinessDateTaskGroups],
+  );
+  const activeBusinessDateFetchTasks = useMemo(
+    () => fetchTasks.filter((task) => activeBusinessDateTaskGroupIds.has(task.taskGroupId)),
+    [activeBusinessDateTaskGroupIds, fetchTasks],
+  );
+  const activeTrialTaskGroup = useMemo(
+    () => trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate) ?? null,
+    [selectedBusinessDate, trialTaskGroups],
+  );
+  const activeTrialFetchTasks = useMemo(
+    () => (activeTrialTaskGroup ? fetchTasksByTaskGroupId.get(activeTrialTaskGroup.id) ?? [] : []),
+    [activeTrialTaskGroup, fetchTasksByTaskGroupId],
+  );
+  const visibleTaskGroups = activeTrialTaskGroup ? [activeTrialTaskGroup] : activeBusinessDateTaskGroups;
+  const visibleFetchTasks = activeTrialTaskGroup ? activeTrialFetchTasks : activeBusinessDateFetchTasks;
+
   const visibleRawRows = useMemo(
     () => {
       if (!usesBusinessDateAxis) {
@@ -1987,13 +2037,18 @@ function WideTableViewSection({
       }
       const trialTaskGroup = trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate);
       if (trialTaskGroup) {
-        return buildWideTableProcessingRows(wideTable, trialTaskGroup.rowSnapshots ?? [], enabledCategories).rawRows;
+        if (trialTaskGroup.rowSnapshots?.length) {
+          return buildWideTableProcessingRows(wideTable, trialTaskGroup.rowSnapshots, enabledCategories).rawRows;
+        }
+        const trialRowIds = new Set((fetchTasksByTaskGroupId.get(trialTaskGroup.id) ?? []).map((task) => task.rowId));
+        return rawRows.filter((row) => trialRowIds.has(resolveProcessingRowId(row)));
       }
-      return selectedBusinessDate
+      const dateRows = selectedBusinessDate
         ? rawRows.filter((row) => row.values[businessDateColumnName] === selectedBusinessDate)
         : rawRows;
+      return dateRows;
     },
-    [activeSnapshotRows, businessDateColumnName, enabledCategories, rawRows, selectedBusinessDate, trialTaskGroups, usesBusinessDateAxis, wideTable],
+    [activeSnapshotRows, businessDateColumnName, enabledCategories, fetchTasksByTaskGroupId, rawRows, selectedBusinessDate, trialTaskGroups, usesBusinessDateAxis, wideTable],
   );
   const visibleProcessedRows = useMemo(
     () => {
@@ -2002,23 +2057,18 @@ function WideTableViewSection({
       }
       const trialTaskGroup = trialTaskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate);
       if (trialTaskGroup) {
-        return buildWideTableProcessingRows(wideTable, trialTaskGroup.rowSnapshots ?? [], enabledCategories).processedRows;
+        if (trialTaskGroup.rowSnapshots?.length) {
+          return buildWideTableProcessingRows(wideTable, trialTaskGroup.rowSnapshots, enabledCategories).processedRows;
+        }
+        const trialRowIds = new Set((fetchTasksByTaskGroupId.get(trialTaskGroup.id) ?? []).map((task) => task.rowId));
+        return processedRows.filter((row) => trialRowIds.has(resolveProcessingRowId(row)));
       }
-      return selectedBusinessDate
+      const dateRows = selectedBusinessDate
         ? processedRows.filter((row) => row.values[businessDateColumnName] === selectedBusinessDate)
         : processedRows;
+      return dateRows;
     },
-    [activeSnapshotRows, businessDateColumnName, enabledCategories, processedRows, selectedBusinessDate, trialTaskGroups, usesBusinessDateAxis, wideTable],
-  );
-  const activeBusinessDateTaskGroup = useMemo(
-    () => (
-      usesBusinessDateAxis
-        ? taskGroups.find((taskGroup) => taskGroup.id === selectedBusinessDate)
-          ?? taskGroups.find((taskGroup) => taskGroup.businessDate === selectedBusinessDate && taskGroup.triggeredBy !== "trial")
-          ?? null
-        : null
-    ),
-    [selectedBusinessDate, taskGroups, usesBusinessDateAxis],
+    [activeSnapshotRows, businessDateColumnName, enabledCategories, fetchTasksByTaskGroupId, processedRows, selectedBusinessDate, trialTaskGroups, usesBusinessDateAxis, wideTable],
   );
 
   return (
@@ -2100,16 +2150,16 @@ function WideTableViewSection({
       {showProcessed ? (
         <WideTableCard title="结果预览" requirement={requirement} wideTable={wideTable}
           rows={visibleProcessedRows} rawRows={visibleRawRows} wideTableRecords={usesBusinessDateAxis ? wideTableRecords : activeSnapshotRecords}
-          taskGroups={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? [activeBusinessDateTaskGroup] : taskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
-          fetchTasks={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeBusinessDateTaskGroup.id) : fetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
+          taskGroups={usesBusinessDateAxis ? visibleTaskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
+          fetchTasks={usesBusinessDateAxis ? visibleFetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
           onOpenTaskModal={onOpenTaskModal} annotateRawDifference compact
           diffMode={showDiff && !usesBusinessDateAxis ? previousSnapshotRowMap ?? undefined : undefined}
           emptyMessage={usesBusinessDateAxis ? "当前业务日期下还没有可展示的结果预览。" : "当前任务组下还没有可展示的结果预览。"} />
       ) : (
         <WideTableCard title="结果预览" requirement={requirement} wideTable={wideTable}
           rows={visibleRawRows} rawRows={visibleRawRows} wideTableRecords={usesBusinessDateAxis ? wideTableRecords : activeSnapshotRecords}
-          taskGroups={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? [activeBusinessDateTaskGroup] : taskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
-          fetchTasks={usesBusinessDateAxis ? activeBusinessDateTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeBusinessDateTaskGroup.id) : fetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
+          taskGroups={usesBusinessDateAxis ? visibleTaskGroups : activeSnapshotTaskGroup ? [activeSnapshotTaskGroup] : []}
+          fetchTasks={usesBusinessDateAxis ? visibleFetchTasks : activeSnapshotTaskGroup ? fetchTasks.filter((task) => task.taskGroupId === activeSnapshotTaskGroup.id) : []}
           onOpenTaskModal={onOpenTaskModal}
           diffMode={showDiff && !usesBusinessDateAxis ? previousSnapshotRowMap ?? undefined : undefined}
           emptyMessage={usesBusinessDateAxis ? "当前业务日期下还没有可展示的结果预览。" : "当前任务组下还没有可展示的结果预览。"} />

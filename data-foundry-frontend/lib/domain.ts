@@ -86,11 +86,13 @@ export type AuditRule = {
 export type AcceptanceTicket = {
   id: string;
   taskGroupId: string;
+  wideTableId?: string;
   dataset: string;
   requirementId: string;
-  status: "pending" | "approved" | "rejected" | "fixing" | "deleted";
+  status: "pending" | "approved" | "partial_approved" | "rejected" | "fixing" | "publishing" | "publish_failed" | "deleted";
   owner: string;
   feedback: string;
+  rowIds?: number[];
   latestActionAt: string;
 };
 

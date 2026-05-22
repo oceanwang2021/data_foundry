@@ -59,6 +59,41 @@ public class CollectionResultAppServiceTest {
   }
 
   @Test
+  void parsesLooseMarkdownTableWhenMetadataAndHeaderAreOnSameLine() {
+    CollectionResultAppService service = newService(mock(CollectionResultRepository.class));
+    String markdown =
+        "### \u8868\u540d: \u81ea\u52a8\u9a7e\u9a76\u516c\u53f8\u8fd0\u8425\u6307\u6807\u957f\u8868"
+            + " (AD Company Metrics Long Format) | \u4e1a\u6001\u7c7b\u522b (Business Type) | comcode"
+            + " | \u6307\u6807\u540d\u79f0 (Metric Name) | \u6307\u6807\u503c (Value) |\n"
+            + "| Robobus | 3344180 | \u4e8b\u6545\u7387 | 0.12 |\n";
+
+    List<Map<String, String>> rows = service.parseFirstMarkdownTable(markdown);
+
+    assertEquals(1, rows.size());
+    assertEquals("Robobus", rows.get(0).get("\u4e1a\u6001\u7c7b\u522b (Business Type)"));
+    assertEquals("3344180", rows.get(0).get("comcode"));
+    assertEquals("\u4e8b\u6545\u7387", rows.get(0).get("\u6307\u6807\u540d\u79f0 (Metric Name)"));
+    assertEquals("0.12", rows.get(0).get("\u6307\u6807\u503c (Value)"));
+    assertTrue(!rows.get(0).containsKey("### \u8868\u540d: \u81ea\u52a8\u9a7e\u9a76\u516c\u53f8\u8fd0\u8425\u6307\u6807\u957f\u8868 (AD Company Metrics Long Format)"));
+  }
+
+  @Test
+  void keepsRowsWhenCellContainsExtraPipe() {
+    CollectionResultAppService service = newService(mock(CollectionResultRepository.class));
+    String markdown =
+        "| comcode | \u6307\u6807\u540d\u79f0 | Source_Evidence |\n"
+            + "| ------- | -------- | --------------- |\n"
+            + "| 3344180 | \u4e8b\u6545\u7387 | A | B |\n";
+
+    List<Map<String, String>> rows = service.parseFirstMarkdownTable(markdown);
+
+    assertEquals(1, rows.size());
+    assertEquals("3344180", rows.get(0).get("comcode"));
+    assertEquals("\u4e8b\u6545\u7387", rows.get(0).get("\u6307\u6807\u540d\u79f0"));
+    assertEquals("A | B", rows.get(0).get("Source_Evidence"));
+  }
+
+  @Test
   void invalidMarkdownTableReturnsEmptyRows() {
     CollectionResultAppService service = newService(mock(CollectionResultRepository.class));
     String markdown =

@@ -375,6 +375,43 @@ export type MappedResultMaterializationOutcome = {
   skippedUnmappedMetrics: number;
 };
 
+export type TargetPublishOutcome = {
+  jobId: string;
+  requirementId?: string;
+  wideTableId: string;
+  taskGroupId?: string;
+  targetSchema?: string;
+  targetTable?: string;
+  status: "success" | "partial_failed" | "failed" | string;
+  errorMsg?: string;
+  totalRows: number;
+  insertedRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  failedRows: number;
+};
+
+export type TargetComparisonRow = {
+  rowId: number;
+  status: "matched" | "not_found" | "missing_dimension" | "failed" | string;
+  message?: string;
+  dimensionValues?: Record<string, unknown>;
+  previousValues: Record<string, string | number | null>;
+};
+
+export type TargetComparisonOutcome = {
+  requirementId?: string;
+  wideTableId: string;
+  targetSchema?: string;
+  targetTable?: string;
+  status: "success" | "partial_failed" | "empty" | string;
+  totalRows: number;
+  matchedRows: number;
+  missingRows: number;
+  failedRows: number;
+  rows: TargetComparisonRow[];
+};
+
 export type CollectionBatch = {
   id: string;
   wideTableId: string;

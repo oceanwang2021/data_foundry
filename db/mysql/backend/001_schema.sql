@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS wide_tables (
   schema_version          INT           NOT NULL DEFAULT 1,
   schema_json             JSON          NULL,
   scope_json              JSON          NULL,
+  scope_input_mode        VARCHAR(32)   NOT NULL DEFAULT 'parameter_rows' COMMENT 'scope input mode: parameter_rows/dimension_ranges',
   indicator_groups_json   JSON          NULL,
   schedule_rules_json     JSON          NULL,
   semantic_time_axis      VARCHAR(32)   NULL,
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS wide_table_scope_imports (
   requirement_id          VARCHAR(64)   NOT NULL,
   import_mode             VARCHAR(64)   NOT NULL,
   file_name               VARCHAR(255)  NOT NULL,
-  file_type               VARCHAR(128)  NOT NULL COMMENT '导入文件类型或 MIME 类型',
+  file_type               VARCHAR(255)  NOT NULL COMMENT 'import file type or MIME type',
   content_hash            VARCHAR(64)   NULL,
   row_count               INT           NOT NULL DEFAULT 0,
   header_json             JSON          NULL,
@@ -148,6 +149,7 @@ CREATE TABLE IF NOT EXISTS fetch_tasks (
   dimension_values_json JSON         NULL,
   rendered_prompt_text  LONGTEXT     NULL,
   prompt_template_snapshot LONGTEXT  NULL,
+  collection_task_id    VARCHAR(128) NULL,
   business_date         VARCHAR(32)  NULL,
   status                VARCHAR(32)  NOT NULL DEFAULT 'pending',
   can_rerun             TINYINT(1)   NOT NULL DEFAULT 1,
@@ -182,6 +184,10 @@ CREATE TABLE IF NOT EXISTS wide_table_rows (
   plan_version            INT           NOT NULL DEFAULT 1,
   row_status              VARCHAR(32)   NOT NULL DEFAULT 'initialized',
   dimension_values_json   JSON          NULL,
+  parameter_values_json   JSON          NULL COMMENT 'parameter row variables for placeholder substitution',
+  parameter_source        VARCHAR(32)   NOT NULL DEFAULT 'manual' COMMENT 'manual/paste/csv/tsv/xlsx',
+  parameter_row_no        INT           NULL COMMENT 'source row number from import input',
+  parameter_group_key     VARCHAR(255)  NULL COMMENT 'group key for imported parameter rows',
   business_date           VARCHAR(32)   NULL,
   row_binding_key         VARCHAR(512)  NULL,
   indicator_values_json   JSON          NULL,
@@ -189,7 +195,9 @@ CREATE TABLE IF NOT EXISTS wide_table_rows (
   PRIMARY KEY (wide_table_id, row_id),
   INDEX idx_wtr_requirement_id (requirement_id),
   INDEX idx_wtr_business_date (business_date),
-  INDEX idx_wtr_row_binding_key (row_binding_key)
+  INDEX idx_wtr_row_binding_key (row_binding_key),
+  INDEX idx_wtr_parameter_source (parameter_source),
+  INDEX idx_wtr_parameter_group_key (parameter_group_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS collection_results (
@@ -226,6 +234,8 @@ CREATE TABLE IF NOT EXISTS collection_result_rows (
   schedule_job_id        VARCHAR(64)  NULL,
   wide_table_id          VARCHAR(64)  NULL,
   row_id                 INT          NULL,
+  source_metric_name     VARCHAR(255) NULL,
+  target_indicator_key   VARCHAR(128) NULL,
   indicator_key          VARCHAR(128) NULL,
   indicator_name         VARCHAR(255) NULL,
   business_date          VARCHAR(32)  NULL,
@@ -249,6 +259,97 @@ CREATE TABLE IF NOT EXISTS collection_result_rows (
   INDEX idx_collection_result_rows_result_id (collection_result_id),
   INDEX idx_collection_result_rows_fetch_task_id (fetch_task_id),
   INDEX idx_collection_result_rows_wide_table_row (wide_table_id, row_id),
+  INDEX idx_collection_result_rows_source_metric (wide_table_id, source_metric_name),
+  INDEX idx_collection_result_rows_target_indicator (wide_table_id, target_indicator_key),
   INDEX idx_collection_result_rows_indicator_key (indicator_key),
   INDEX idx_collection_result_rows_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS metric_field_mappings (
+  id                    VARCHAR(160) NOT NULL PRIMARY KEY,
+  requirement_id        VARCHAR(64)  NOT NULL,
+  wide_table_id         VARCHAR(64)  NOT NULL,
+  source_metric_name    VARCHAR(255) NOT NULL,
+  target_indicator_key  VARCHAR(128) NULL,
+  target_indicator_name VARCHAR(255) NULL,
+  match_type            VARCHAR(32)  NOT NULL DEFAULT 'manual',
+  confidence            DECIMAL(8,4) NULL,
+  status                VARCHAR(32)  NOT NULL DEFAULT 'pending',
+  created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_metric_field_mappings_source (wide_table_id, source_metric_name),
+  INDEX idx_metric_field_mappings_requirement (requirement_id),
+  INDEX idx_metric_field_mappings_wide_table (wide_table_id),
+  INDEX idx_metric_field_mappings_target (wide_table_id, target_indicator_key),
+  INDEX idx_metric_field_mappings_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS target_publish_jobs (
+  id              VARCHAR(128) NOT NULL PRIMARY KEY,
+  requirement_id  VARCHAR(64)  NOT NULL,
+  wide_table_id   VARCHAR(64)  NOT NULL,
+  task_group_id   VARCHAR(64)  NULL,
+  target_schema   VARCHAR(128) NOT NULL,
+  target_table    VARCHAR(255) NOT NULL,
+  status          VARCHAR(32)  NOT NULL DEFAULT 'running',
+  total_rows      INT          NOT NULL DEFAULT 0,
+  inserted_rows   INT          NOT NULL DEFAULT 0,
+  updated_rows    INT          NOT NULL DEFAULT 0,
+  skipped_rows    INT          NOT NULL DEFAULT 0,
+  failed_rows     INT          NOT NULL DEFAULT 0,
+  error_msg       TEXT         NULL,
+  approved_at     DATETIME     NULL,
+  published_at    DATETIME     NULL,
+  created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_target_publish_jobs_requirement (requirement_id),
+  INDEX idx_target_publish_jobs_wide_table (wide_table_id),
+  INDEX idx_target_publish_jobs_task_group (task_group_id),
+  INDEX idx_target_publish_jobs_status (status),
+  INDEX idx_target_publish_jobs_published_at (published_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS target_publish_row_logs (
+  id                    VARCHAR(160) NOT NULL PRIMARY KEY,
+  job_id                VARCHAR(128) NOT NULL,
+  requirement_id        VARCHAR(64)  NOT NULL,
+  wide_table_id         VARCHAR(64)  NOT NULL,
+  row_id                INT          NULL,
+  action                VARCHAR(32)  NOT NULL,
+  status                VARCHAR(32)  NOT NULL,
+  error_msg             TEXT         NULL,
+  dimension_values_json JSON         NULL,
+  target_values_json    JSON         NULL,
+  created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_target_publish_row_logs_job (job_id),
+  INDEX idx_target_publish_row_logs_wide_table_row (wide_table_id, row_id),
+  INDEX idx_target_publish_row_logs_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS acceptance_tickets (
+  id                 VARCHAR(128) NOT NULL PRIMARY KEY,
+  requirement_id     VARCHAR(64)  NOT NULL,
+  wide_table_id      VARCHAR(64)  NULL,
+  task_group_id      VARCHAR(64)  NULL,
+  scope_type         VARCHAR(32)  NOT NULL DEFAULT 'task_group',
+  scope_key          VARCHAR(128) NOT NULL,
+  dataset            VARCHAR(255) NULL,
+  owner              VARCHAR(128) NULL,
+  reviewer           VARCHAR(128) NULL,
+  status             VARCHAR(32)  NOT NULL DEFAULT 'pending',
+  feedback           TEXT         NULL,
+  row_ids_json       JSON         NULL,
+  publish_job_id     VARCHAR(128) NULL,
+  publish_error_msg  TEXT         NULL,
+  approved_at        DATETIME     NULL,
+  published_at       DATETIME     NULL,
+  latest_action_at   DATETIME     NULL,
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_acceptance_tickets_scope (requirement_id, scope_type, scope_key),
+  INDEX idx_acceptance_tickets_requirement (requirement_id),
+  INDEX idx_acceptance_tickets_wide_table (wide_table_id),
+  INDEX idx_acceptance_tickets_task_group (task_group_id),
+  INDEX idx_acceptance_tickets_status (status),
+  INDEX idx_acceptance_tickets_latest_action (latest_action_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

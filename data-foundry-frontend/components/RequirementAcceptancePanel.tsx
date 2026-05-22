@@ -11,7 +11,10 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  approveAndPublishAcceptanceTicket,
   createAcceptanceTicket,
+  fetchWideTableTargetComparison,
+  rejectAcceptanceTicket,
   updateAcceptanceTicket,
   updateWideTableRow,
 } from "@/lib/api-client";
@@ -48,15 +51,19 @@ import {
 
 // ==================== 验收状态类型 ====================
 
-type TaskGroupReviewStatus = "pending" | "approved" | "rejected";
+type TaskGroupReviewStatus = "pending" | "approved" | "partial_approved" | "rejected";
 
 type TaskGroupReviewState = {
   status: TaskGroupReviewStatus;
   feedback?: string;
   reviewedAt?: string;
+  rowIds?: number[];
 };
 
 type IndicatorAction = "skip" | "fix_value";
+type IndicatorDiffType = "removed" | "changed" | "added";
+
+type PreviousValuesByWideTable = Map<string, Map<number, Record<string, string | number | null>>>;
 
 type Props = {
   requirement: Requirement;
@@ -132,15 +139,29 @@ export default function RequirementAcceptancePanel({
   const [modalAction, setModalAction] = useState<IndicatorAction>("skip");
   const [savingCellKeys, setSavingCellKeys] = useState<string[]>([]);
   const [reviewStates, setReviewStates] = useState<Map<string, TaskGroupReviewState>>(new Map());
+  const [wideTableReviewStates, setWideTableReviewStates] = useState<Map<string, TaskGroupReviewState>>(new Map());
   const [rejectFeedback, setRejectFeedback] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState<string | null>(null);
+  const [showWideTableRejectDialog, setShowWideTableRejectDialog] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  const [targetPreviousValues, setTargetPreviousValues] = useState<PreviousValuesByWideTable>(() => new Map());
+  const [targetComparisonSummary, setTargetComparisonSummary] = useState("");
+  const [targetComparisonReloadKey, setTargetComparisonReloadKey] = useState(0);
 
   const ticketByTaskGroupId = useMemo(() => {
     const map = new Map<string, AcceptanceTicket>();
     for (const ticket of acceptanceTickets) {
       if (!ticket.taskGroupId) continue;
       map.set(ticket.taskGroupId, ticket);
+    }
+    return map;
+  }, [acceptanceTickets]);
+
+  const ticketByWideTableId = useMemo(() => {
+    const map = new Map<string, AcceptanceTicket>();
+    for (const ticket of acceptanceTickets) {
+      if (!ticket.wideTableId || ticket.taskGroupId) continue;
+      map.set(ticket.wideTableId, ticket);
     }
     return map;
   }, [acceptanceTickets]);
@@ -152,7 +173,9 @@ export default function RequirementAcceptancePanel({
       const normalized: TaskGroupReviewStatus =
         ticket.status === "approved"
           ? "approved"
-          : ticket.status === "rejected" || ticket.status === "fixing"
+          : ticket.status === "partial_approved"
+          ? "partial_approved"
+          : ticket.status === "rejected" || ticket.status === "fixing" || ticket.status === "publish_failed"
           ? "rejected"
           : "pending";
       if (normalized === "pending") return;
@@ -160,10 +183,33 @@ export default function RequirementAcceptancePanel({
         status: normalized,
         feedback: ticket.feedback || undefined,
         reviewedAt: ticket.latestActionAt || undefined,
+        rowIds: ticket.rowIds,
       });
     });
     setReviewStates(next);
   }, [ticketByTaskGroupId]);
+
+  useEffect(() => {
+    const next = new Map<string, TaskGroupReviewState>();
+    ticketByWideTableId.forEach((ticket, wideTableId) => {
+      const normalized: TaskGroupReviewStatus =
+        ticket.status === "approved"
+          ? "approved"
+          : ticket.status === "partial_approved"
+          ? "partial_approved"
+          : ticket.status === "rejected" || ticket.status === "fixing" || ticket.status === "publish_failed"
+          ? "rejected"
+          : "pending";
+      if (normalized === "pending") return;
+      next.set(wideTableId, {
+        status: normalized,
+        feedback: ticket.feedback || undefined,
+        reviewedAt: ticket.latestActionAt || undefined,
+        rowIds: ticket.rowIds,
+      });
+    });
+    setWideTableReviewStates(next);
+  }, [ticketByWideTableId]);
 
   const views = useMemo(
     () =>
@@ -173,17 +219,59 @@ export default function RequirementAcceptancePanel({
         taskGroups,
         fetchTasks,
         scheduleJobs,
+        targetPreviousValues: showDiff ? targetPreviousValues : undefined,
       }),
-    [fetchTasks, scheduleJobs, taskGroups, wideTableRecords, wideTables],
+    [fetchTasks, scheduleJobs, showDiff, targetPreviousValues, taskGroups, wideTableRecords, wideTables],
   );
 
-  const summary = useMemo(() => {
-    const allTaskGroupIds = views.flatMap((v) => v.taskGroups.map((tg) => tg.id));
-    const total = allTaskGroupIds.length;
-    const approved = allTaskGroupIds.filter((id) => reviewStates.get(id)?.status === "approved").length;
-    const rejected = allTaskGroupIds.filter((id) => reviewStates.get(id)?.status === "rejected").length;
-    return { total, approved, rejected, pending: total - approved - rejected };
-  }, [views, reviewStates]);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!showDiff) {
+      setTargetPreviousValues(new Map());
+      setTargetComparisonSummary("");
+      return () => { cancelled = true; };
+    }
+
+    const loadTargetComparison = async () => {
+      const next: PreviousValuesByWideTable = new Map();
+      let matchedRows = 0;
+      let missingRows = 0;
+      let failedRows = 0;
+
+      const outcomes = await Promise.allSettled(
+        wideTables.map(async (wideTable) => ({ wideTableId: wideTable.id, result: await fetchWideTableTargetComparison(wideTable.id) })),
+      );
+      if (cancelled) return;
+
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") {
+          failedRows += 1;
+          continue;
+        }
+        const { wideTableId, result } = outcome.value;
+        matchedRows += result.matchedRows ?? 0;
+        missingRows += result.missingRows ?? 0;
+        failedRows += result.failedRows ?? 0;
+        const rowMap = new Map<number, Record<string, string | number | null>>();
+        for (const row of result.rows ?? []) {
+          if (row.previousValues) rowMap.set(row.rowId, row.previousValues);
+        }
+        next.set(wideTableId, rowMap);
+      }
+
+      setTargetPreviousValues(next);
+      setTargetComparisonSummary(`目标表对比：匹配 ${matchedRows} 行，未找到 ${missingRows} 行，失败 ${failedRows} 行。`);
+    };
+
+    void loadTargetComparison().catch((error) => {
+      if (cancelled) return;
+      setTargetPreviousValues(new Map());
+      setTargetComparisonSummary(`目标表对比加载失败：${formatActionError(error)}`);
+    });
+
+    return () => { cancelled = true; };
+  }, [showDiff, targetComparisonReloadKey, wideTables]);
 
   const activeCellTarget = useMemo(
     () => resolveActiveCellTarget(views, selectedCell),
@@ -299,10 +387,80 @@ export default function RequirementAcceptancePanel({
     }
   };
 
-  const handleApproveTaskGroup = (taskGroupId: string) => {
-    setReviewStates((prev) => new Map(prev).set(taskGroupId, { status: "approved", reviewedAt: new Date().toISOString() }));
-    setMessage("已通过该任务组的验收。");
-    void persistTaskGroupReview(taskGroupId, { status: "approved" });
+  const ensureTaskGroupAcceptanceTicket = async (taskGroupId: string): Promise<AcceptanceTicket> => {
+    const existing = ticketByTaskGroupId.get(taskGroupId);
+    if (existing?.id) {
+      return existing;
+    }
+    return createAcceptanceTicket({
+      dataset: resolveDatasetLabel(),
+      requirementId: requirement.id,
+      taskGroupId,
+      owner: requirement.owner,
+      status: "pending",
+    });
+  };
+
+  const ensureWideTableAcceptanceTicket = async (wideTableId: string): Promise<AcceptanceTicket> => {
+    const existing = ticketByWideTableId.get(wideTableId);
+    if (existing?.id) {
+      return existing;
+    }
+    const wideTable = wideTables.find((item) => item.id === wideTableId);
+    const dataset = wideTable?.name?.trim() ? `${wideTable.name}(${wideTable.id})` : wideTableId;
+    return createAcceptanceTicket({
+      dataset,
+      requirementId: requirement.id,
+      wideTableId,
+      owner: requirement.owner,
+      status: "pending",
+    });
+  };
+
+  const handlePublishAndApproveTaskGroup = async (taskGroupId: string, rowIds?: number[]) => {
+    const view = views.find((item) => item.taskGroups.some((taskGroup) => taskGroup.id === taskGroupId));
+    if (!view) return;
+    setMessage("正在发布验收结果到目标表...");
+    try {
+      const ticket = await ensureTaskGroupAcceptanceTicket(taskGroupId);
+      const publishResult = await approveAndPublishAcceptanceTicket(ticket.id, { rowIds, reviewer: requirement.owner });
+      if (publishResult.failedRows > 0) {
+        setMessage(`发布部分失败：成功插入 ${publishResult.insertedRows} 行，更新 ${publishResult.updatedRows} 行，失败 ${publishResult.failedRows} 行。`);
+        await onRefreshData?.();
+        return;
+      }
+      setReviewStates((prev) => new Map(prev).set(taskGroupId, { status: "approved", reviewedAt: new Date().toISOString() }));
+      await onRefreshData?.();
+      setTargetComparisonReloadKey((prev) => prev + 1);
+      setMessage(`已通过并发布到 ${publishResult.targetSchema}.${publishResult.targetTable}：插入 ${publishResult.insertedRows} 行，更新 ${publishResult.updatedRows} 行，跳过 ${publishResult.skippedRows} 行。`);
+    } catch (error) {
+      setMessage(`发布失败：${formatActionError(error)}`);
+    }
+  };
+
+  const handlePublishWideTable = async (wideTableId: string, rowIds?: number[]) => {
+    setMessage("正在发布验收结果到目标表...");
+    try {
+      const totalRows = views.find((item) => item.wideTable.id === wideTableId)?.rows.length ?? rowIds?.length ?? 0;
+      const ticket = await ensureWideTableAcceptanceTicket(wideTableId);
+      const publishResult = await approveAndPublishAcceptanceTicket(ticket.id, { rowIds, reviewer: requirement.owner });
+      const reviewedAt = new Date().toISOString();
+      if (publishResult.failedRows === 0) {
+        const status: TaskGroupReviewStatus = rowIds && rowIds.length < totalRows ? "partial_approved" : "approved";
+        setWideTableReviewStates((prev) =>
+          new Map(prev).set(wideTableId, { status, reviewedAt, rowIds }),
+        );
+      }
+      if (publishResult.failedRows > 0) {
+        setMessage(`发布部分失败：成功插入 ${publishResult.insertedRows} 行，更新 ${publishResult.updatedRows} 行，失败 ${publishResult.failedRows} 行。`);
+        return;
+      }
+      setMessage(`已发布到 ${publishResult.targetSchema}.${publishResult.targetTable}：插入 ${publishResult.insertedRows} 行，更新 ${publishResult.updatedRows} 行，跳过 ${publishResult.skippedRows} 行。`);
+      await onRefreshData?.();
+      setTargetComparisonReloadKey((prev) => prev + 1);
+    } catch (error) {
+      setMessage(`发布失败：${formatActionError(error)}`);
+    }
   };
 
   const handleRejectTaskGroup = (taskGroupId: string) => {
@@ -310,12 +468,48 @@ export default function RequirementAcceptancePanel({
     setRejectFeedback("");
   };
 
+  const handleRejectWideTable = (wideTableId: string) => {
+    setShowWideTableRejectDialog(wideTableId);
+    setRejectFeedback("");
+  };
+
   const confirmRejectTaskGroup = () => {
     if (!showRejectDialog) return;
     setReviewStates((prev) => new Map(prev).set(showRejectDialog, { status: "rejected", feedback: rejectFeedback || undefined, reviewedAt: new Date().toISOString() }));
     setMessage("已驳回该任务组，请在指标级别标注问题后通知执行人处理。");
-    void persistTaskGroupReview(showRejectDialog, { status: "rejected", feedback: rejectFeedback || undefined });
+    const taskGroupId = showRejectDialog;
+    const feedback = rejectFeedback || undefined;
+    void (async () => {
+      try {
+        const ticket = await ensureTaskGroupAcceptanceTicket(taskGroupId);
+        await rejectAcceptanceTicket(ticket.id, { feedback, reviewer: requirement.owner });
+        await onRefreshData?.();
+      } catch (error) {
+        setMessage(`验收驳回保存失败：${formatActionError(error)}`);
+      }
+    })();
     setShowRejectDialog(null);
+    setRejectFeedback("");
+  };
+
+  const confirmRejectWideTable = () => {
+    if (!showWideTableRejectDialog) return;
+    const wideTableId = showWideTableRejectDialog;
+    const feedback = rejectFeedback || undefined;
+    setWideTableReviewStates((prev) =>
+      new Map(prev).set(wideTableId, { status: "rejected", feedback, reviewedAt: new Date().toISOString() }),
+    );
+    setMessage("已驳回该宽表，请按驳回原因完成修正后重新验收。");
+    void (async () => {
+      try {
+        const ticket = await ensureWideTableAcceptanceTicket(wideTableId);
+        await rejectAcceptanceTicket(ticket.id, { feedback, reviewer: requirement.owner });
+        await onRefreshData?.();
+      } catch (error) {
+        setMessage(`验收驳回保存失败：${formatActionError(error)}`);
+      }
+    })();
+    setShowWideTableRejectDialog(null);
     setRejectFeedback("");
   };
 
@@ -338,13 +532,7 @@ export default function RequirementAcceptancePanel({
           {showDiff ? <span className="text-[11px] text-muted-foreground">对比当前值与上一轮采集值</span> : null}
         </div>
         {message ? <div className="text-xs text-primary">{message}</div> : null}
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-4">
-        <SummaryCard title="待验收" value={String(summary.pending)} />
-        <SummaryCard title="已通过" value={String(summary.approved)} accent="green" />
-        <SummaryCard title="已驳回" value={String(summary.rejected)} accent="red" />
-        <SummaryCard title="任务组总数" value={String(summary.total)} />
+        {targetComparisonSummary ? <div className="text-xs text-muted-foreground">{targetComparisonSummary}</div> : null}
       </section>
 
       {views.map((view) => (
@@ -356,8 +544,11 @@ export default function RequirementAcceptancePanel({
           showDiff={showDiff}
           navSource={navSource}
           onOpenCellModal={openCellModal}
-          onApprove={handleApproveTaskGroup}
+          onApprove={handlePublishAndApproveTaskGroup}
+          onApproveWideTable={handlePublishWideTable}
+          wideTableReviewState={wideTableReviewStates.get(view.wideTable.id)}
           onReject={handleRejectTaskGroup}
+          onRejectWideTable={handleRejectWideTable}
         />
       ))}
 
@@ -382,6 +573,15 @@ export default function RequirementAcceptancePanel({
           onCancel={() => { setShowRejectDialog(null); setRejectFeedback(""); }}
         />
       ) : null}
+
+      {showWideTableRejectDialog ? (
+        <RejectDialog
+          feedback={rejectFeedback}
+          onFeedbackChange={setRejectFeedback}
+          onConfirm={confirmRejectWideTable}
+          onCancel={() => { setShowWideTableRejectDialog(null); setRejectFeedback(""); }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -396,7 +596,10 @@ function AcceptanceWideTableSection({
   navSource,
   onOpenCellModal,
   onApprove,
+  onApproveWideTable,
+  wideTableReviewState,
   onReject,
+  onRejectWideTable,
 }: {
   view: AcceptanceWideTableView;
   requirement: Requirement;
@@ -404,8 +607,11 @@ function AcceptanceWideTableSection({
   showDiff: boolean;
   navSource?: "projects" | "requirements" | "tasks" | "acceptance";
   onOpenCellModal: (target: ActiveCellTarget) => void;
-  onApprove: (taskGroupId: string) => void;
+  onApprove: (taskGroupId: string, rowIds?: number[]) => void;
+  onApproveWideTable: (wideTableId: string, rowIds?: number[]) => void;
+  wideTableReviewState?: TaskGroupReviewState;
   onReject: (taskGroupId: string) => void;
+  onRejectWideTable: (wideTableId: string) => void;
 }) {
   const usesBusinessDateAxis = view.usesBusinessDateAxis;
 
@@ -516,6 +722,42 @@ function AcceptanceWideTableSection({
     }
     return filterFullSnapshotScopedRows(view.rows, currentTaskGroup?.id ?? null);
   }, [currentTaskGroup?.id, selectedBusinessDate, usesBusinessDateAxis, view.rows]);
+  const visibleRowIds = useMemo(() => visibleRows.map((row) => row.rowId), [visibleRows]);
+  const visibleRowIdKey = visibleRowIds.join(",");
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<number>>(() => new Set(visibleRowIds));
+
+  useEffect(() => {
+    setSelectedRowIds((prev) => {
+      const visible = new Set(visibleRowIds);
+      const retained = Array.from(prev).filter((rowId) => visible.has(rowId));
+      return new Set(retained.length > 0 ? retained : visibleRowIds);
+    });
+  }, [visibleRowIdKey]);
+
+  const selectedPublishRowIds = useMemo(() => Array.from(selectedRowIds).filter((rowId) => visibleRowIds.includes(rowId)), [selectedRowIds, visibleRowIds]);
+  const allVisibleRowsSelected = visibleRowIds.length > 0 && selectedPublishRowIds.length === visibleRowIds.length;
+  const effectiveReviewState = currentTaskGroup ? currentReviewState : wideTableReviewState;
+  const unapprovedRowIds = useMemo(() => {
+    if (effectiveReviewState?.status !== "partial_approved" && effectiveReviewState?.status !== "approved") {
+      return new Set<number>();
+    }
+    if (!effectiveReviewState.rowIds || effectiveReviewState.rowIds.length >= visibleRowIds.length) {
+      return new Set<number>();
+    }
+    const approvedRows = new Set(effectiveReviewState.rowIds);
+    return new Set(visibleRowIds.filter((rowId) => !approvedRows.has(rowId)));
+  }, [effectiveReviewState?.rowIds, effectiveReviewState?.status, visibleRowIdKey]);
+  const toggleAllVisibleRows = () => {
+    setSelectedRowIds(allVisibleRowsSelected ? new Set() : new Set(visibleRowIds));
+  };
+  const toggleVisibleRow = (rowId: number) => {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
 
   return (
     <section className="rounded-xl border bg-card p-6 space-y-4">
@@ -581,8 +823,19 @@ function AcceptanceWideTableSection({
           reviewState={currentReviewState}
           fetchTasks={view.fetchTasks.filter((ft) => ft.taskGroupId === currentTaskGroup.id)}
           returnToTasksHref={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navSource ? `nav=${navSource}&` : ""}view=tasks&tab=tasks&tg=${currentTaskGroup.id}`}
-          onApprove={() => onApprove(currentTaskGroup.id)}
+          selectedRowCount={selectedPublishRowIds.length}
+          totalRows={visibleRows.length}
+          onApprove={() => onApprove(currentTaskGroup.id, selectedPublishRowIds)}
           onReject={() => onReject(currentTaskGroup.id)}
+        />
+      ) : visibleRows.length > 0 ? (
+        <WideTableReviewBar
+          wideTable={view.wideTable}
+          reviewState={wideTableReviewState}
+          selectedRowCount={selectedPublishRowIds.length}
+          totalRows={visibleRows.length}
+          onApprove={() => onApproveWideTable(view.wideTable.id, selectedPublishRowIds)}
+          onReject={() => onRejectWideTable(view.wideTable.id)}
         />
       ) : null}
 
@@ -596,6 +849,15 @@ function AcceptanceWideTableSection({
           <table className="w-full min-w-max text-xs">
             <thead className="border-b">
               <tr>
+                <th className="w-10 px-2 py-2 text-left align-bottom">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleRowsSelected}
+                    disabled={visibleRowIds.length === 0}
+                    onChange={toggleAllVisibleRows}
+                    aria-label="选择当前页全部行"
+                  />
+                </th>
                 {view.wideTable.schema.columns.map((column) => (
                   <th key={column.id} className="min-w-28 px-2 py-2 text-left align-bottom">
                     <div className="font-medium text-foreground">{column.chineseName ?? column.name}</div>
@@ -607,12 +869,32 @@ function AcceptanceWideTableSection({
             <tbody className="divide-y">
               {visibleRows.length === 0 ? (
                 <tr>
-                  <td colSpan={view.wideTable.schema.columns.length} className="px-3 py-6 text-center text-xs text-muted-foreground">
+                  <td colSpan={view.wideTable.schema.columns.length + 1} className="px-3 py-6 text-center text-xs text-muted-foreground">
                     {usesBusinessDateAxis ? "当前业务日期下还没有可展示的验收数据。" : "当前快照下还没有可展示的验收数据。"}
                   </td>
                 </tr>
-              ) : visibleRows.map((row) => (
-                <tr key={`${view.wideTable.id}-${row.rowId}-${row.businessDate}`}>
+              ) : visibleRows.map((row) => {
+                const unapproved = unapprovedRowIds.has(row.rowId);
+                return (
+                <tr
+                  key={`${view.wideTable.id}-${row.rowId}-${row.businessDate}`}
+                  className={cn(unapproved && "bg-red-50/70")}
+                >
+                  <td className="px-2 py-2 align-top">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedRowIds.has(row.rowId)}
+                        onChange={() => toggleVisibleRow(row.rowId)}
+                        aria-label={`选择第 ${row.rowId} 行`}
+                      />
+                      {unapproved ? (
+                        <span className="whitespace-nowrap rounded border border-red-200 bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                          未通过
+                        </span>
+                      ) : null}
+                    </div>
+                  </td>
                   {view.wideTable.schema.columns.map((column) => {
                     const isIndicator = column.category === "indicator";
                     const binding = isIndicator
@@ -624,8 +906,8 @@ function AcceptanceWideTableSection({
                       const cellTarget: ActiveCellTarget = { view, row, column, binding };
                       const prevValue = row.record._metadata?.previousValues?.[column.name];
                       const curValue = row.record[column.name];
-                      const hasDiff = showDiff && prevValue !== undefined && hasIndicatorDiff(curValue, prevValue);
-                      const prevDisplay = prevValue != null ? String(prevValue) : null;
+                      const diffType = showDiff && prevValue !== undefined ? getIndicatorDiffType(curValue, prevValue) : null;
+                      const prevDisplay = prevValue !== undefined ? formatDisplayValue(prevValue) : "";
                       return (
                         <td key={column.id} className="p-0 align-top">
                           <button type="button" onClick={() => onOpenCellModal(cellTarget)}
@@ -633,15 +915,16 @@ function AcceptanceWideTableSection({
                               "block w-full px-2 py-1.5 text-left transition-colors hover:bg-primary/5",
                               binding?.task?.status === "failed" ? "bg-red-50 text-red-700"
                                 : binding?.task ? "bg-primary/5 text-foreground" : "text-foreground",
-                              hasDiff && "ring-1 ring-inset ring-amber-300",
+                              unapproved && !diffType && "bg-red-50/70 text-red-800",
+                              diffCellClass(diffType),
                             )}
                             title={binding?.task
                               ? `任务：${binding.task.id}；指标组：${binding.indicatorGroupName}；状态：${taskStatusLabel[binding.task.status] ?? binding.task.status}`
                               : "未关联采集任务，可人工修正"}>
                             <div>{cellValue || "\u00A0"}</div>
-                            {hasDiff ? (
-                              <div className="mt-0.5 text-[10px] text-amber-600 truncate" title={`上一轮：${prevDisplay ?? "NULL"}`}>
-                                上一轮：{prevDisplay ?? "NULL"}
+                            {diffType ? (
+                              <div className={cn("mt-0.5 text-[10px] truncate", diffTextClass(diffType))} title={`上一轮：${prevDisplay}`}>
+                                上一轮：{prevDisplay}
                               </div>
                             ) : null}
                           </button>
@@ -649,11 +932,12 @@ function AcceptanceWideTableSection({
                       );
                     }
                     return (
-                      <td key={column.id} className="px-2 py-2 align-top text-muted-foreground">{cellValue}</td>
+                      <td key={column.id} className={cn("px-2 py-2 align-top text-muted-foreground", unapproved && "text-red-800")}>{cellValue}</td>
                     );
                   })}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -669,6 +953,8 @@ function TaskGroupReviewBar({
   reviewState,
   fetchTasks,
   returnToTasksHref,
+  selectedRowCount,
+  totalRows,
   onApprove,
   onReject,
 }: {
@@ -676,6 +962,8 @@ function TaskGroupReviewBar({
   reviewState?: TaskGroupReviewState;
   fetchTasks: FetchTask[];
   returnToTasksHref: string;
+  selectedRowCount: number;
+  totalRows: number;
   onApprove: () => void;
   onReject: () => void;
 }) {
@@ -686,6 +974,7 @@ function TaskGroupReviewBar({
   const statusConfig = {
     pending: { label: "待验收", badgeClass: "bg-amber-50 text-amber-700 border-amber-200", barClass: "border-amber-200 bg-amber-50/50" },
     approved: { label: "已通过", badgeClass: "bg-green-50 text-green-700 border-green-200", barClass: "border-green-200 bg-green-50/50" },
+    partial_approved: { label: "部分通过", badgeClass: "bg-amber-50 text-amber-700 border-amber-200", barClass: "border-amber-200 bg-amber-50/50" },
     rejected: { label: "已驳回", badgeClass: "bg-red-50 text-red-700 border-red-200", barClass: "border-red-200 bg-red-50/50" },
   }[status];
 
@@ -698,6 +987,7 @@ function TaskGroupReviewBar({
         <span className="text-muted-foreground">
           任务组 {taskGroup.id} · 共 {fetchTasks.length} 个任务 · 已完成 {completedTasks}
           {failedTasks > 0 ? ` · 失败 ${failedTasks}` : ""}
+          {` · 已选 ${selectedRowCount} 行`}
         </span>
         {taskGroup.triggeredBy === "trial" ? (
           <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
@@ -711,8 +1001,9 @@ function TaskGroupReviewBar({
       <div className="flex items-center gap-2 shrink-0">
         {status === "pending" ? (
           <>
-            <button type="button" onClick={onApprove}
-              className="inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors">
+            <button type="button" onClick={onApprove} disabled={selectedRowCount !== totalRows || totalRows === 0}
+              title={selectedRowCount !== totalRows ? "需要全选当前页全部行后才能整体验收通过；未通过的数据请点击驳回" : undefined}
+              className="inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50">
               <CheckCircle2 className="h-3.5 w-3.5" />
               通过
             </button>
@@ -734,12 +1025,102 @@ function TaskGroupReviewBar({
               </a>
             ) : null}
           </>
+        ) : status === "partial_approved" ? (
+          <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "部分通过"}
+          </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-xs text-red-600">
             <XCircle className="h-3.5 w-3.5" />
             {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已驳回"}
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function WideTableReviewBar({
+  wideTable,
+  reviewState,
+  selectedRowCount,
+  totalRows,
+  onApprove,
+  onReject,
+}: {
+  wideTable: WideTable;
+  reviewState?: TaskGroupReviewState;
+  selectedRowCount: number;
+  totalRows: number;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const approvedRowCount = reviewState?.rowIds?.length;
+  const partialApproved =
+    reviewState?.status === "partial_approved"
+    || (reviewState?.status === "approved" && approvedRowCount !== undefined && approvedRowCount < totalRows);
+  const approved = reviewState?.status === "approved" && !partialApproved;
+  const rejected = reviewState?.status === "rejected";
+  const canApprove = selectedRowCount === totalRows && totalRows > 0 && !approved;
+  return (
+    <div className={cn(
+      "flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3",
+      approved ? "border-green-200 bg-green-50/50"
+        : rejected ? "border-red-200 bg-red-50/50"
+        : "border-amber-200 bg-amber-50/50",
+    )}>
+      <div className="flex items-center gap-3 text-xs min-w-0">
+        {approved ? (
+          <span className="inline-flex items-center rounded border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
+            已通过
+          </span>
+        ) : null}
+        {partialApproved ? (
+          <span className="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+            部分通过
+          </span>
+        ) : null}
+        {rejected ? (
+          <span className="inline-flex items-center rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">
+            已驳回
+          </span>
+        ) : null}
+        <span className={cn(
+          "inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-medium",
+          approved || partialApproved || rejected ? "hidden" : "border-amber-200 bg-amber-50 text-amber-700",
+        )}>
+          待验收
+        </span>
+        <span className="text-muted-foreground">
+          宽表 {wideTable.name} · 当前 {totalRows} 行 · 未关联任务组，按宽表整体验收 · 已选 {selectedRowCount} 行
+          {partialApproved && approvedRowCount !== undefined ? ` · 已发布 ${approvedRowCount} 行，仍有 ${Math.max(totalRows - approvedRowCount, 0)} 行未通过` : ""}
+        </span>
+      </div>
+      {approved ? (
+        <span className="inline-flex items-center gap-1 text-xs text-green-600">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已通过"}
+        </span>
+      ) : null}
+      <div className="flex items-center gap-2 shrink-0">
+        {rejected ? (
+          <span className="inline-flex items-center gap-1 text-xs text-red-600">
+            <XCircle className="h-3.5 w-3.5" />
+            {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已驳回"}
+          </span>
+        ) : null}
+      <button type="button" onClick={onApprove} disabled={!canApprove}
+        title={selectedRowCount !== totalRows ? "需要全选当前页全部行后才能整体验收通过；未通过的数据请点击驳回" : undefined}
+        className={cn("inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50", approved && "hidden")}>
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        通过
+      </button>
+        <button type="button" onClick={onReject} disabled={approved}
+          className={cn("inline-flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50", approved && "hidden")}>
+          <XCircle className="h-3.5 w-3.5" />
+          驳回
+        </button>
       </div>
     </div>
   );
@@ -760,10 +1141,9 @@ function IndicatorActionModal({
   const task = target.binding?.task;
   const taskGroup = target.binding?.taskGroup;
   const agentRaw = target.row.record._metadata?.agentRawValues?.[target.column.name];
-  const rawValueStr = agentRaw?.rawValue != null ? String(agentRaw.rawValue) : null;
   const prevValue = target.row.record._metadata?.previousValues?.[target.column.name];
-  const prevValueStr = prevValue != null ? String(prevValue) : null;
-  const hasDiff = prevValue !== undefined && hasIndicatorDiff(target.row.record[target.column.name], prevValue);
+  const prevValueStr = prevValue !== undefined ? formatDisplayValue(prevValue) : null;
+  const diffType = prevValue !== undefined ? getIndicatorDiffType(target.row.record[target.column.name], prevValue) : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -785,12 +1165,12 @@ function IndicatorActionModal({
           <div className="grid gap-3 md:grid-cols-2">
             <InfoCard label="当前值" value={currentValue} />
             <InfoCard label="上一轮值" value={prevValueStr ?? "无历史数据"}
-              valueClassName={hasDiff ? "text-amber-600 font-medium" : ""} />
+              valueClassName={diffType ? cn(diffTextClass(diffType), "font-medium") : ""} />
           </div>
 
-          {hasDiff ? (
-            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-              当前值与上一轮采集值存在差异，请确认变化是否合理。
+          {diffType ? (
+            <div className={cn("rounded border px-3 py-1.5 text-xs", diffNoticeClass(diffType))}>
+              {diffDescription(diffType)}
             </div>
           ) : null}
 
@@ -931,19 +1311,11 @@ function InfoCard({ label, value, valueClassName }: { label: string; value: stri
   );
 }
 
-function SummaryCard({ title, value, accent }: { title: string; value: string; accent?: "green" | "red" }) {
-  return (
-    <div className="rounded-xl border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{title}</div>
-      <div className={cn("mt-1 text-xl font-semibold", accent === "green" && "text-green-600", accent === "red" && "text-red-600")}>{value}</div>
-    </div>
-  );
-}
-
 // ==================== 数据构建 ====================
 
 function buildAcceptanceWideTableViews(params: {
   wideTables: WideTable[]; wideTableRecords: WideTableRecord[]; taskGroups: TaskGroup[]; fetchTasks: FetchTask[]; scheduleJobs: ScheduleJob[];
+  targetPreviousValues?: PreviousValuesByWideTable;
 }): AcceptanceWideTableView[] {
   return params.wideTables.map((wideTable) => {
     const usesBusinessDateAxis = hasWideTableBusinessDateDimension(wideTable);
@@ -971,7 +1343,7 @@ function buildAcceptanceWideTableViews(params: {
         })
       : fullSnapshotPages.map((p) => tgs.find((tg) => tg.id === p.taskGroupId)).filter((tg): tg is TaskGroup => Boolean(tg));
     const tgMap = new Map(tgs.map((tg) => [tg.id, tg]));
-    const rows = usesBusinessDateAxis
+    let rows = usesBusinessDateAxis
       ? [
           ...trialTaskGroups.flatMap((tg) =>
             buildAcceptanceRowsFromRecords(
@@ -992,6 +1364,20 @@ function buildAcceptanceWideTableViews(params: {
             return buildAcceptanceRowsFromRecords(wideTable, snaps, { scopeKey: page.taskGroupId, scopeLabel: page.pageLabel });
           })
         : buildAcceptanceRowsFromRecords(wideTable, scopedRecords, { scopeKey: "current_snapshot", scopeLabel: "当前快照" });
+    const targetPreviousRows = params.targetPreviousValues?.get(wideTable.id);
+    if (targetPreviousRows) {
+      rows = rows.map((row) => {
+        const previousValues = targetPreviousRows.get(row.rowId);
+        if (!previousValues) return row;
+        return {
+          ...row,
+          record: {
+            ...row.record,
+            _metadata: { ...(row.record._metadata ?? {}), previousValues },
+          },
+        };
+      });
+    }
     const fts = params.fetchTasks.filter((ft) => tgMap.has(ft.taskGroupId));
     const cellBindingMap = new Map<string, AcceptanceCellBinding>();
     for (const task of fts) {
@@ -1007,7 +1393,7 @@ function buildAcceptanceWideTableViews(params: {
     }
     // 计算 previousValues：同维度组合上一个业务日期/快照的指标值
     const indicatorColNames = wideTable.schema.columns.filter((c) => c.category === "indicator").map((c) => c.name);
-    if (indicatorColNames.length > 0) {
+    if (indicatorColNames.length > 0 && !targetPreviousRows) {
       if (usesBusinessDateAxis) {
         // 增量模式：按 rowLabel 分组，按 businessDate 排序，前一个就是上一轮
         const groupedByLabel = new Map<string, AcceptanceRowView[]>();
@@ -1087,30 +1473,60 @@ function buildRowLabel(wt: WideTable, record: WideTableRecord): string {
   const vals = wt.schema.columns
     .filter((c) => (c.category === "dimension" && !c.isBusinessDate) || c.category === "attribute")
     .map((c) => formatDisplayValue(record[c.name]))
-    .filter((v) => v !== "-" && v !== "NULL");
+    .filter((v) => v !== "");
   return vals.length > 0 ? vals.slice(0, 3).join(" / ") : `ROW ${getRecordRowId(record)}`;
 }
 function getRecordRowId(record: WideTableRecord): number { return Number(record.ROW_ID ?? record.id); }
 function buildCellKey(wtId: string, rowId: number, bd: string, col: string): string { return `${wtId}:${rowId}:${bd}:${col}`; }
 function buildScopedCellKey(rowId: number, bd: string, col: string): string { return `${rowId}:${bd}:${col}`; }
 function formatInputValue(v: unknown): string { return v == null ? "" : String(v); }
-function formatDisplayValue(v: unknown): string { return v == null || v === "" ? "NULL" : String(v); }
+function formatDisplayValue(v: unknown): string { return isEmptyDisplayValue(v) ? "" : String(v); }
 
-/** 判断 Agent 原始值与宽表当前值是否存在差异（排除双 null、空值修复等场景） */
-function hasIndicatorDiff(currentValue: unknown, rawValue: unknown): boolean {
-  // 双方都为空不算差异
-  if (currentValue == null && rawValue == null) return false;
-  // 一方为空另一方不为空算差异
-  if (currentValue == null || rawValue == null) return true;
+function isEmptyDisplayValue(value: unknown): boolean {
+  if (value == null) return true;
+  const text = String(value).trim();
+  return text === "" || text === "-" || text.toUpperCase() === "NULL";
+}
+
+function getIndicatorDiffType(currentValue: unknown, previousValue: unknown): IndicatorDiffType | null {
+  const currentEmpty = isEmptyDisplayValue(currentValue);
+  const previousEmpty = isEmptyDisplayValue(previousValue);
+  if (currentEmpty && previousEmpty) return null;
+  if (currentEmpty && !previousEmpty) return "removed";
+  if (!currentEmpty && previousEmpty) return "added";
   const curStr = String(currentValue).trim();
-  const rawStr = String(rawValue).trim();
-  // 字符串完全相同不算差异
-  if (curStr === rawStr) return false;
-  // 尝试数值比较：两边都能解析为相同数值则不算差异
+  const rawStr = String(previousValue).trim();
+  if (curStr === rawStr) return null;
   const curNum = Number(curStr);
   const rawNum = Number(rawStr);
-  if (Number.isFinite(curNum) && Number.isFinite(rawNum) && curNum === rawNum) return false;
-  return true;
+  if (Number.isFinite(curNum) && Number.isFinite(rawNum) && curNum === rawNum) return null;
+  return "changed";
+}
+
+function diffCellClass(type: IndicatorDiffType | null): string {
+  if (type === "removed") return "bg-red-50 text-red-700 ring-1 ring-inset ring-red-300";
+  if (type === "added") return "bg-green-50 text-green-700 ring-1 ring-inset ring-green-300";
+  if (type === "changed") return "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-300";
+  return "";
+}
+
+function diffTextClass(type: IndicatorDiffType | null): string {
+  if (type === "removed") return "text-red-600";
+  if (type === "added") return "text-green-600";
+  if (type === "changed") return "text-amber-700";
+  return "";
+}
+
+function diffNoticeClass(type: IndicatorDiffType | null): string {
+  if (type === "removed") return "border-red-200 bg-red-50 text-red-700";
+  if (type === "added") return "border-green-200 bg-green-50 text-green-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function diffDescription(type: IndicatorDiffType): string {
+  if (type === "removed") return "上一轮有值，本轮为空，请确认是否允许清空。";
+  if (type === "added") return "上一轮为空，本轮有值，请确认新增值是否合理。";
+  return "本轮值与上一轮值不同，请确认变化是否合理。";
 }
 function normalizePersistedValue(v: string): string | null { return v.trim() === "" ? null : v.trim(); }
 function formatActionError(error: unknown): string {

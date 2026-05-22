@@ -20,6 +20,8 @@ import type {
   CollectionResultRow,
   MetricFieldMapping,
   MappedResultMaterializationOutcome,
+  TargetComparisonOutcome,
+  TargetPublishOutcome,
   FetchTaskResults,
   CollectionBatch,
   IndicatorGroup,
@@ -661,8 +663,8 @@ export function mapTaskGroup(raw: any): TaskGroup {
     deltaReason: raw.delta_reason,
     status: mapTaskGroupStatus(raw.status),
     totalTasks: raw.total_tasks ?? 0,
-    pendingTasks: raw.pending_tasks ?? 0,
     runningTasks: raw.running_tasks ?? 0,
+    pendingTasks: raw.pending_tasks ?? 0,
     completedTasks: raw.completed_tasks ?? 0,
     failedTasks: raw.failed_tasks ?? 0,
     cancelledTasks: raw.cancelled_tasks ?? 0,
@@ -875,16 +877,36 @@ function mapBackfillRequest(raw: any): BackfillRequest {
 
 /** 后端 AcceptanceTicket → 前端 AcceptanceTicket */
 function mapAcceptanceTicket(raw: any): AcceptanceTicket {
+  const rawRowIds = raw.row_ids ?? raw.rowIds ?? raw.row_ids_json ?? raw.rowIdsJson;
   return {
     id: raw.id,
-    taskGroupId: raw.task_group_id ?? "",
+    taskGroupId: raw.task_group_id ?? raw.taskGroupId ?? "",
+    wideTableId: raw.wide_table_id ?? raw.wideTableId ?? undefined,
     dataset: raw.dataset,
-    requirementId: raw.requirement_id,
+    requirementId: raw.requirement_id ?? raw.requirementId,
     status: raw.status,
     owner: raw.owner,
     feedback: raw.feedback ?? "",
-    latestActionAt: raw.latest_action_at ?? "",
+    rowIds: parseNumberArray(rawRowIds),
+    latestActionAt: raw.latest_action_at ?? raw.latestActionAt ?? "",
   };
+}
+
+function parseNumberArray(value: unknown): number[] | undefined {
+  if (Array.isArray(value)) {
+    return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 后端 AuditRule → 前端 AuditRule */
@@ -1161,8 +1183,12 @@ function toBackendWideTablePlanTaskGroups(
       partition_key: taskGroup.partitionKey ?? taskGroup.businessDate ?? "full_table",
       partition_label: taskGroup.partitionLabel ?? taskGroup.businessDateLabel ?? taskGroup.id,
       total_tasks: taskGroup.totalTasks,
+      running_tasks: taskGroup.runningTasks,
+      pending_tasks: taskGroup.pendingTasks,
       completed_tasks: taskGroup.completedTasks,
       failed_tasks: taskGroup.failedTasks,
+      cancelled_tasks: taskGroup.cancelledTasks,
+      invalidated_tasks: taskGroup.invalidatedTasks,
       triggered_by: taskGroup.triggeredBy,
       created_at: taskGroup.createdAt,
       updated_at: taskGroup.updatedAt,
@@ -1979,6 +2005,89 @@ export async function materializeMappedResults(wideTableId: string): Promise<Map
   };
 }
 
+export async function publishWideTableToTarget(
+  wideTableId: string,
+  options?: { taskGroupId?: string; rowIds?: number[] },
+): Promise<TargetPublishOutcome> {
+  const body =
+    options?.taskGroupId || options?.rowIds
+      ? {
+          ...(options.taskGroupId ? { task_group_id: options.taskGroupId } : {}),
+          ...(options.rowIds ? { row_ids: options.rowIds } : {}),
+        }
+      : undefined;
+  const raw = await apiPost<any>(
+    `/api/wide-tables/${encodeURIComponent(wideTableId)}/actions/publish-to-target`,
+    body,
+  );
+  return mapTargetPublishOutcome(raw, wideTableId);
+}
+
+export async function approveAndPublishAcceptanceTicket(
+  ticketId: string,
+  options?: { rowIds?: number[]; reviewer?: string },
+): Promise<TargetPublishOutcome> {
+  const body =
+    options?.rowIds || options?.reviewer
+      ? {
+          ...(options.rowIds ? { row_ids: options.rowIds } : {}),
+          ...(options.reviewer ? { reviewer: options.reviewer } : {}),
+        }
+      : undefined;
+  const raw = await apiPost<any>(
+    `/api/acceptance-tickets/${encodeURIComponent(ticketId)}/actions/approve-and-publish`,
+    body,
+  );
+  return mapTargetPublishOutcome(raw);
+}
+
+function mapTargetPublishOutcome(raw: any, fallbackWideTableId = ""): TargetPublishOutcome {
+  return {
+    jobId: String(raw.job_id ?? raw.jobId ?? ""),
+    requirementId: raw.requirement_id ?? raw.requirementId ?? undefined,
+    wideTableId: String(raw.wide_table_id ?? raw.wideTableId ?? fallbackWideTableId),
+    taskGroupId: raw.task_group_id ?? raw.taskGroupId ?? undefined,
+    targetSchema: raw.target_schema ?? raw.targetSchema ?? undefined,
+    targetTable: raw.target_table ?? raw.targetTable ?? undefined,
+    status: String(raw.status ?? "failed"),
+    errorMsg: raw.error_msg ?? raw.errorMsg ?? undefined,
+    totalRows: Number(raw.total_rows ?? raw.totalRows ?? 0),
+    insertedRows: Number(raw.inserted_rows ?? raw.insertedRows ?? 0),
+    updatedRows: Number(raw.updated_rows ?? raw.updatedRows ?? 0),
+    skippedRows: Number(raw.skipped_rows ?? raw.skippedRows ?? 0),
+    failedRows: Number(raw.failed_rows ?? raw.failedRows ?? 0),
+  };
+}
+
+export async function fetchWideTableTargetComparison(wideTableId: string): Promise<TargetComparisonOutcome> {
+  const raw = await apiGet<any>(
+    `/api/wide-tables/${encodeURIComponent(wideTableId)}/actions/target-comparison`,
+  );
+  return {
+    requirementId: raw.requirement_id ?? raw.requirementId ?? undefined,
+    wideTableId: String(raw.wide_table_id ?? raw.wideTableId ?? wideTableId),
+    targetSchema: raw.target_schema ?? raw.targetSchema ?? undefined,
+    targetTable: raw.target_table ?? raw.targetTable ?? undefined,
+    status: String(raw.status ?? "failed"),
+    totalRows: Number(raw.total_rows ?? raw.totalRows ?? 0),
+    matchedRows: Number(raw.matched_rows ?? raw.matchedRows ?? 0),
+    missingRows: Number(raw.missing_rows ?? raw.missingRows ?? 0),
+    failedRows: Number(raw.failed_rows ?? raw.failedRows ?? 0),
+    rows: (raw.rows ?? []).map((row: any) => ({
+      rowId: Number(row.row_id ?? row.rowId),
+      status: String(row.status ?? ""),
+      message: row.message ?? undefined,
+      dimensionValues: row.dimension_values ?? row.dimensionValues ?? undefined,
+      previousValues: Object.fromEntries(
+        Object.entries(row.previous_values ?? row.previousValues ?? {}).map(([key, value]) => [
+          key,
+          value == null ? null : typeof value === "number" ? value : String(value),
+        ]),
+      ),
+    })),
+  };
+}
+
 export async function executeTask(taskId: string): Promise<{
   taskId: string;
   collectionTaskId?: string;
@@ -2087,15 +2196,17 @@ export async function fetchAcceptanceTickets(): Promise<AcceptanceTicket[]> {
 export async function createAcceptanceTicket(data: {
   dataset: string;
   requirementId: string;
-  taskGroupId: string;
+  taskGroupId?: string;
+  wideTableId?: string;
   owner: string;
   feedback?: string;
-  status?: "approved" | "rejected";
+  status?: "pending" | "approved" | "partial_approved" | "rejected";
 }): Promise<AcceptanceTicket> {
   const raw = await apiPost<any>("/api/acceptance-tickets", {
     dataset: data.dataset,
     requirement_id: data.requirementId,
     task_group_id: data.taskGroupId,
+    wide_table_id: data.wideTableId,
     owner: data.owner,
     feedback: data.feedback,
     status: data.status,
@@ -2108,6 +2219,17 @@ export async function updateAcceptanceTicket(
   data: { status?: string; feedback?: string },
 ): Promise<void> {
   await apiPut(`/api/acceptance-tickets/${ticketId}`, data);
+}
+
+export async function rejectAcceptanceTicket(
+  ticketId: string,
+  data: { feedback?: string; reviewer?: string } = {},
+): Promise<AcceptanceTicket> {
+  const raw = await apiPost<any>(`/api/acceptance-tickets/${encodeURIComponent(ticketId)}/actions/reject`, {
+    feedback: data.feedback,
+    reviewer: data.reviewer,
+  });
+  return mapAcceptanceTicket(raw);
 }
 
 export async function fetchDashboardMetrics(): Promise<{
@@ -2165,19 +2287,12 @@ export async function loadProjectData(projectId: string): Promise<{
   const { requirements, wideTables } = await fetchRequirementWideTables(projectId);
 
   // 并行加载所有需求的 task groups 和 fetch tasks
-  const taskGroupsArrays = await Promise.all(
-    requirements.map((req) => fetchTaskGroups(projectId, req.id).catch(() => [] as TaskGroup[])),
-  );
-  const fetchTasksArrays = await Promise.all(
-    requirements.map((req) => fetchFetchTasks(projectId, req.id).catch(() => [] as FetchTask[])),
-  );
-
   return {
     project,
     requirements,
     wideTables,
-    taskGroups: taskGroupsArrays.flat(),
-    fetchTasks: fetchTasksArrays.flat(),
+    taskGroups: [],
+    fetchTasks: [],
   };
 }
 
