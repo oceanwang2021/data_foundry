@@ -1382,7 +1382,6 @@ export async function createRequirement(
     title: string;
     owner: string;
     assignee: string;
-    businessGoal?: string;
     backgroundKnowledge?: string;
     deliveryScope?: string;
     dataUpdateEnabled?: boolean;
@@ -1411,8 +1410,7 @@ export async function createRequirement(
     phase: "production",
     owner: data.owner,
     assignee: data.assignee,
-    business_goal: data.businessGoal ?? data.backgroundKnowledge ?? "",
-    background_knowledge: data.backgroundKnowledge ?? data.businessGoal ?? "",
+    background_knowledge: data.backgroundKnowledge ?? "",
     delivery_scope: data.deliveryScope ?? "",
     data_update_enabled: data.dataUpdateEnabled,
     data_update_mode: data.dataUpdateMode ?? null,

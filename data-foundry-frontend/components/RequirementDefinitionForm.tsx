@@ -1126,7 +1126,7 @@ function BasicInfoSection({
         <EditableField label="背景知识" control={
           <textarea className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[72px] resize-y"
             value={requirement.backgroundKnowledge ?? requirement.businessGoal ?? ""}
-            onChange={(e) => update({ backgroundKnowledge: e.target.value, businessGoal: e.target.value })}
+            onChange={(e) => update({ backgroundKnowledge: e.target.value })}
             placeholder="补充业务背景、历史口径和上下文信息" />
         } />
       </div>

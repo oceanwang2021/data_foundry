@@ -218,7 +218,6 @@ export default function CreateRequirementModal({
   const [title, setTitle] = useState("");
   const [owner, setOwner] = useState("");
   const [assignee, setAssignee] = useState("");
-  const [businessGoal, setBusinessGoal] = useState("");
   const [backgroundKnowledge, setBackgroundKnowledge] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState(projectId ?? defaultProjectId ?? project?.id ?? "");
 
@@ -256,7 +255,6 @@ export default function CreateRequirementModal({
     setTitle("");
     setOwner("");
     setAssignee("");
-    setBusinessGoal("");
     setBackgroundKnowledge("");
     setSelectedProjectId(projectId ?? defaultProjectId ?? project?.id ?? projectOptions[0]?.id ?? "");
     setEnabledSearchEngines(defaultSearchEngines);
@@ -378,7 +376,6 @@ export default function CreateRequirementModal({
         title: title.trim(),
         owner: owner.trim(),
         assignee: assignee.trim(),
-        businessGoal: businessGoal.trim(),
         backgroundKnowledge: backgroundKnowledge.trim(),
         dataUpdateEnabled: dataUpdateEnabled === null ? undefined : dataUpdateEnabled,
         dataUpdateMode: null,
@@ -490,23 +487,14 @@ export default function CreateRequirementModal({
 
           <section className="rounded-lg border p-4 space-y-3">
             <div className="font-semibold">业务需求</div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">业务目标</label>
-                <textarea
-                  value={businessGoal}
-                  onChange={(e) => setBusinessGoal(e.target.value)}
-                  className="w-full min-h-24 rounded-md border px-3 py-2 text-sm resize-y"
-                  placeholder="描述需求背景、目标与交付方式"
-                />
-              </div>
+            <div className="grid gap-3">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">背景知识</label>
                 <textarea
                   value={backgroundKnowledge}
                   onChange={(e) => setBackgroundKnowledge(e.target.value)}
                   className="w-full min-h-24 rounded-md border px-3 py-2 text-sm resize-y"
-                  placeholder="例如：术语解释、业务口径、参考链接等"
+                  placeholder="补充业务背景、历史口径和上下文信息"
                 />
               </div>
             </div>

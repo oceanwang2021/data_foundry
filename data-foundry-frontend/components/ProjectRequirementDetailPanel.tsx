@@ -111,7 +111,6 @@ export default function ProjectRequirementDetailPanel({
       status: nextRequirement.status,
       owner: nextRequirement.owner,
       assignee: nextRequirement.assignee,
-      businessGoal: nextRequirement.businessGoal,
       backgroundKnowledge: nextRequirement.backgroundKnowledge,
       collectionPolicy: nextRequirement.collectionPolicy,
       dataUpdateEnabled: nextRequirement.dataUpdateEnabled,
