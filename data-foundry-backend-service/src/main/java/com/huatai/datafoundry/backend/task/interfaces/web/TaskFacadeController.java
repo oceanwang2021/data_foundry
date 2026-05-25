@@ -132,6 +132,11 @@ public class TaskFacadeController {
     return requirementQueryService.listTaskRuns(taskId);
   }
 
+  @GetMapping("/{taskId}/status-detail")
+  public Map<String, Object> getTaskStatusDetail(@PathVariable("taskId") String taskId) {
+    return taskAppService.getCollectionTaskStatusDetail(taskId);
+  }
+
   @PostMapping("/task-groups/{taskGroupId}/actions/execute")
   public Map<String, Object> executeTaskGroup(
       @PathVariable("taskGroupId") String taskGroupId,

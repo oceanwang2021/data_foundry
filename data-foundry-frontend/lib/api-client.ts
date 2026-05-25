@@ -2099,6 +2099,14 @@ export async function executeTask(taskId: string): Promise<{
   };
 }
 
+export async function fetchCollectionTaskStatusDetail(taskId: string): Promise<Record<string, unknown>> {
+  const raw = await apiGet<any>(`/api/tasks/${encodeURIComponent(taskId)}/status-detail`);
+  if (raw && typeof raw === "object") {
+    return raw as Record<string, unknown>;
+  }
+  return { success: false, detail: "Empty status response" };
+}
+
 export async function retryTask(taskId: string): Promise<{
   taskId: string;
   collectionTaskId?: string;

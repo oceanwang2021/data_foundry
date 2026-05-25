@@ -19,6 +19,7 @@ import {
   executeTask,
   executeTaskGroup,
   ensureTaskGroupTasks,
+  fetchCollectionTaskStatusDetail,
   persistWideTablePlan,
   persistWideTablePreview,
   syncWideTableCollectionStatuses,
@@ -43,6 +44,7 @@ import {
   type TaskGroupExecutionSummary,
 } from "@/lib/task-group-execution";
 import { resolveRequirementDataUpdateEnabled } from "@/lib/requirement-data-update";
+import CollectionTaskStatusPopup from "@/components/CollectionTaskStatusPopup";
 import FetchTaskDetailPopup from "@/components/FetchTaskDetailPopup";
 import RequirementDataProcessingPanel from "@/components/RequirementDataProcessingPanel";
 import { StageSummaryCard } from "@/components/StageSummaryCard";
@@ -160,6 +162,13 @@ export default function RequirementTasksPanel({
   const [selectedWtId, setSelectedWtId] = useState<string>(wideTables[0]?.id ?? "");
   const [expandedTgId, setExpandedTgId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskStatusLog, setSelectedTaskStatusLog] = useState<{
+    collectionTaskId: string;
+    rowLabel: string;
+  } | null>(null);
+  const [taskStatusLogPayload, setTaskStatusLogPayload] = useState<Record<string, unknown> | null>(null);
+  const [taskStatusLogError, setTaskStatusLogError] = useState("");
+  const [isLoadingTaskStatusLog, setIsLoadingTaskStatusLog] = useState(false);
   const [taskActionMessage, setTaskActionMessage] = useState("");
   const [indicatorGroupMessage, setIndicatorGroupMessage] = useState("");
   const [promptSaveMessage, setPromptSaveMessage] = useState("");
@@ -1424,6 +1433,75 @@ export default function RequirementTasksPanel({
     }
   };
 
+  const closeTaskStatusLog = () => {
+    setSelectedTaskStatusLog(null);
+    setTaskStatusLogPayload(null);
+    setTaskStatusLogError("");
+    setIsLoadingTaskStatusLog(false);
+  };
+
+  const handleOpenTaskStatusLog = async (collectionTaskId: string, rowLabel: string) => {
+    setSelectedTaskStatusLog({ collectionTaskId, rowLabel });
+    setTaskStatusLogPayload(null);
+    setTaskStatusLogError("");
+    setIsLoadingTaskStatusLog(true);
+    try {
+      const payload = await fetchCollectionTaskStatusDetail(collectionTaskId);
+      setTaskStatusLogPayload(payload);
+    } catch (error) {
+      setTaskStatusLogError(`加载日志失败：${formatTaskActionError(error)}`);
+    } finally {
+      setIsLoadingTaskStatusLog(false);
+    }
+  };
+
+  const renderTaskInstanceActions = (
+    row: TaskInstanceRowView,
+    isRunning: boolean,
+    actionLabel: string,
+  ) => (
+    <div className="flex flex-col items-start gap-2">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
+          disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
+          className={cn(
+            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+            "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
+        </button>
+        {isRunning && row.collectionTaskId ? (
+          <button
+            type="button"
+            onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+            disabled={cancellingTaskIds.includes(row.fetchTaskId)}
+            className={cn(
+              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+            )}
+          >
+            {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
+          </button>
+        ) : null}
+      </div>
+      {isRunning && row.collectionTaskId ? (
+        <button
+          type="button"
+          onClick={() => void handleOpenTaskStatusLog(row.collectionTaskId!, row.rowLabel)}
+          className={cn(
+            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+            "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+          )}
+        >
+          查看日志
+        </button>
+      ) : null}
+    </div>
+  );
+
   const renderTaskInstanceTable = (
     rows: TaskInstanceRowView[],
     legendItems: Array<{
@@ -1497,32 +1575,7 @@ export default function RequirementTasksPanel({
                       <StatusBadge status={row.status} />
                     </td>
                     <td className="px-3 py-3 align-top">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-                          disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
-                          className={cn(
-                            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-                            "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
-                          )}
-                        >
-                          {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
-                        </button>
-                        {isRunning && row.collectionTaskId ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
-                            disabled={cancellingTaskIds.includes(row.fetchTaskId)}
-                            className={cn(
-                              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-                              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
-                            )}
-                          >
-                            {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
-                          </button>
-                        ) : null}
-                      </div>
+                      {renderTaskInstanceActions(row, isRunning, actionLabel)}
                     </td>
                   </tr>
                 );
@@ -1661,32 +1714,7 @@ export default function RequirementTasksPanel({
                                   <StatusBadge status={row.status} />
                                 </td>
                                 <td className="px-3 py-3 align-top">
-                                  <div className="flex flex-wrap gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-                                      disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
-                                      className={cn(
-                                        "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-                                        "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
-                                      )}
-                                    >
-                                      {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
-                                    </button>
-                                    {isRunning && row.collectionTaskId ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
-                                        disabled={cancellingTaskIds.includes(row.fetchTaskId)}
-                                        className={cn(
-                                          "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-                                          "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
-                                        )}
-                                      >
-                                        {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
-                                      </button>
-                                    ) : null}
-                                  </div>
+                                  {renderTaskInstanceActions(row, isRunning, actionLabel)}
                                 </td>
                               </tr>
                             );
@@ -2957,6 +2985,17 @@ export default function RequirementTasksPanel({
               {runningTaskIds.includes(selectedTask.id) ? "执行中..." : "重新执行任务"}
             </button>
           ) : null}
+        />
+      ) : null}
+
+      {selectedTaskStatusLog ? (
+        <CollectionTaskStatusPopup
+          collectionTaskId={selectedTaskStatusLog.collectionTaskId}
+          rowLabel={selectedTaskStatusLog.rowLabel}
+          payload={taskStatusLogPayload}
+          isLoading={isLoadingTaskStatusLog}
+          errorMessage={taskStatusLogError}
+          onClose={closeTaskStatusLog}
         />
       ) : null}
     </div>

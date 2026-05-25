@@ -49,13 +49,20 @@ public interface CollectionSearchGateway {
     private final String taskId;
     private final String status;
     private final String errorMessage;
+    private final String rawResponseJson;
 
     public CollectionTaskStatusResult(
         boolean success, String taskId, String status, String errorMessage) {
+      this(success, taskId, status, errorMessage, null);
+    }
+
+    public CollectionTaskStatusResult(
+        boolean success, String taskId, String status, String errorMessage, String rawResponseJson) {
       this.success = success;
       this.taskId = taskId;
       this.status = status;
       this.errorMessage = errorMessage;
+      this.rawResponseJson = rawResponseJson;
     }
 
     public boolean isSuccess() {
@@ -72,6 +79,10 @@ public interface CollectionSearchGateway {
 
     public String getErrorMessage() {
       return errorMessage;
+    }
+
+    public String getRawResponseJson() {
+      return rawResponseJson;
     }
   }
 

@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -236,6 +237,67 @@ public class TaskAppService {
     out.put("failed_task_count", summary.failedTaskCount);
     out.put("cancelled_task_count", summary.cancelledTaskCount);
     out.put("error_count", summary.errorCount);
+    return out;
+  }
+
+  public Map<String, Object> getCollectionTaskStatusDetail(String taskIdOrCollectionTaskId) {
+    String lookupKey = normalize(taskIdOrCollectionTaskId);
+    if (lookupKey == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "taskId is required");
+    }
+
+    FetchTask task = fetchTaskRepository.getByCollectionTaskId(lookupKey);
+    if (task == null) {
+      task = fetchTaskRepository.getById(lookupKey);
+    }
+
+    String externalTaskId = task != null ? normalize(task.getCollectionTaskId()) : lookupKey;
+    if (externalTaskId == null) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Task has no collection task id");
+    }
+    if (collectionSearchGateway == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Collection status service unavailable");
+    }
+
+    CollectionTaskStatusResult statusResult = collectionSearchGateway.getTaskStatus(externalTaskId);
+    if (statusResult == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Collection status service unavailable");
+    }
+
+    String rawResponseJson = statusResult.getRawResponseJson();
+    if (rawResponseJson != null && !rawResponseJson.trim().isEmpty()) {
+      try {
+        Object parsed = objectMapper.readValue(rawResponseJson, Object.class);
+        if (parsed instanceof Map) {
+          @SuppressWarnings("unchecked")
+          Map<String, Object> rawMap = (Map<String, Object>) parsed;
+          return rawMap;
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("success", statusResult.isSuccess());
+        out.put("data", parsed);
+        return out;
+      } catch (Exception ignored) {
+        // Fall through to synthesized response below.
+      }
+    }
+
+    Map<String, Object> data = new LinkedHashMap<String, Object>();
+    data.put("task_id", statusResult.getTaskId() != null ? statusResult.getTaskId() : externalTaskId);
+    if (statusResult.getStatus() != null) {
+      data.put("status", statusResult.getStatus());
+    }
+    if (task != null) {
+      data.put("fetch_task_id", task.getId());
+      data.put("collection_task_id", externalTaskId);
+    }
+
+    Map<String, Object> out = new LinkedHashMap<String, Object>();
+    out.put("success", statusResult.isSuccess());
+    out.put("data", data);
+    if (statusResult.getErrorMessage() != null && !statusResult.getErrorMessage().trim().isEmpty()) {
+      out.put("detail", statusResult.getErrorMessage());
+    }
     return out;
   }
 

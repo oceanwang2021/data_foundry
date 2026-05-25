@@ -114,11 +114,15 @@ public class CollectionSearchClient implements CollectionSearchGateway {
         status = HttpStatus.SERVICE_UNAVAILABLE;
       }
       return new CollectionTaskStatusResult(
-          false, normalizedTaskId, null, "http " + status.value() + safeSnippet(ex.getResponseBodyAsString()));
+          false,
+          normalizedTaskId,
+          null,
+          "http " + status.value() + safeSnippet(ex.getResponseBodyAsString()),
+          ex.getResponseBodyAsString());
     } catch (RestClientException ex) {
-      return new CollectionTaskStatusResult(false, normalizedTaskId, null, "unavailable: " + ex.getMessage());
+      return new CollectionTaskStatusResult(false, normalizedTaskId, null, "unavailable: " + ex.getMessage(), null);
     } catch (Exception ex) {
-      return new CollectionTaskStatusResult(false, normalizedTaskId, null, ex.getMessage());
+      return new CollectionTaskStatusResult(false, normalizedTaskId, null, ex.getMessage(), null);
     }
   }
 
@@ -196,7 +200,7 @@ public class CollectionSearchClient implements CollectionSearchGateway {
 
   private CollectionTaskStatusResult parseTaskStatusResponse(HttpStatus statusCode, String rawBody) {
     if (statusCode == null || !statusCode.is2xxSuccessful()) {
-      return new CollectionTaskStatusResult(false, null, null, "non-2xx: " + statusCode);
+      return new CollectionTaskStatusResult(false, null, null, "non-2xx: " + statusCode, rawBody);
     }
     try {
       Map raw = objectMapper.readValue(rawBody, Map.class);
@@ -204,21 +208,21 @@ public class CollectionSearchClient implements CollectionSearchGateway {
       if (!(success instanceof Boolean) || !((Boolean) success).booleanValue()) {
         Object detail = raw.get("detail");
         return new CollectionTaskStatusResult(
-            false, null, null, detail != null ? String.valueOf(detail) : "success=false");
+            false, null, null, detail != null ? String.valueOf(detail) : "success=false", rawBody);
       }
       Object data = raw.get("data");
       if (!(data instanceof Map)) {
-        return new CollectionTaskStatusResult(false, null, null, "missing data");
+        return new CollectionTaskStatusResult(false, null, null, "missing data", rawBody);
       }
       Map dataMap = (Map) data;
       String taskId = stringValue(dataMap.get("task_id"));
       String taskStatus = stringValue(dataMap.get("status"));
       if (taskId == null || taskStatus == null) {
-        return new CollectionTaskStatusResult(false, taskId, taskStatus, "missing task status");
+        return new CollectionTaskStatusResult(false, taskId, taskStatus, "missing task status", rawBody);
       }
-      return new CollectionTaskStatusResult(true, taskId, taskStatus, null);
+      return new CollectionTaskStatusResult(true, taskId, taskStatus, null, rawBody);
     } catch (Exception ex) {
-      return new CollectionTaskStatusResult(false, null, null, ex.getMessage());
+      return new CollectionTaskStatusResult(false, null, null, ex.getMessage(), rawBody);
     }
   }
 
