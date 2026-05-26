@@ -79,6 +79,7 @@ import {
 } from "@/lib/task-group-display";
 import {
   formatIndicatorSummary,
+  normalizeCollectionTaskLabel,
 } from "@/lib/collection-task-list-view";
 import {
   buildIndicatorGroupPrompt,
@@ -674,19 +675,19 @@ export default function RequirementTasksPanel({
     ),
     [collectionTaskGroupRunViews, effectiveWideTable],
   );
-  const collectionTaskIndicatorLabelMap = useMemo(
+  const collectionTaskNameMap = useMemo(
     () => new Map(
       (taskPlan?.collectionTasks ?? []).map((task) => [
         task.id,
-        formatIndicatorSummary(task.indicatorLabels) || task.name || "未关联指标",
+        normalizeCollectionTaskLabel(task.name),
       ] as const),
     ),
     [taskPlan],
   );
-  const defaultCollectionTaskIndicatorLabel = useMemo(
+  const defaultCollectionTaskName = useMemo(
     () => (
       taskPlan?.collectionTasks.length === 1
-        ? formatIndicatorSummary(taskPlan.collectionTasks[0]?.indicatorLabels ?? []) || taskPlan.collectionTasks[0]?.name || "未关联指标"
+        ? normalizeCollectionTaskLabel(taskPlan.collectionTasks[0]?.name)
         : ""
     ),
     [taskPlan],
@@ -2630,14 +2631,14 @@ export default function RequirementTasksPanel({
                       {taskPlan.collectionTasks.map((task, index) => (
                         <div key={task.id} className="space-y-1">
                           <div>
-                            {`采集任务${index + 1}${task.name ? `（${task.name}）` : ""}：${formatIndicatorSummary(task.indicatorLabels)}`}
+                            {`${normalizeCollectionTaskLabel(task.name)}：${formatIndicatorSummary(task.indicatorLabels)}`}
                           </div>
                           {task.indicatorLabels.length > 3 ? (
                             <button
                               type="button"
                               className="text-xs text-primary hover:underline"
                               onClick={() => setSelectedIndicatorTask({
-                                collectionTaskLabel: task.name || `采集任务${index + 1}`,
+                                collectionTaskLabel: normalizeCollectionTaskLabel(task.name),
                                 indicatorLabels: task.indicatorLabels,
                               })}
                             >
@@ -2708,27 +2709,25 @@ export default function RequirementTasksPanel({
                 ?? collectionTaskIndicatorLabelsMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
                 ?? (taskPlan?.collectionTasks.length === 1 ? taskPlan.collectionTasks[0]?.indicatorLabels : undefined)
                 ?? [];
-              const displayGroupLabel = collectionTaskIndicatorLabelMap.get(section.id)
-                ?? collectionTaskIndicatorLabelMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
-                ?? defaultCollectionTaskIndicatorLabel
-                ?? section.taskGroups[0]?.indicatorGroupName
-                ?? "未关联指标";
-              const collectionTaskTitle = collectionTaskGroupSections.length > 1
-                ? `采集任务${sectionIndex + 1}：${displayGroupLabel}`
-                : `采集任务：${displayGroupLabel}`;
+              const displayGroupLabel = collectionTaskNameMap.get(section.id)
+                ?? collectionTaskNameMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
+                ?? defaultCollectionTaskName
+                ?? normalizeCollectionTaskLabel(section.taskGroups[0]?.indicatorGroupName);
+              const collectionTaskTitle = `采集任务：${displayGroupLabel}`;
 
               return (
                 <div key={section.id} className="space-y-3">
                   <div className="space-y-1 px-1">
                     <div className="text-base font-semibold text-foreground">{collectionTaskTitle}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {formatIndicatorSummary(displayIndicatorLabels)}
+                    </div>
                     {displayIndicatorLabels.length > 3 ? (
                       <button
                         type="button"
                         className="text-xs text-primary hover:underline"
                         onClick={() => setSelectedIndicatorTask({
-                          collectionTaskLabel: collectionTaskGroupSections.length > 1
-                            ? `采集任务${sectionIndex + 1}`
-                            : "采集任务",
+                          collectionTaskLabel: displayGroupLabel,
                           indicatorLabels: displayIndicatorLabels,
                         })}
                       >

@@ -46,8 +46,16 @@ export function resolveCollectionTaskKey(taskGroup: TaskGroup): string {
   return taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_KEY;
 }
 
+export function normalizeCollectionTaskLabel(label?: string | null): string {
+  const normalized = String(label ?? "").trim();
+  if (!normalized || normalized === COLLECTION_TASK_DEFAULT_KEY) {
+    return COLLECTION_TASK_DEFAULT_LABEL;
+  }
+  return normalized;
+}
+
 export function resolveCollectionTaskLabel(taskGroup: TaskGroup): string {
-  return taskGroup.partitionLabel ?? taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_LABEL;
+  return normalizeCollectionTaskLabel(taskGroup.partitionLabel ?? taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_LABEL);
 }
 
 export function formatIndicatorSummary(indicatorNames: string[], previewCount = 3): string {
@@ -61,6 +69,14 @@ export function formatIndicatorSummary(indicatorNames: string[], previewCount = 
   }
 
   return `${indicatorNames.length} 个指标｜${preview.join("、")} 等`;
+}
+
+export function formatCollectionTaskDisplaySummary(
+  label: string | undefined | null,
+  indicatorNames: string[],
+  previewCount = 3,
+): string {
+  return `${normalizeCollectionTaskLabel(label)}｜${formatIndicatorSummary(indicatorNames, previewCount)}`;
 }
 
 export function formatCollectionTaskDateTime(value?: string): string {
