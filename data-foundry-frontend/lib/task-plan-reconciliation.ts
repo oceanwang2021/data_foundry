@@ -71,7 +71,9 @@ export function reconcileTaskPlanChange(params: {
   const scopedTaskGroups = params.taskGroups.filter((taskGroup) => taskGroup.wideTableId === wideTable.id);
   const scopedFetchTasks = params.fetchTasks.filter((task) => task.wideTableId === wideTable.id);
   const currentRevisionTaskGroups = scopedTaskGroups.filter(
-    (taskGroup) => resolveTaskGroupPlanVersion(taskGroup, currentPlanVersion) === currentPlanVersion,
+    (taskGroup) =>
+      taskGroup.triggeredBy !== "trial"
+      && resolveTaskGroupPlanVersion(taskGroup, currentPlanVersion) === currentPlanVersion,
   );
   const hasCurrentRevisionPlan = previousRecords.length > 0 || currentRevisionTaskGroups.length > 0 || Boolean(wideTable.currentPlanFingerprint);
   const nextPlanVersion = hasCurrentRevisionPlan && previousFingerprint !== nextPlanFingerprint

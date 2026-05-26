@@ -291,6 +291,7 @@ export default function RequirementTasksPanel({
       selectedWt && taskGroups.some(
         (taskGroup) =>
           taskGroup.wideTableId === selectedWt.id
+          && taskGroup.triggeredBy !== "trial"
           && resolveTaskGroupPlanVersion(taskGroup, currentPlanVersion) === currentPlanVersion,
       ),
     ),
