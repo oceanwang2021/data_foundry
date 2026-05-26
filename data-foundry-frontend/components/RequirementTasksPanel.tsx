@@ -78,8 +78,12 @@ import {
   describeFullSnapshotScheduleRule,
 } from "@/lib/task-group-display";
 import {
+  formatIndicatorSummary,
+} from "@/lib/collection-task-list-view";
+import {
   buildIndicatorGroupPrompt,
 } from "@/lib/indicator-group-prompt";
+import CollectionTaskIndicatorsPopup from "@/components/CollectionTaskIndicatorsPopup";
 
 type Props = {
   requirement: Requirement;
@@ -165,6 +169,10 @@ export default function RequirementTasksPanel({
   const [selectedTaskStatusLog, setSelectedTaskStatusLog] = useState<{
     collectionTaskId: string;
     rowLabel: string;
+  } | null>(null);
+  const [selectedIndicatorTask, setSelectedIndicatorTask] = useState<{
+    collectionTaskLabel: string;
+    indicatorLabels: string[];
   } | null>(null);
   const [taskStatusLogPayload, setTaskStatusLogPayload] = useState<Record<string, unknown> | null>(null);
   const [taskStatusLogError, setTaskStatusLogError] = useState("");
@@ -669,7 +677,7 @@ export default function RequirementTasksPanel({
     () => new Map(
       (taskPlan?.collectionTasks ?? []).map((task) => [
         task.id,
-        task.indicatorLabels.join("、") || task.name || "未关联指标",
+        formatIndicatorSummary(task.indicatorLabels) || task.name || "未关联指标",
       ] as const),
     ),
     [taskPlan],
@@ -677,8 +685,14 @@ export default function RequirementTasksPanel({
   const defaultCollectionTaskIndicatorLabel = useMemo(
     () => (
       taskPlan?.collectionTasks.length === 1
-        ? taskPlan.collectionTasks[0]?.indicatorLabels.join("、") || taskPlan.collectionTasks[0]?.name || "未关联指标"
+        ? formatIndicatorSummary(taskPlan.collectionTasks[0]?.indicatorLabels ?? []) || taskPlan.collectionTasks[0]?.name || "未关联指标"
         : ""
+    ),
+    [taskPlan],
+  );
+  const collectionTaskIndicatorLabelsMap = useMemo(
+    () => new Map(
+      (taskPlan?.collectionTasks ?? []).map((task) => [task.id, task.indicatorLabels] as const),
     ),
     [taskPlan],
   );
@@ -1455,6 +1469,33 @@ export default function RequirementTasksPanel({
     }
   };
 
+  const renderIndicatorSummaryBlock = (
+    indicatorLabels: string[],
+    collectionTaskLabel: string,
+    compact = false,
+  ) => {
+    if (indicatorLabels.length === 0) {
+      return <div className="text-muted-foreground">-</div>;
+    }
+
+    return (
+      <div className="space-y-1">
+        <div className="text-muted-foreground">
+          {formatIndicatorSummary(indicatorLabels)}
+        </div>
+        {indicatorLabels.length > 3 ? (
+          <button
+            type="button"
+            className={cn("text-xs text-primary hover:underline", compact ? "leading-4" : "")}
+            onClick={() => setSelectedIndicatorTask({ collectionTaskLabel, indicatorLabels })}
+          >
+            查看全部
+          </button>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderTaskInstanceActions = (
     row: TaskInstanceRowView,
     isRunning: boolean,
@@ -1565,7 +1606,7 @@ export default function RequirementTasksPanel({
                     <td className="px-3 py-3 align-top text-slate-700">
                       <div className="space-y-1">
                         <div className="font-medium">{row.indicatorGroupName}</div>
-                        <div className="text-muted-foreground">{row.indicatorLabels.join("、") || "-"}</div>
+                        {renderIndicatorSummaryBlock(row.indicatorLabels, row.indicatorGroupName, true)}
                       </div>
                     </td>
                     <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
@@ -1704,7 +1745,7 @@ export default function RequirementTasksPanel({
                                 <td className="px-3 py-3 align-top text-slate-700">
                                   <div className="space-y-1">
                                     <div className="font-medium">{row.indicatorGroupName}</div>
-                                    <div className="text-muted-foreground">{row.indicatorLabels.join("、") || "-"}</div>
+                                    {renderIndicatorSummaryBlock(row.indicatorLabels, row.indicatorGroupName, true)}
                                   </div>
                                 </td>
                                 <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
@@ -2586,8 +2627,22 @@ export default function RequirementTasksPanel({
                   hint={taskPlan.collectionTasks.length > 0 ? (
                     <div className="space-y-1">
                       {taskPlan.collectionTasks.map((task, index) => (
-                        <div key={task.id}>
-                          {`采集任务${index + 1}${task.name ? `（${task.name}）` : ""}：${task.indicatorLabels.join("、") || "未关联指标"}`}
+                        <div key={task.id} className="space-y-1">
+                          <div>
+                            {`采集任务${index + 1}${task.name ? `（${task.name}）` : ""}：${formatIndicatorSummary(task.indicatorLabels)}`}
+                          </div>
+                          {task.indicatorLabels.length > 3 ? (
+                            <button
+                              type="button"
+                              className="text-xs text-primary hover:underline"
+                              onClick={() => setSelectedIndicatorTask({
+                                collectionTaskLabel: task.name || `采集任务${index + 1}`,
+                                indicatorLabels: task.indicatorLabels,
+                              })}
+                            >
+                              查看全部
+                            </button>
+                          ) : null}
                         </div>
                       ))}
                     </div>
@@ -2648,6 +2703,10 @@ export default function RequirementTasksPanel({
             ) : null}
 
             {collectionTaskGroupSections.map((section, sectionIndex) => {
+              const displayIndicatorLabels = collectionTaskIndicatorLabelsMap.get(section.id)
+                ?? collectionTaskIndicatorLabelsMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
+                ?? (taskPlan?.collectionTasks.length === 1 ? taskPlan.collectionTasks[0]?.indicatorLabels : undefined)
+                ?? [];
               const displayGroupLabel = collectionTaskIndicatorLabelMap.get(section.id)
                 ?? collectionTaskIndicatorLabelMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
                 ?? defaultCollectionTaskIndicatorLabel
@@ -2659,8 +2718,22 @@ export default function RequirementTasksPanel({
 
               return (
                 <div key={section.id} className="space-y-3">
-                  <div className="px-1">
+                  <div className="space-y-1 px-1">
                     <div className="text-base font-semibold text-foreground">{collectionTaskTitle}</div>
+                    {displayIndicatorLabels.length > 3 ? (
+                      <button
+                        type="button"
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => setSelectedIndicatorTask({
+                          collectionTaskLabel: collectionTaskGroupSections.length > 1
+                            ? `采集任务${sectionIndex + 1}`
+                            : "采集任务",
+                          indicatorLabels: displayIndicatorLabels,
+                        })}
+                      >
+                        查看全部指标
+                      </button>
+                    ) : null}
                   </div>
                   {renderTaskGroupCards(section.taskGroups)}
                 </div>
@@ -2996,6 +3069,16 @@ export default function RequirementTasksPanel({
           isLoading={isLoadingTaskStatusLog}
           errorMessage={taskStatusLogError}
           onClose={closeTaskStatusLog}
+        />
+      ) : null}
+
+      {selectedIndicatorTask ? (
+        <CollectionTaskIndicatorsPopup
+          collectionTaskLabel={selectedIndicatorTask.collectionTaskLabel}
+          requirementTitle={requirement.title}
+          wideTableName={selectedWt?.name ?? effectiveWideTable?.name ?? "-"}
+          indicatorNames={selectedIndicatorTask.indicatorLabels}
+          onClose={() => setSelectedIndicatorTask(null)}
         />
       ) : null}
     </div>
