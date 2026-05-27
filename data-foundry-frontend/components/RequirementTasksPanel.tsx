@@ -86,6 +86,8 @@ import {
 } from "@/lib/indicator-group-prompt";
 import CollectionTaskIndicatorsPopup from "@/components/CollectionTaskIndicatorsPopup";
 
+const MAX_BATCH_EXECUTION_CONCURRENCY = 5;
+
 type Props = {
   requirement: Requirement;
   initialSubTab?: "prompts" | "tasks" | "output";
@@ -195,7 +197,10 @@ export default function RequirementTasksPanel({
   const [isTrialTaskListExpanded, setIsTrialTaskListExpanded] = useState(true);
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
   const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
+  const [queuedTaskIds, setQueuedTaskIds] = useState<string[]>([]);
   const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
+  const [bulkExecutingScopeKeys, setBulkExecutingScopeKeys] = useState<string[]>([]);
+  const [selectedTaskIdsByScope, setSelectedTaskIdsByScope] = useState<Record<string, string[]>>({});
   const [activeTaskSubTab, setActiveTaskSubTab] = useState<TaskSubTabKey>(() => {
     if (requestedSubTab === "prompts" || requestedSubTab === "tasks" || requestedSubTab === "output") {
       return requestedSubTab;
@@ -728,11 +733,6 @@ export default function RequirementTasksPanel({
     ),
     [fetchTasks, selectedWt],
   );
-  const trialTaskInstanceStatusLegend = useMemo(
-    () => buildTaskStatusLegend(trialFetchTasks),
-    [trialFetchTasks],
-  );
-
   useEffect(() => {
     setIndicatorGroupMessage("");
     setIsIndicatorGroupModalOpen(false);
@@ -1350,65 +1350,130 @@ export default function RequirementTasksPanel({
     }
   };
 
-  const handleRequestTaskRerun = async (taskId: string, rowLabel: string) => {
+  const getTaskInstanceDisplayStatus = (row: Pick<TaskInstanceRowView, "fetchTaskId" | "status">): string => {
+    if (queuedTaskIds.includes(row.fetchTaskId)) {
+      return "queued";
+    }
+    if (runningTaskIds.includes(row.fetchTaskId)) {
+      return "running";
+    }
+    return row.status;
+  };
+
+  const canSelectTaskInstance = (row: Pick<TaskInstanceRowView, "fetchTaskId" | "status">): boolean => {
+    const displayStatus = getTaskInstanceDisplayStatus(row);
+    return displayStatus !== "running" && displayStatus !== "queued";
+  };
+
+  const getScopedSelectedTaskIds = (scopeKey: string, rows: TaskInstanceRowView[]): string[] => {
+    const rowIdSet = new Set(rows.map((row) => row.fetchTaskId));
+    return (selectedTaskIdsByScope[scopeKey] ?? []).filter((taskId) => rowIdSet.has(taskId));
+  };
+
+  const handleToggleTaskSelection = (scopeKey: string, taskId: string) => {
+    setSelectedTaskIdsByScope((prev) => {
+      const current = prev[scopeKey] ?? [];
+      const next = current.includes(taskId)
+        ? current.filter((id) => id !== taskId)
+        : [...current, taskId];
+      return { ...prev, [scopeKey]: next };
+    });
+  };
+
+  const handleToggleAllTaskSelection = (scopeKey: string, rows: TaskInstanceRowView[]) => {
+    const selectableTaskIds = rows.filter(canSelectTaskInstance).map((row) => row.fetchTaskId);
+    setSelectedTaskIdsByScope((prev) => {
+      const current = (prev[scopeKey] ?? []).filter((taskId) => selectableTaskIds.includes(taskId));
+      const next = current.length === selectableTaskIds.length ? [] : selectableTaskIds;
+      return { ...prev, [scopeKey]: next };
+    });
+  };
+
+  const clearScopedTaskSelection = (scopeKey: string) => {
+    setSelectedTaskIdsByScope((prev) => ({ ...prev, [scopeKey]: [] }));
+  };
+
+  const dispatchSingleTaskExecution = async (
+    taskId: string,
+    rowLabel: string,
+    options?: {
+      refreshAfterExecution?: boolean;
+      silent?: boolean;
+      optimistic?: boolean;
+      preserveRunningState?: boolean;
+    },
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const {
+      refreshAfterExecution: shouldRefresh = true,
+      silent = false,
+      optimistic = true,
+      preserveRunningState = false,
+    } = options ?? {};
     const now = new Date().toISOString();
     const targetTask = fetchTasks.find((task) => task.id === taskId);
     if (!targetTask) {
-      return;
+      return { ok: false, error: "Task not found" };
     }
+    let keepRunningState = false;
 
     if (isLocalTaskId(taskId)) {
       applyLocalTaskExecution(taskId, rowLabel);
-      return;
+      return { ok: true };
     }
 
-    const nextAttempt = targetTask.executionRecords.length + 1;
-    const optimisticFetchTasks: FetchTask[] = fetchTasks.map((task) => (
-      task.id === taskId
-        ? {
-            ...task,
-            status: "running" as const,
-            updatedAt: now,
-            executionRecords: [
-              ...task.executionRecords,
-              {
-                id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
-                fetchTaskId: task.id,
-                attempt: nextAttempt,
-                status: "running" as const,
-                triggeredBy: "manual_retry" as const,
-                startedAt: now,
-              },
-            ],
-          }
-        : task
-    ));
-    onFetchTasksChange(optimisticFetchTasks);
-    const optimisticTaskGroups: TaskGroup[] = taskGroups.map((taskGroup) => (
-      taskGroup.id === targetTask.taskGroupId
-        ? {
-            ...taskGroup,
-            status: "running" as const,
-            pendingTasks: Math.max(taskGroup.pendingTasks - 1, 0),
-            runningTasks: taskGroup.runningTasks + 1,
-            completedTasks: targetTask.status === "completed"
-              ? Math.max(taskGroup.completedTasks - 1, 0)
-              : taskGroup.completedTasks,
-            failedTasks: targetTask.status === "failed"
-              ? Math.max(taskGroup.failedTasks - 1, 0)
-              : taskGroup.failedTasks,
-            updatedAt: now,
-          }
-        : taskGroup
-    ));
-    onTaskGroupsChange(optimisticTaskGroups);
+    let optimisticFetchTasks: FetchTask[] | null = null;
+    if (optimistic) {
+      const nextAttempt = targetTask.executionRecords.length + 1;
+      optimisticFetchTasks = fetchTasks.map((task) => (
+        task.id === taskId
+          ? {
+              ...task,
+              status: "running" as const,
+              updatedAt: now,
+              executionRecords: [
+                ...task.executionRecords,
+                {
+                  id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
+                  fetchTaskId: task.id,
+                  attempt: nextAttempt,
+                  status: "running" as const,
+                  triggeredBy: "manual_retry" as const,
+                  startedAt: now,
+                },
+              ],
+            }
+          : task
+      ));
+      onFetchTasksChange(optimisticFetchTasks);
+      const optimisticTaskGroups: TaskGroup[] = taskGroups.map((taskGroup) => (
+        taskGroup.id === targetTask.taskGroupId
+          ? {
+              ...taskGroup,
+              status: "running" as const,
+              pendingTasks: Math.max(taskGroup.pendingTasks - 1, 0),
+              runningTasks: taskGroup.runningTasks + 1,
+              completedTasks: targetTask.status === "completed"
+                ? Math.max(taskGroup.completedTasks - 1, 0)
+                : taskGroup.completedTasks,
+              failedTasks: targetTask.status === "failed"
+                ? Math.max(taskGroup.failedTasks - 1, 0)
+                : taskGroup.failedTasks,
+              updatedAt: now,
+            }
+          : taskGroup
+      ));
+      onTaskGroupsChange(optimisticTaskGroups);
+    }
+
     setRunningTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
-    setTaskActionMessage(`已发起任务 ${taskId}（${rowLabel}）的单任务执行，正在同步最新结果。`);
+    if (!silent) {
+      setTaskActionMessage(`已发起任务 ${taskId}（${rowLabel}）的单任务执行，正在同步最新结果。`);
+    }
     try {
       const dispatchResult = targetTask.status === "failed"
         ? await retryTask(taskId)
         : await executeTask(taskId);
-      if (dispatchResult.collectionTaskId || dispatchResult.status) {
+      if (optimisticFetchTasks && (dispatchResult.collectionTaskId || dispatchResult.status)) {
         onFetchTasksChange(
           optimisticFetchTasks.map((task) => (
             task.id === taskId
@@ -1422,12 +1487,89 @@ export default function RequirementTasksPanel({
           )),
         );
       }
-      await refreshAfterExecution();
+      if (shouldRefresh) {
+        await refreshAfterExecution();
+      } else if (preserveRunningState) {
+        keepRunningState = true;
+      }
+      return { ok: true };
     } catch (error) {
-      setTaskActionMessage(`执行失败：${formatTaskActionError(error)}`);
+      const errorMessage = formatTaskActionError(error);
+      if (!silent) {
+        setTaskActionMessage(`执行失败：${errorMessage}`);
+      }
+      return { ok: false, error: errorMessage };
     } finally {
-      setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
+      if (!keepRunningState) {
+        setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
+      }
     }
+  };
+
+  const handleBatchExecuteTasks = async (scopeKey: string, rows: TaskInstanceRowView[]) => {
+    const selectedTaskIds = getScopedSelectedTaskIds(scopeKey, rows)
+      .filter((taskId) => {
+        const row = rows.find((item) => item.fetchTaskId === taskId);
+        return row ? canSelectTaskInstance(row) : false;
+      });
+
+    if (selectedTaskIds.length === 0) {
+      setTaskActionMessage("请先选择至少一个可执行的采集实例。");
+      return;
+    }
+
+    const rowMap = new Map(rows.map((row) => [row.fetchTaskId, row] as const));
+    setBulkExecutingScopeKeys((prev) => (prev.includes(scopeKey) ? prev : [...prev, scopeKey]));
+    setQueuedTaskIds((prev) => Array.from(new Set([...prev, ...selectedTaskIds])));
+    setTaskActionMessage(`已选择 ${selectedTaskIds.length} 个采集实例，正在分批发起执行（最多 ${MAX_BATCH_EXECUTION_CONCURRENCY} 个并发）。`);
+
+    let successCount = 0;
+    let failedCount = 0;
+
+    try {
+      for (let index = 0; index < selectedTaskIds.length; index += MAX_BATCH_EXECUTION_CONCURRENCY) {
+        const batchTaskIds = selectedTaskIds.slice(index, index + MAX_BATCH_EXECUTION_CONCURRENCY);
+        const results = await Promise.all(batchTaskIds.map(async (taskId) => {
+          const row = rowMap.get(taskId);
+          if (!row) {
+            return { ok: false as const };
+          }
+          setQueuedTaskIds((prev) => prev.filter((id) => id !== taskId));
+          return dispatchSingleTaskExecution(taskId, row.rowLabel, {
+            refreshAfterExecution: false,
+            silent: true,
+            optimistic: false,
+            preserveRunningState: true,
+          });
+        }));
+
+        for (const result of results) {
+          if (result.ok) {
+            successCount += 1;
+          } else {
+            failedCount += 1;
+          }
+        }
+      }
+
+      await refreshAfterExecution();
+      setTaskActionMessage(
+        failedCount > 0
+          ? `已发起 ${successCount} 个采集实例，${failedCount} 个发起失败，其余任务已同步最新状态。`
+          : `已发起 ${successCount} 个采集实例，正在同步最新状态。`,
+      );
+    } catch (error) {
+      setTaskActionMessage(`批量执行失败：${formatTaskActionError(error)}`);
+    } finally {
+      setQueuedTaskIds((prev) => prev.filter((id) => !selectedTaskIds.includes(id)));
+      setRunningTaskIds((prev) => prev.filter((id) => !selectedTaskIds.includes(id)));
+      setBulkExecutingScopeKeys((prev) => prev.filter((key) => key !== scopeKey));
+      clearScopedTaskSelection(scopeKey);
+    }
+  };
+
+  const handleRequestTaskRerun = async (taskId: string, rowLabel: string) => {
+    await dispatchSingleTaskExecution(taskId, rowLabel);
   };
 
   const handleCancelTask = async (taskId: string, rowLabel: string) => {
@@ -1630,6 +1772,207 @@ export default function RequirementTasksPanel({
     );
   };
 
+  const renderSelectableTaskInstanceActions = (row: TaskInstanceRowView) => {
+    const displayStatus = getTaskInstanceDisplayStatus(row);
+    const isRunning = displayStatus === "running";
+    const isQueued = displayStatus === "queued";
+    const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
+
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
+            disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning || isQueued}
+            className={cn(
+              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+              "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
+            )}
+          >
+            {isQueued ? "排队中..." : isRunning ? "采集中..." : actionLabel}
+          </button>
+          {isRunning && row.collectionTaskId ? (
+            <button
+              type="button"
+              onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+              disabled={cancellingTaskIds.includes(row.fetchTaskId)}
+              className={cn(
+                "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+                "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+              )}
+            >
+              {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
+            </button>
+          ) : null}
+        </div>
+        {isRunning && row.collectionTaskId ? (
+          <button
+            type="button"
+            onClick={() => void handleOpenTaskStatusLog(row.collectionTaskId!, row.rowLabel)}
+            className={cn(
+              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
+              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+            )}
+          >
+            查看日志
+          </button>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderSelectableTaskInstanceTable = (
+    rows: TaskInstanceRowView[],
+    scopeKey: string,
+    emptyMessage = "当前还没有可展示的采集实例。",
+  ) => {
+    if (rows.length === 0) {
+      return <div className="text-xs text-muted-foreground">{emptyMessage}</div>;
+    }
+
+    const selectedTaskIds = getScopedSelectedTaskIds(scopeKey, rows);
+    const selectableRows = rows.filter(canSelectTaskInstance);
+    const allSelected = selectableRows.length > 0 && selectedTaskIds.length === selectableRows.length;
+    const isBulkExecuting = bulkExecutingScopeKeys.includes(scopeKey);
+    const legendItems = buildTaskStatusLegend(
+      rows.map((row) => ({ status: getTaskInstanceDisplayStatus(row) })),
+    );
+
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-muted-foreground/30 bg-muted/10 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                disabled={selectableRows.length === 0 || isBulkExecuting}
+                onChange={() => handleToggleAllTaskSelection(scopeKey, rows)}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+              />
+              <span>全选当前时间范围可执行实例</span>
+            </label>
+            <span>{`已选 ${selectedTaskIds.length} 项`}</span>
+            <span>{`可批量执行 ${selectableRows.length} 项`}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleBatchExecuteTasks(scopeKey, rows)}
+              disabled={selectedTaskIds.length === 0 || isBulkExecuting}
+              className={cn(
+                "inline-flex items-center rounded-md px-3 py-1.5 text-xs font-medium",
+                selectedTaskIds.length === 0 || isBulkExecuting
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-primary text-primary-foreground hover:opacity-90",
+              )}
+            >
+              {isBulkExecuting ? "批量采集中..." : "批量采集"}
+            </button>
+            <button
+              type="button"
+              onClick={() => clearScopedTaskSelection(scopeKey)}
+              disabled={selectedTaskIds.length === 0}
+              className={cn(
+                "inline-flex items-center rounded-md border px-3 py-1.5 text-xs",
+                selectedTaskIds.length === 0
+                  ? "cursor-not-allowed border-muted text-muted-foreground opacity-60"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+              )}
+            >
+              清空选择
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+          {legendItems.map((item) => (
+            <span
+              key={item.status}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
+                item.badgeClassName,
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
+              {item.label} {item.count}
+            </span>
+          ))}
+        </div>
+        <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+          <table className="w-full text-xs leading-5">
+            <thead>
+              <tr>
+                <th className="w-10 border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">
+                  <input
+                    type="checkbox"
+                    aria-label="全选当前时间范围采集实例"
+                    checked={allSelected}
+                    disabled={selectableRows.length === 0 || isBulkExecuting}
+                    onChange={() => handleToggleAllTaskSelection(scopeKey, rows)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                </th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集参数</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">时间列</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集指标组</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集实例 ID</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">实例状态</th>
+                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {rows.map((row) => {
+                const displayStatus = getTaskInstanceDisplayStatus(row);
+                const isSelected = selectedTaskIds.includes(row.fetchTaskId);
+                const isSelectable = canSelectTaskInstance(row);
+                return (
+                  <tr key={row.fetchTaskId}>
+                    <td className="px-3 py-3 align-top">
+                      <input
+                        type="checkbox"
+                        aria-label={`选择采集实例 ${row.rowLabel}`}
+                        checked={isSelected}
+                        disabled={!isSelectable || isBulkExecuting}
+                        onChange={() => handleToggleTaskSelection(scopeKey, row.fetchTaskId)}
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-700">
+                      <div className="space-y-1">
+                        {row.parameterLines.map((line) => (
+                          <div key={`${row.fetchTaskId}-${line}`} className="break-all">
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-top text-slate-700">{row.businessDateLabel}</td>
+                    <td className="px-3 py-3 align-top text-slate-700">
+                      <div className="space-y-1">
+                        <div className="font-medium">{row.indicatorGroupName}</div>
+                        {renderIndicatorSummaryBlock(row.indicatorLabels, row.indicatorGroupName, true)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
+                      {row.collectionTaskId ?? "-"}
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <StatusBadge status={displayStatus} />
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      {renderSelectableTaskInstanceActions(row)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const renderTaskGroupCards = (taskGroupViews: HistoricalTaskGroupView[]) => (
     <div className="rounded-xl border bg-background divide-y overflow-hidden">
       {taskGroupViews.map((tg) => {
@@ -1712,7 +2055,12 @@ export default function RequirementTasksPanel({
 
             {isExpanded ? (
               <div className="border-t bg-background px-4 py-3">
-                {expandedTaskInstanceRows.length === 0 ? (
+                {renderSelectableTaskInstanceTable(
+                  expandedTaskInstanceRows,
+                  `task-group:${tg.id}`,
+                  "褰撳墠浠诲姟缁勮繕娌℃湁鍙睍绀虹殑閲囬泦瀹炰緥銆?",
+                )}
+                {false ? (
                   <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集实例。</div>
                 ) : (
                   <div className="space-y-3">
@@ -2700,7 +3048,13 @@ export default function RequirementTasksPanel({
                     {isTrialTaskListExpanded ? "收起" : "展开"}
                   </button>
                 </div>
-                {isTrialTaskListExpanded ? renderTaskInstanceTable(trialTaskInstanceRows, trialTaskInstanceStatusLegend) : null}
+                {isTrialTaskListExpanded
+                  ? renderSelectableTaskInstanceTable(
+                    trialTaskInstanceRows,
+                    `trial:${selectedWt.id}`,
+                    "褰撳墠杩樻病鏈夊彲灞曠ず鐨勮瘯杩愯瀹炰緥銆?",
+                  )
+                  : null}
               </div>
             ) : null}
 
@@ -3425,7 +3779,7 @@ function buildTaskStatusLegendFromCountMap(countMap: Map<string, number>): Array
   badgeClassName: string;
   dotClassName: string;
 }> {
-  const orderedStatuses = ["completed", "running", "failed", "cancelled", "pending", "invalidated"];
+  const orderedStatuses = ["completed", "running", "queued", "failed", "cancelled", "pending", "invalidated"];
   return orderedStatuses
     .filter((status) => (countMap.get(status) ?? 0) > 0)
     .map((status) => ({
@@ -3646,13 +4000,14 @@ type TaskGroupRunSectionView = {
 
 type TaskInstanceRowView = {
   fetchTaskId: string;
+  taskGroupId: string;
   rowLabel: string;
   parameterLines: string[];
   businessDateLabel: string;
   indicatorGroupName: string;
   indicatorLabels: string[];
   collectionTaskId?: string;
-  status: FetchTask["status"];
+  status: string;
 };
 
 type PlanVersionView = {
@@ -4118,6 +4473,7 @@ function buildTaskInstanceRowViews(params: {
 
     return {
       fetchTaskId: fetchTask.id,
+      taskGroupId: fetchTask.taskGroupId,
       rowLabel: buildTaskInstanceRowLabelFromTask(fetchTask),
       parameterLines: formatTaskInstanceParameterLinesFromTask(parameterColumns, fetchTask),
       businessDateLabel: overrideBusinessDateLabel || (
