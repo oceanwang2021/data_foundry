@@ -11,10 +11,13 @@ const FREQUENCY_LABELS: Record<string, string> = {
   yearly: "年频",
 };
 
+export type CollectionTaskExecutionMode = "formal" | "trial";
+
 export type CollectionTaskListRowView = {
   key: string;
   collectionTaskKey: string;
   collectionTaskLabel: string;
+  executionMode: CollectionTaskExecutionMode;
   requirementId: string;
   requirementTitle: string;
   projectId: string;
@@ -56,6 +59,10 @@ export function normalizeCollectionTaskLabel(label?: string | null): string {
 
 export function resolveCollectionTaskLabel(taskGroup: TaskGroup): string {
   return normalizeCollectionTaskLabel(taskGroup.partitionLabel ?? taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_LABEL);
+}
+
+export function resolveCollectionTaskExecutionMode(taskGroup: TaskGroup): CollectionTaskExecutionMode {
+  return taskGroup.triggeredBy === "trial" ? "trial" : "formal";
 }
 
 export function formatIndicatorSummary(indicatorNames: string[], previewCount = 3): string {
@@ -116,6 +123,7 @@ export function buildCollectionTaskListRows(params: {
     key: string;
     collectionTaskKey: string;
     collectionTaskLabel: string;
+    executionMode: CollectionTaskExecutionMode;
     requirement: Requirement;
     project?: Project;
     wideTable: WideTable;
@@ -134,11 +142,13 @@ export function buildCollectionTaskListRows(params: {
     }
 
     const collectionTaskKey = resolveCollectionTaskKey(taskGroup);
-    const rowKey = `${requirement.id}:${wideTable.id}:${collectionTaskKey}`;
+    const executionMode = resolveCollectionTaskExecutionMode(taskGroup);
+    const rowKey = `${requirement.id}:${wideTable.id}:${collectionTaskKey}:${executionMode}`;
     const row = groupedRows.get(rowKey) ?? {
       key: rowKey,
       collectionTaskKey,
       collectionTaskLabel: resolveCollectionTaskLabel(taskGroup),
+      executionMode,
       requirement,
       project: projectById.get(requirement.projectId),
       wideTable,
@@ -167,6 +177,7 @@ function buildRowView(
     key: string;
     collectionTaskKey: string;
     collectionTaskLabel: string;
+    executionMode: CollectionTaskExecutionMode;
     requirement: Requirement;
     project?: Project;
     wideTable: WideTable;
@@ -201,6 +212,7 @@ function buildRowView(
     key: row.key,
     collectionTaskKey: row.collectionTaskKey,
     collectionTaskLabel: row.collectionTaskLabel,
+    executionMode: row.executionMode,
     requirementId: row.requirement.id,
     requirementTitle: row.requirement.title ?? row.requirement.id,
     projectId: row.requirement.projectId,
