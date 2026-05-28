@@ -9,6 +9,7 @@ import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
 import com.huatai.datafoundry.backend.task.domain.model.WideTableRowValuePatch;
 import com.huatai.datafoundry.backend.task.domain.repository.CollectionResultRepository;
+import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.WideTableReadRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.WideTableRowWriteRepository;
 import com.huatai.datafoundry.contract.agent.AgentExecutionResponse;
@@ -39,18 +40,47 @@ public class CollectionResultAppService {
   private static final TypeReference<Map<String, Object>> MAP_REF =
       new TypeReference<Map<String, Object>>() {};
   private static final Pattern HTML_TAG = Pattern.compile("<[^>]+>");
+  private static final String COL_METRIC_NAME = "\u6307\u6807\u540d\u79f0 (Metric Name)";
+  private static final String COL_VALUE = "\u6307\u6807\u503c (Value)";
+  private static final String COL_UNIT = "\u5355\u4f4d (Unit)";
+  private static final String COL_DATA_PERIOD = "\u6570\u636e\u65f6\u95f4 (Data Period)";
+  private static final String COL_DATA_SOURCE = "\u6570\u636e\u6765\u6e90 (Data Source)";
+  private static final String COL_NOTES = "\u903b\u8f91\u8bf4\u660e\u53ca\u8865\u5145 (Notes)";
+  private static final String COL_MIN_VALUE = "Min_Value";
+  private static final String COL_MAX_VALUE = "Max_Value";
+  private static final String COL_SOURCE_URL = "Source_URL";
+  private static final String COL_SOURCE_EVIDENCE = "Source_Evidence";
+  private static final String COL_ROW_ID = "row_id";
+  private static final String COL_FETCH_TASK_ID = "fetch_task_id";
+  private static final String COL_COLLECTION_RESULT_ID = "collection_result_id";
+  private static final String COL_BUSINESS_DATE = "business_date";
+  private static final String[] FIXED_METRIC_COLUMNS = new String[] {
+      COL_METRIC_NAME,
+      COL_VALUE,
+      COL_UNIT,
+      COL_DATA_PERIOD,
+      COL_DATA_SOURCE,
+      COL_NOTES,
+      COL_MIN_VALUE,
+      COL_MAX_VALUE,
+      COL_SOURCE_URL,
+      COL_SOURCE_EVIDENCE
+  };
 
   private final CollectionResultRepository collectionResultRepository;
+  private final FetchTaskRepository fetchTaskRepository;
   private final WideTableRowWriteRepository wideTableRowWriteRepository;
   private final WideTableReadRepository wideTableReadRepository;
   private final ObjectMapper objectMapper;
 
   public CollectionResultAppService(
       CollectionResultRepository collectionResultRepository,
+      FetchTaskRepository fetchTaskRepository,
       WideTableRowWriteRepository wideTableRowWriteRepository,
       WideTableReadRepository wideTableReadRepository,
       ObjectMapper objectMapper) {
     this.collectionResultRepository = collectionResultRepository;
+    this.fetchTaskRepository = fetchTaskRepository;
     this.wideTableRowWriteRepository = wideTableRowWriteRepository;
     this.wideTableReadRepository = wideTableReadRepository;
     this.objectMapper = objectMapper;
@@ -181,7 +211,11 @@ public class CollectionResultAppService {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Collection result not found");
     }
 
-    List<Map<String, String>> rows = parseFirstMarkdownTable(result.getFinalReport());
+    FetchTask task = fetchTaskRepository != null ? fetchTaskRepository.getById(normalizedTaskId) : null;
+    List<Map<String, String>> rows = normalizeParsedRowsForTask(
+        parseFirstMarkdownTable(result.getFinalReport()),
+        task,
+        result);
     String normalizedRowsJson = rows == null || rows.isEmpty() ? null : writeJson(rows);
     collectionResultRepository.updateNormalizedRowsJson(
         normalizedTaskId, normalizedResultId, normalizedRowsJson);
@@ -194,7 +228,7 @@ public class CollectionResultAppService {
     if (wideTableId == null || wideTableId.trim().isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Wide table id is required");
     }
-    return normalizeResultsWithFirstHeader(collectionResultRepository.listResultsByWideTable(wideTableId.trim()));
+    return normalizeResults(collectionResultRepository.listResultsByWideTable(wideTableId.trim()));
   }
 
   @Transactional
@@ -202,30 +236,149 @@ public class CollectionResultAppService {
     if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Task group id is required");
     }
-    return normalizeResultsWithFirstHeader(collectionResultRepository.listResultsByTaskGroup(taskGroupId.trim()));
+    return normalizeResults(collectionResultRepository.listResultsByTaskGroup(taskGroupId.trim()));
   }
 
-  private List<CollectionResult> normalizeResultsWithFirstHeader(List<CollectionResult> results) {
-    List<String> standardHeaders = Collections.emptyList();
-    for (CollectionResult result : results) {
-      standardHeaders = parseFirstMarkdownTableHeaders(result != null ? result.getFinalReport() : null);
-      if (!standardHeaders.isEmpty()) {
-        break;
-      }
-    }
+  private List<CollectionResult> normalizeResults(List<CollectionResult> results) {
     for (CollectionResult result : results) {
       if (result == null || result.getId() == null || result.getFetchTaskId() == null) {
         continue;
       }
-      List<Map<String, String>> rows = standardHeaders.isEmpty()
-          ? Collections.<Map<String, String>>emptyList()
-          : parseFirstMarkdownTable(result.getFinalReport(), standardHeaders);
+      FetchTask task = fetchTaskRepository != null ? fetchTaskRepository.getById(result.getFetchTaskId()) : null;
+      List<Map<String, String>> rows = parseFirstMarkdownTable(result.getFinalReport());
+      rows = normalizeParsedRowsForTask(rows, task, result);
       String normalizedRowsJson = rows == null || rows.isEmpty() ? null : writeJson(rows);
       collectionResultRepository.updateNormalizedRowsJson(
           result.getFetchTaskId(), result.getId(), normalizedRowsJson);
       result.setNormalizedRowsJson(normalizedRowsJson);
     }
     return results;
+  }
+
+  private List<Map<String, String>> normalizeParsedRowsForTask(
+      List<Map<String, String>> parsedRows,
+      FetchTask task,
+      CollectionResult result) {
+    if (parsedRows == null || parsedRows.isEmpty()) {
+      return Collections.emptyList();
+    }
+    Map<String, String> taskDimensions =
+        task != null ? readStringMap(task.getDimensionValuesJson()) : new LinkedHashMap<String, String>();
+    String taskBusinessDate = task != null ? cleanText(task.getBusinessDate()) : null;
+    List<Map<String, String>> out = new ArrayList<Map<String, String>>(parsedRows.size());
+    for (Map<String, String> parsedRow : parsedRows) {
+      if (parsedRow == null) {
+        continue;
+      }
+      Map<String, String> normalized = new LinkedHashMap<String, String>();
+      for (Map.Entry<String, String> entry : taskDimensions.entrySet()) {
+        if (entry.getKey() != null && !entry.getKey().trim().isEmpty()) {
+          normalized.put(entry.getKey(), entry.getValue() == null ? "" : entry.getValue());
+        }
+      }
+      if (taskBusinessDate != null && !taskBusinessDate.trim().isEmpty() && !normalized.containsKey(COL_BUSINESS_DATE)) {
+        normalized.put(COL_BUSINESS_DATE, taskBusinessDate);
+      }
+      for (String column : FIXED_METRIC_COLUMNS) {
+        String value = valueByCanonicalColumn(parsedRow, column);
+        normalized.put(column, value == null ? "" : value);
+      }
+      normalized.put(COL_ROW_ID, stringifyInteger(task != null ? task.getRowId() : result != null ? result.getRowId() : null));
+      normalized.put(COL_FETCH_TASK_ID, firstNonBlank(result != null ? result.getFetchTaskId() : null, task != null ? task.getId() : null));
+      if (normalized.get(COL_FETCH_TASK_ID) == null) {
+        normalized.put(COL_FETCH_TASK_ID, "");
+      }
+      normalized.put(COL_COLLECTION_RESULT_ID, result != null && result.getId() != null ? result.getId() : "");
+      out.add(normalized);
+    }
+    return out;
+  }
+
+  private String valueByCanonicalColumn(Map<String, String> row, String canonicalColumn) {
+    if (row == null || row.isEmpty()) {
+      return "";
+    }
+    for (Map.Entry<String, String> entry : row.entrySet()) {
+      if (matchesCanonicalColumn(canonicalColumn, entry.getKey())) {
+        return entry.getValue() == null ? "" : entry.getValue();
+      }
+    }
+    return "";
+  }
+
+  private boolean matchesCanonicalColumn(String canonicalColumn, String key) {
+    String raw = key == null ? "" : key.trim();
+    String lower = raw.toLowerCase(Locale.ROOT);
+    String compact = compactHeader(raw);
+    if (COL_METRIC_NAME.equals(canonicalColumn)) {
+      return compact.contains("metricname")
+          || compact.equals("metric")
+          || raw.contains("\u6307\u6807\u540d\u79f0")
+          || raw.contains("\u6307\u6807\u540d");
+    }
+    if (COL_VALUE.equals(canonicalColumn)) {
+      return lower.equals("value")
+          || compact.equals("value")
+          || compact.contains("metricvalue")
+          || raw.contains("\u6307\u6807\u503c")
+          || raw.contains("\u53d6\u503c");
+    }
+    if (COL_UNIT.equals(canonicalColumn)) {
+      return lower.equals("unit")
+          || compact.equals("unit")
+          || raw.contains("\u5355\u4f4d");
+    }
+    if (COL_DATA_PERIOD.equals(canonicalColumn)) {
+      return compact.contains("dataperiod")
+          || compact.contains("publishedat")
+          || raw.contains("\u6570\u636e\u65f6\u95f4")
+          || raw.contains("\u6570\u636e\u53d1\u5e03\u65f6\u95f4");
+    }
+    if (COL_DATA_SOURCE.equals(canonicalColumn)) {
+      return compact.contains("datasource")
+          || raw.contains("\u6570\u636e\u6765\u6e90")
+          || raw.contains("\u6765\u6e90\u7ad9\u70b9");
+    }
+    if (COL_NOTES.equals(canonicalColumn)) {
+      return compact.contains("notes")
+          || compact.contains("reasoning")
+          || compact.contains("logic")
+          || raw.contains("\u903b\u8f91\u8bf4\u660e")
+          || raw.contains("\u6307\u6807\u903b\u8f91")
+          || raw.contains("\u903b\u8f91\u8865\u5145");
+    }
+    if (COL_MIN_VALUE.equals(canonicalColumn)) {
+      return compact.equals("minvalue") || raw.contains("\u6700\u5c0f\u503c");
+    }
+    if (COL_MAX_VALUE.equals(canonicalColumn)) {
+      return compact.equals("maxvalue") || raw.contains("\u6700\u5927\u503c");
+    }
+    if (COL_SOURCE_URL.equals(canonicalColumn)) {
+      return compact.contains("sourceurl") || raw.contains("\u6765\u6e90url");
+    }
+    if (COL_SOURCE_EVIDENCE.equals(canonicalColumn)) {
+      return compact.contains("sourceevidence")
+          || compact.contains("evidence")
+          || raw.contains("\u539f\u6587\u6458\u5f55")
+          || raw.contains("\u6eaf\u6e90\u6458\u8981")
+          || raw.contains("\u8bc1\u636e");
+    }
+    return false;
+  }
+
+  private String compactHeader(String value) {
+    if (value == null) {
+      return "";
+    }
+    return value
+        .toLowerCase(Locale.ROOT)
+        .replace(" ", "")
+        .replace("_", "")
+        .replace("-", "")
+        .replace("(", "")
+        .replace(")", "")
+        .replace("\uff08", "")
+        .replace("\uff09", "");
   }
 
   List<Map<String, String>> parseFirstMarkdownTable(String markdown) {
@@ -805,6 +958,10 @@ public class CollectionResultAppService {
 
   private String asString(Object value) {
     return value == null ? null : String.valueOf(value);
+  }
+
+  private String stringifyInteger(Integer value) {
+    return value == null ? "" : String.valueOf(value.intValue());
   }
 
   private Object firstNonNull(Object... values) {

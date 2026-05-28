@@ -1,19 +1,13 @@
--- Backend DB schema (MVP runtime schema for local/dev)
+-- Backend DB schema (complete runtime schema for local/dev)
 --
 -- Goal:
 -- - Keep it DROP-free (safe to source into an empty DB).
--- - Cover the current Java backend read/write paths:
---   projects / requirements / wide_tables / task_groups / fetch_tasks.
+-- - Cover the current Java backend read/write paths and all consolidated DDL
+--   from the former backend-service migration scripts.
 --
 -- Note:
--- - This script is aligned with Flyway migrations:
---   backend-service `V001__baseline.sql` + `V002__add_indexes.sql`.
--- - For environment alignment / incremental upgrades, prefer Flyway:
---   see `docs/db-migration-sop.md`.
---
--- Note:
--- - `CREATE TABLE IF NOT EXISTS` won't upgrade existing tables. If you have an old schema already,
---   apply the missing columns/tables via a migration tool (recommended) or manual ALTER scripts.
+-- - `CREATE TABLE IF NOT EXISTS` won't upgrade existing tables. If you have an
+--   old schema already, use db/mysql/backend/005_incremental_upgrade.sql.
 
 CREATE TABLE IF NOT EXISTS projects (
   id            VARCHAR(64)  NOT NULL PRIMARY KEY,
@@ -50,7 +44,12 @@ CREATE TABLE IF NOT EXISTS requirements (
   updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_requirements_project_id (project_id),
   INDEX idx_requirements_project_created_at (project_id, created_at),
-  INDEX idx_requirements_created_at (created_at)
+  INDEX idx_requirements_project_updated_at (project_id, updated_at),
+  INDEX idx_requirements_created_at (created_at),
+  INDEX idx_requirements_updated_at (updated_at),
+  INDEX idx_requirements_status (status),
+  INDEX idx_requirements_owner (owner),
+  INDEX idx_requirements_assignee (assignee)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS wide_tables (
@@ -74,7 +73,8 @@ CREATE TABLE IF NOT EXISTS wide_tables (
   updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_wide_tables_requirement_id (requirement_id),
   INDEX idx_wide_tables_requirement_sort (requirement_id, sort_order),
-  INDEX idx_wide_tables_sort_order (sort_order)
+  INDEX idx_wide_tables_sort_order (sort_order),
+  INDEX idx_wide_tables_table_name (table_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS wide_table_scope_imports (
