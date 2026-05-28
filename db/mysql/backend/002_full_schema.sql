@@ -9,6 +9,12 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS acceptance_tickets;
+DROP TABLE IF EXISTS target_publish_row_logs;
+DROP TABLE IF EXISTS target_publish_jobs;
+DROP TABLE IF EXISTS metric_field_mappings;
+DROP TABLE IF EXISTS collection_result_rows;
+DROP TABLE IF EXISTS collection_results;
 DROP TABLE IF EXISTS wide_table_row_snapshots;
 DROP TABLE IF EXISTS wide_table_rows;
 DROP TABLE IF EXISTS wide_table_scope_imports;
@@ -65,9 +71,15 @@ CREATE TABLE requirements (
   created_at                DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at                DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_requirements_project_id (project_id),
+  INDEX idx_requirements_project_created_at (project_id, created_at),
+  INDEX idx_requirements_project_updated_at (project_id, updated_at),
   INDEX idx_requirements_parent_id (parent_requirement_id),
   INDEX idx_requirements_sort_order (sort_order),
-  INDEX idx_requirements_created_at (created_at)
+  INDEX idx_requirements_created_at (created_at),
+  INDEX idx_requirements_updated_at (updated_at),
+  INDEX idx_requirements_status (status),
+  INDEX idx_requirements_owner (owner),
+  INDEX idx_requirements_assignee (assignee)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE wide_tables (
@@ -89,6 +101,8 @@ CREATE TABLE wide_tables (
   created_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_wide_tables_requirement_id (requirement_id),
+  INDEX idx_wide_tables_requirement_sort (requirement_id, sort_order),
+  INDEX idx_wide_tables_table_name (table_name),
   INDEX idx_wide_tables_sort_order (sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -213,6 +227,8 @@ CREATE TABLE task_groups (
   created_at          DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_tg_requirement_id (requirement_id),
+  INDEX idx_tg_requirement_sort (requirement_id, sort_order),
+  INDEX idx_tg_requirement_wide_table_sort (requirement_id, wide_table_id, sort_order),
   INDEX idx_tg_wide_table_id (wide_table_id),
   INDEX idx_tg_batch_id (batch_id),
   INDEX idx_tg_business_date (business_date),
@@ -249,8 +265,10 @@ CREATE TABLE fetch_tasks (
   created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_ft_requirement_id (requirement_id),
+  INDEX idx_ft_requirement_sort (requirement_id, sort_order),
   INDEX idx_ft_wide_table_id (wide_table_id),
   INDEX idx_ft_task_group_id (task_group_id),
+  INDEX idx_ft_task_group_sort (task_group_id, sort_order),
   INDEX idx_ft_batch_id (batch_id),
   INDEX idx_ft_status (status),
   INDEX idx_ft_sort_order (sort_order)
@@ -380,6 +398,34 @@ CREATE TABLE target_publish_row_logs (
   INDEX idx_target_publish_row_logs_job (job_id),
   INDEX idx_target_publish_row_logs_wide_table_row (wide_table_id, row_id),
   INDEX idx_target_publish_row_logs_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE acceptance_tickets (
+  id                 VARCHAR(128) NOT NULL PRIMARY KEY,
+  requirement_id     VARCHAR(64)  NOT NULL,
+  wide_table_id      VARCHAR(64)  NULL,
+  task_group_id      VARCHAR(64)  NULL,
+  scope_type         VARCHAR(32)  NOT NULL DEFAULT 'task_group',
+  scope_key          VARCHAR(128) NOT NULL,
+  dataset            VARCHAR(255) NULL,
+  owner              VARCHAR(128) NULL,
+  reviewer           VARCHAR(128) NULL,
+  status             VARCHAR(32)  NOT NULL DEFAULT 'pending',
+  feedback           TEXT         NULL,
+  row_ids_json       JSON         NULL,
+  publish_job_id     VARCHAR(128) NULL,
+  publish_error_msg  TEXT         NULL,
+  approved_at        DATETIME     NULL,
+  published_at       DATETIME     NULL,
+  latest_action_at   DATETIME     NULL,
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_acceptance_tickets_scope (requirement_id, scope_type, scope_key),
+  INDEX idx_acceptance_tickets_requirement (requirement_id),
+  INDEX idx_acceptance_tickets_wide_table (wide_table_id),
+  INDEX idx_acceptance_tickets_task_group (task_group_id),
+  INDEX idx_acceptance_tickets_status (status),
+  INDEX idx_acceptance_tickets_latest_action (latest_action_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE retrieval_tasks (
