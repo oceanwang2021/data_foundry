@@ -1,6 +1,8 @@
 package com.huatai.datafoundry.backend.requirement.application.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huatai.datafoundry.backend.account.application.service.AccountAppService;
+import com.huatai.datafoundry.backend.account.infrastructure.persistence.mybatis.record.AccountRecord;
 import com.huatai.datafoundry.backend.requirement.application.command.RequirementCreateCommand;
 import com.huatai.datafoundry.backend.requirement.application.command.RequirementUpdateCommand;
 import com.huatai.datafoundry.backend.requirement.application.command.WideTableCreateCommand;
@@ -31,6 +33,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class RequirementAppService {
+  private final AccountAppService accountAppService;
   private final RequirementRepository requirementRepository;
   private final WideTableScopeImportMapper wideTableScopeImportMapper;
   private final WideTableRowMapper wideTableRowMapper;
@@ -39,12 +42,14 @@ public class RequirementAppService {
   private final TaskPlanAppService taskPlanAppService;
 
   public RequirementAppService(
+      AccountAppService accountAppService,
       RequirementRepository requirementRepository,
       WideTableScopeImportMapper wideTableScopeImportMapper,
       WideTableRowMapper wideTableRowMapper,
       ObjectMapper objectMapper,
       ApplicationEventPublisher eventPublisher,
       TaskPlanAppService taskPlanAppService) {
+    this.accountAppService = accountAppService;
     this.requirementRepository = requirementRepository;
     this.wideTableScopeImportMapper = wideTableScopeImportMapper;
     this.wideTableRowMapper = wideTableRowMapper;
@@ -59,6 +64,16 @@ public class RequirementAppService {
     if (command == null || command.getTitle() == null || command.getTitle().trim().isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Requirement title is required");
     }
+    AccountRecord creator =
+        requireInjectedAccount(command.getCreatedByAccount(), "created_by_account");
+    AccountRecord owner = requireAssignedAccount(command.getOwnerAccount(), command.getOwner(), "owner");
+    AccountRecord assignee =
+        requireAssignedAccount(command.getAssigneeAccount(), command.getAssignee(), "assignee");
+    AccountRecord acceptanceOwner =
+        requireAssignedAccount(
+            command.getAcceptanceOwnerAccount(),
+            command.getAcceptanceOwner(),
+            "acceptance_owner");
 
     Requirement record = new Requirement();
     record.setId(requirementId);
@@ -67,8 +82,17 @@ public class RequirementAppService {
     record.setPhase(command.getPhase() != null ? command.getPhase() : "production");
     record.setStatus("draft");
     record.setSchemaLocked(Boolean.FALSE);
-    record.setOwner(command.getOwner());
-    record.setAssignee(command.getAssignee());
+    record.setCreatedBy(creator != null ? creator.getDisplayName() : trimToNull(command.getCreatedBy()));
+    record.setCreatedByAccount(creator != null ? creator.getAccount() : null);
+    record.setOwner(owner != null ? owner.getDisplayName() : trimToNull(command.getOwner()));
+    record.setOwnerAccount(owner != null ? owner.getAccount() : null);
+    record.setAssignee(assignee != null ? assignee.getDisplayName() : trimToNull(command.getAssignee()));
+    record.setAssigneeAccount(assignee != null ? assignee.getAccount() : null);
+    record.setAcceptanceOwner(
+        acceptanceOwner != null
+            ? acceptanceOwner.getDisplayName()
+            : trimToNull(command.getAcceptanceOwner()));
+    record.setAcceptanceOwnerAccount(acceptanceOwner != null ? acceptanceOwner.getAccount() : null);
     record.setBusinessGoal(command.getBusinessGoal());
     record.setBackgroundKnowledge(command.getBackgroundKnowledge());
     record.setDeliveryScope(command.getDeliveryScope());
@@ -101,10 +125,31 @@ public class RequirementAppService {
     toUpdate.setId(requirementId);
     toUpdate.setProjectId(projectId);
     if (command != null) {
+      AccountRecord owner = resolveOptionalAssignedAccount(command.getOwnerAccount(), command.getOwner(), "owner");
+      AccountRecord assignee =
+          resolveOptionalAssignedAccount(command.getAssigneeAccount(), command.getAssignee(), "assignee");
+      AccountRecord acceptanceOwner =
+          resolveOptionalAssignedAccount(
+              command.getAcceptanceOwnerAccount(),
+              command.getAcceptanceOwner(),
+              "acceptance_owner");
       toUpdate.setTitle(command.getTitle());
       toUpdate.setStatus(command.getStatus());
-      toUpdate.setOwner(command.getOwner());
-      toUpdate.setAssignee(command.getAssignee());
+      if (owner != null || command.getOwner() != null) {
+        toUpdate.setOwner(owner != null ? owner.getDisplayName() : trimToNull(command.getOwner()));
+        toUpdate.setOwnerAccount(owner != null ? owner.getAccount() : null);
+      }
+      if (assignee != null || command.getAssignee() != null) {
+        toUpdate.setAssignee(assignee != null ? assignee.getDisplayName() : trimToNull(command.getAssignee()));
+        toUpdate.setAssigneeAccount(assignee != null ? assignee.getAccount() : null);
+      }
+      if (acceptanceOwner != null || command.getAcceptanceOwner() != null) {
+        toUpdate.setAcceptanceOwner(
+            acceptanceOwner != null
+                ? acceptanceOwner.getDisplayName()
+                : trimToNull(command.getAcceptanceOwner()));
+        toUpdate.setAcceptanceOwnerAccount(acceptanceOwner != null ? acceptanceOwner.getAccount() : null);
+      }
       toUpdate.setBusinessGoal(command.getBusinessGoal());
       toUpdate.setBackgroundKnowledge(command.getBackgroundKnowledge());
       toUpdate.setDeliveryScope(command.getDeliveryScope());
@@ -448,6 +493,59 @@ public class RequirementAppService {
     if (value == null) return null;
     String s = String.valueOf(value);
     return s != null ? s.trim() : null;
+  }
+
+  private String trimToNull(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private String requireNonBlank(String value, String message) {
+    String normalized = trimToNull(value);
+    if (normalized == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    }
+    return normalized;
+  }
+
+  private AccountRecord requireInjectedAccount(String accountValue, String fieldName) {
+    return accountAppService.requireActiveAccount(
+        requireNonBlank(accountValue, fieldName + " is required"),
+        fieldName);
+  }
+
+  private AccountRecord requireAssignedAccount(
+      String accountValue, String fallbackDisplayName, String fieldName) {
+    String normalizedAccount = trimToNull(accountValue);
+    String normalizedDisplayName = trimToNull(fallbackDisplayName);
+    if (normalizedAccount == null) {
+      if (normalizedDisplayName != null) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST,
+            fieldName + "_account is required");
+      }
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          fieldName + "_account is required");
+    }
+    return accountAppService.requireActiveAccount(normalizedAccount, fieldName + "_account");
+  }
+
+  private AccountRecord resolveOptionalAssignedAccount(
+      String accountValue, String fallbackDisplayName, String fieldName) {
+    String normalizedAccount = trimToNull(accountValue);
+    if (normalizedAccount != null) {
+      return accountAppService.requireActiveAccount(normalizedAccount, fieldName + "_account");
+    }
+    if (trimToNull(fallbackDisplayName) != null) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          fieldName + "_account is required");
+    }
+    return null;
   }
 
   private String buildRowBindingKey(String businessDate, Map<String, Object> dimensionValues) {

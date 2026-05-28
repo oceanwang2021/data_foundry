@@ -369,13 +369,16 @@ export default function RequirementAcceptancePanel({
         await updateAcceptanceTicket(existing.id, {
           status: data.status,
           feedback: data.feedback,
+          owner: requirement.acceptanceOwner ?? requirement.owner,
+          ownerAccount: requirement.acceptanceOwnerAccount ?? null,
         });
       } else {
         await createAcceptanceTicket({
           dataset: resolveDatasetLabel(),
           requirementId: requirement.id,
           taskGroupId,
-          owner: requirement.owner,
+          owner: requirement.acceptanceOwner ?? requirement.owner,
+          ownerAccount: requirement.acceptanceOwnerAccount,
           feedback: data.feedback,
           status: data.status,
         });
@@ -396,7 +399,8 @@ export default function RequirementAcceptancePanel({
       dataset: resolveDatasetLabel(),
       requirementId: requirement.id,
       taskGroupId,
-      owner: requirement.owner,
+      owner: requirement.acceptanceOwner ?? requirement.owner,
+      ownerAccount: requirement.acceptanceOwnerAccount,
       status: "pending",
     });
   };
@@ -412,7 +416,8 @@ export default function RequirementAcceptancePanel({
       dataset,
       requirementId: requirement.id,
       wideTableId,
-      owner: requirement.owner,
+      owner: requirement.acceptanceOwner ?? requirement.owner,
+      ownerAccount: requirement.acceptanceOwnerAccount,
       status: "pending",
     });
   };
@@ -423,7 +428,11 @@ export default function RequirementAcceptancePanel({
     setMessage("正在发布验收结果到目标表...");
     try {
       const ticket = await ensureTaskGroupAcceptanceTicket(taskGroupId);
-      const publishResult = await approveAndPublishAcceptanceTicket(ticket.id, { rowIds, reviewer: requirement.owner });
+      const publishResult = await approveAndPublishAcceptanceTicket(ticket.id, {
+        rowIds,
+        reviewer: requirement.acceptanceOwner ?? requirement.owner,
+        reviewerAccount: requirement.acceptanceOwnerAccount,
+      });
       if (publishResult.failedRows > 0) {
         setMessage(`发布部分失败：成功插入 ${publishResult.insertedRows} 行，更新 ${publishResult.updatedRows} 行，失败 ${publishResult.failedRows} 行。`);
         await onRefreshData?.();
@@ -443,7 +452,11 @@ export default function RequirementAcceptancePanel({
     try {
       const totalRows = views.find((item) => item.wideTable.id === wideTableId)?.rows.length ?? rowIds?.length ?? 0;
       const ticket = await ensureWideTableAcceptanceTicket(wideTableId);
-      const publishResult = await approveAndPublishAcceptanceTicket(ticket.id, { rowIds, reviewer: requirement.owner });
+      const publishResult = await approveAndPublishAcceptanceTicket(ticket.id, {
+        rowIds,
+        reviewer: requirement.acceptanceOwner ?? requirement.owner,
+        reviewerAccount: requirement.acceptanceOwnerAccount,
+      });
       const reviewedAt = new Date().toISOString();
       if (publishResult.failedRows === 0) {
         const status: TaskGroupReviewStatus = rowIds && rowIds.length < totalRows ? "partial_approved" : "approved";
@@ -482,7 +495,11 @@ export default function RequirementAcceptancePanel({
     void (async () => {
       try {
         const ticket = await ensureTaskGroupAcceptanceTicket(taskGroupId);
-        await rejectAcceptanceTicket(ticket.id, { feedback, reviewer: requirement.owner });
+        await rejectAcceptanceTicket(ticket.id, {
+          feedback,
+          reviewer: requirement.acceptanceOwner ?? requirement.owner,
+          reviewerAccount: requirement.acceptanceOwnerAccount,
+        });
         await onRefreshData?.();
       } catch (error) {
         setMessage(`验收驳回保存失败：${formatActionError(error)}`);
@@ -503,7 +520,11 @@ export default function RequirementAcceptancePanel({
     void (async () => {
       try {
         const ticket = await ensureWideTableAcceptanceTicket(wideTableId);
-        await rejectAcceptanceTicket(ticket.id, { feedback, reviewer: requirement.owner });
+        await rejectAcceptanceTicket(ticket.id, {
+          feedback,
+          reviewer: requirement.acceptanceOwner ?? requirement.owner,
+          reviewerAccount: requirement.acceptanceOwnerAccount,
+        });
         await onRefreshData?.();
       } catch (error) {
         setMessage(`验收驳回保存失败：${formatActionError(error)}`);

@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication(
     scanBasePackages = {
+      "com.huatai.datafoundry.backend.account",
       "com.huatai.datafoundry.backend.integration",
       "com.huatai.datafoundry.backend.health",
       "com.huatai.datafoundry.backend.ops",

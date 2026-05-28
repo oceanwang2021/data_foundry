@@ -4,7 +4,11 @@ public class RequirementUpdateCommand {
   private String title;
   private String status;
   private String owner;
+  private String ownerAccount;
   private String assignee;
+  private String assigneeAccount;
+  private String acceptanceOwner;
+  private String acceptanceOwnerAccount;
   private String businessGoal;
   private String backgroundKnowledge;
   private String deliveryScope;
@@ -16,7 +20,11 @@ public class RequirementUpdateCommand {
   public boolean hasDefinitionEdits() {
     return title != null
         || owner != null
+        || ownerAccount != null
         || assignee != null
+        || assigneeAccount != null
+        || acceptanceOwner != null
+        || acceptanceOwnerAccount != null
         || businessGoal != null
         || backgroundKnowledge != null
         || deliveryScope != null
@@ -50,12 +58,44 @@ public class RequirementUpdateCommand {
     this.owner = owner;
   }
 
+  public String getOwnerAccount() {
+    return ownerAccount;
+  }
+
+  public void setOwnerAccount(String ownerAccount) {
+    this.ownerAccount = ownerAccount;
+  }
+
   public String getAssignee() {
     return assignee;
   }
 
   public void setAssignee(String assignee) {
     this.assignee = assignee;
+  }
+
+  public String getAssigneeAccount() {
+    return assigneeAccount;
+  }
+
+  public void setAssigneeAccount(String assigneeAccount) {
+    this.assigneeAccount = assigneeAccount;
+  }
+
+  public String getAcceptanceOwner() {
+    return acceptanceOwner;
+  }
+
+  public void setAcceptanceOwner(String acceptanceOwner) {
+    this.acceptanceOwner = acceptanceOwner;
+  }
+
+  public String getAcceptanceOwnerAccount() {
+    return acceptanceOwnerAccount;
+  }
+
+  public void setAcceptanceOwnerAccount(String acceptanceOwnerAccount) {
+    this.acceptanceOwnerAccount = acceptanceOwnerAccount;
   }
 
   public String getBusinessGoal() {

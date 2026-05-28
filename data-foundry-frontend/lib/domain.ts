@@ -91,6 +91,9 @@ export type AcceptanceTicket = {
   requirementId: string;
   status: "pending" | "approved" | "partial_approved" | "rejected" | "fixing" | "publishing" | "publish_failed" | "deleted";
   owner: string;
+  ownerAccount?: string;
+  reviewer?: string;
+  reviewerAccount?: string;
   feedback: string;
   rowIds?: number[];
   latestActionAt: string;

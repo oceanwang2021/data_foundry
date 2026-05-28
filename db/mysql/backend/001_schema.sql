@@ -15,10 +15,24 @@
 -- - `CREATE TABLE IF NOT EXISTS` won't upgrade existing tables. If you have an old schema already,
 --   apply the missing columns/tables via a migration tool (recommended) or manual ALTER scripts.
 
+CREATE TABLE IF NOT EXISTS accounts (
+  account       VARCHAR(255) NOT NULL PRIMARY KEY,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name  VARCHAR(255) NOT NULL,
+  role          VARCHAR(32)  NOT NULL,
+  status        VARCHAR(32)  NOT NULL DEFAULT 'ACTIVE',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_accounts_status (status),
+  INDEX idx_accounts_role (role),
+  INDEX idx_accounts_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS projects (
   id            VARCHAR(64)  NOT NULL PRIMARY KEY,
   name          VARCHAR(255) NOT NULL,
   created_by    VARCHAR(255) NOT NULL DEFAULT '',
+  created_by_account VARCHAR(255) NOT NULL DEFAULT '',
   business_background TEXT   NULL,
   description   TEXT         NULL,
   status        VARCHAR(32)  NOT NULL DEFAULT 'active',
@@ -36,8 +50,14 @@ CREATE TABLE IF NOT EXISTS requirements (
   phase         VARCHAR(32)  NOT NULL DEFAULT 'demo',
   status        VARCHAR(32)  NOT NULL DEFAULT 'draft',
   schema_locked TINYINT(1)   NULL,
+  created_by    VARCHAR(255) NULL,
+  created_by_account VARCHAR(255) NULL,
   owner         VARCHAR(255) NULL,
+  owner_account VARCHAR(255) NULL,
   assignee      VARCHAR(255) NULL,
+  assignee_account VARCHAR(255) NULL,
+  acceptance_owner VARCHAR(255) NULL,
+  acceptance_owner_account VARCHAR(255) NULL,
   business_goal TEXT         NULL,
   background_knowledge TEXT  NULL,
   business_boundary TEXT     NULL,
@@ -335,7 +355,9 @@ CREATE TABLE IF NOT EXISTS acceptance_tickets (
   scope_key          VARCHAR(128) NOT NULL,
   dataset            VARCHAR(255) NULL,
   owner              VARCHAR(128) NULL,
+  owner_account      VARCHAR(255) NULL,
   reviewer           VARCHAR(128) NULL,
+  reviewer_account   VARCHAR(255) NULL,
   status             VARCHAR(32)  NOT NULL DEFAULT 'pending',
   feedback           TEXT         NULL,
   row_ids_json       JSON         NULL,

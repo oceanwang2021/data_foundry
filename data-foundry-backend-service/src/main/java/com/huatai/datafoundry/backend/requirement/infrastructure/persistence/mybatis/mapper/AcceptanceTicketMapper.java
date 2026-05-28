@@ -11,7 +11,7 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface AcceptanceTicketMapper {
   String COLUMNS =
-      "id, requirement_id, wide_table_id, task_group_id, scope_type, scope_key, dataset, owner, reviewer, "
+      "id, requirement_id, wide_table_id, task_group_id, scope_type, scope_key, dataset, owner, owner_account, reviewer, reviewer_account, "
           + "status, feedback, row_ids_json, publish_job_id, publish_error_msg, approved_at, published_at, "
           + "latest_action_at, created_at, updated_at";
 
@@ -40,17 +40,19 @@ public interface AcceptanceTicketMapper {
 
   @Insert({
       "insert into acceptance_tickets (",
-      "  id, requirement_id, wide_table_id, task_group_id, scope_type, scope_key, dataset, owner, reviewer,",
+      "  id, requirement_id, wide_table_id, task_group_id, scope_type, scope_key, dataset, owner, owner_account, reviewer, reviewer_account,",
       "  status, feedback, row_ids_json, publish_job_id, publish_error_msg, approved_at, published_at, latest_action_at",
       ") values (",
-      "  #{id}, #{requirementId}, #{wideTableId}, #{taskGroupId}, #{scopeType}, #{scopeKey}, #{dataset}, #{owner}, #{reviewer},",
+      "  #{id}, #{requirementId}, #{wideTableId}, #{taskGroupId}, #{scopeType}, #{scopeKey}, #{dataset}, #{owner}, #{ownerAccount}, #{reviewer}, #{reviewerAccount},",
       "  #{status}, #{feedback}, #{rowIdsJson}, #{publishJobId}, #{publishErrorMsg}, #{approvedAt}, #{publishedAt}, #{latestActionAt}",
       ") on duplicate key update ",
       "  wide_table_id = values(wide_table_id),",
       "  task_group_id = values(task_group_id),",
       "  dataset = values(dataset),",
       "  owner = values(owner),",
+      "  owner_account = values(owner_account),",
       "  reviewer = values(reviewer),",
+      "  reviewer_account = values(reviewer_account),",
       "  status = values(status),",
       "  feedback = values(feedback),",
       "  row_ids_json = values(row_ids_json),",
@@ -71,7 +73,9 @@ public interface AcceptanceTicketMapper {
       "  <if test='taskGroupId != null'>task_group_id = #{taskGroupId},</if>",
       "  <if test='dataset != null'>dataset = #{dataset},</if>",
       "  <if test='owner != null'>owner = #{owner},</if>",
+      "  <if test='ownerAccount != null'>owner_account = #{ownerAccount},</if>",
       "  <if test='reviewer != null'>reviewer = #{reviewer},</if>",
+      "  <if test='reviewerAccount != null'>reviewer_account = #{reviewerAccount},</if>",
       "  <if test='status != null'>status = #{status},</if>",
       "  <if test='feedback != null'>feedback = #{feedback},</if>",
       "  <if test='rowIdsJson != null'>row_ids_json = #{rowIdsJson},</if>",

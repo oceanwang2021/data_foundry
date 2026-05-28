@@ -111,7 +111,19 @@ export default function ProjectRequirementDetailPanel({
     if (nextRequirement.title !== currentRequirement.title) payload.title = nextRequirement.title;
     if (nextRequirement.status !== currentRequirement.status) payload.status = nextRequirement.status;
     if (nextRequirement.owner !== currentRequirement.owner) payload.owner = nextRequirement.owner;
+    if ((nextRequirement.ownerAccount ?? "") !== (currentRequirement.ownerAccount ?? "")) {
+      payload.ownerAccount = nextRequirement.ownerAccount ?? null;
+    }
     if (nextRequirement.assignee !== currentRequirement.assignee) payload.assignee = nextRequirement.assignee;
+    if ((nextRequirement.assigneeAccount ?? "") !== (currentRequirement.assigneeAccount ?? "")) {
+      payload.assigneeAccount = nextRequirement.assigneeAccount ?? null;
+    }
+    if (nextRequirement.acceptanceOwner !== currentRequirement.acceptanceOwner) {
+      payload.acceptanceOwner = nextRequirement.acceptanceOwner;
+    }
+    if ((nextRequirement.acceptanceOwnerAccount ?? "") !== (currentRequirement.acceptanceOwnerAccount ?? "")) {
+      payload.acceptanceOwnerAccount = nextRequirement.acceptanceOwnerAccount ?? null;
+    }
     if (nextRequirement.backgroundKnowledge !== currentRequirement.backgroundKnowledge) {
       payload.backgroundKnowledge = nextRequirement.backgroundKnowledge;
     }

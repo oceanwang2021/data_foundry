@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { buildApiUrl } from "@/lib/api-base";
@@ -10,6 +10,7 @@ import {
   previewParameterRowsSql,
   updateRequirementWideTable,
 } from "@/lib/api-client";
+import AccountSelect from "@/components/AccountSelect";
 import KnowledgeBaseSelectorModal from "@/components/KnowledgeBaseSelectorModal";
 import SchemaSelectorModal from "@/components/SchemaSelectorModal";
 import type {
@@ -1112,15 +1113,28 @@ function BasicInfoSection({
         <h3 className="font-semibold">1. 业务定义</h3>
         <p className="text-xs text-muted-foreground">明确这条需求的背景知识与角色分工。</p>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <CompactInfoItem label="需求 ID" value={requirement.id} />
         <EditableField label="业务负责人" control={
-          <input className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            value={requirement.owner} onChange={(e) => update({ owner: e.target.value })} />
+          <AccountSelect
+            value={requirement.ownerAccount}
+            displayName={requirement.owner}
+            onChange={({ account, name }) => update({ owner: name, ownerAccount: account || undefined })}
+          />
         } />
         <EditableField label="执行人" control={
-          <input className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            value={requirement.assignee} onChange={(e) => update({ assignee: e.target.value })} />
+          <AccountSelect
+            value={requirement.assigneeAccount}
+            displayName={requirement.assignee}
+            onChange={({ account, name }) => update({ assignee: name, assigneeAccount: account || undefined })}
+          />
+        } />
+        <EditableField label="数据验收负责人" control={
+          <AccountSelect
+            value={requirement.acceptanceOwnerAccount}
+            displayName={requirement.acceptanceOwner}
+            onChange={({ account, name }) => update({ acceptanceOwner: name, acceptanceOwnerAccount: account || undefined })}
+          />
         } />
       </div>
 

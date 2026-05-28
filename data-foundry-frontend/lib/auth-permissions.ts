@@ -22,18 +22,11 @@ export const STATUS_LABEL: Record<UserStatus, string> = {
 };
 
 const STORAGE_KEYS = {
-  users: "dataFoundry.permissions.users.v1",
-  currentUserAccount: "dataFoundry.permissions.currentUserAccount.v1",
+  authToken: "dataFoundry.auth.token.v1",
+  currentUser: "dataFoundry.auth.currentUser.v1",
 } as const;
 
-export const DEFAULT_PERMISSION_USERS: PermissionUser[] = [
-  { account: "ba_zhangsan", name: "张三", status: "ACTIVE", role: "DATA_BA" },
-  { account: "engineer_lisi", name: "李四", status: "ACTIVE", role: "DATA_ENGINEER" },
-  { account: "expert_wangwu", name: "王五", status: "ACTIVE", role: "BUSINESS_EXPERT" },
-  { account: "admin", name: "管理员", status: "ACTIVE", role: "ADMIN" },
-];
-
-const PERMISSIONS_CHANGED_EVENT = "datafoundry:permissions-changed";
+const AUTH_CHANGED_EVENT = "datafoundry:auth-changed";
 
 export function subscribePermissionsChanged(listener: () => void) {
   if (typeof window === "undefined") {
@@ -41,11 +34,11 @@ export function subscribePermissionsChanged(listener: () => void) {
   }
 
   const handler = () => listener();
-  window.addEventListener(PERMISSIONS_CHANGED_EVENT, handler);
+  window.addEventListener(AUTH_CHANGED_EVENT, handler);
   window.addEventListener("storage", handler);
 
   return () => {
-    window.removeEventListener(PERMISSIONS_CHANGED_EVENT, handler);
+    window.removeEventListener(AUTH_CHANGED_EVENT, handler);
     window.removeEventListener("storage", handler);
   };
 }
@@ -54,58 +47,81 @@ export function notifyPermissionsChanged() {
   if (typeof window === "undefined") {
     return;
   }
-  window.dispatchEvent(new Event(PERMISSIONS_CHANGED_EVENT));
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
-export function loadPermissionUsers(): PermissionUser[] {
+export function loadAuthToken(): string {
   if (typeof window === "undefined") {
-    return DEFAULT_PERMISSION_USERS;
+    return "";
+  }
+  return window.localStorage.getItem(STORAGE_KEYS.authToken) || "";
+}
+
+export function saveAuthToken(token: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(STORAGE_KEYS.authToken, token);
+  notifyPermissionsChanged();
+}
+
+export function loadStoredCurrentUser(): PermissionUser | null {
+  if (typeof window === "undefined") {
+    return null;
   }
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEYS.users);
+    const raw = window.localStorage.getItem(STORAGE_KEYS.currentUser);
     if (!raw) {
-      return DEFAULT_PERMISSION_USERS;
+      return null;
     }
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return DEFAULT_PERMISSION_USERS;
+    const parsed = JSON.parse(raw) as Partial<PermissionUser> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
     }
-    return parsed as PermissionUser[];
+    if (!parsed.account || !parsed.name || !parsed.role || !parsed.status) {
+      return null;
+    }
+    return {
+      account: parsed.account,
+      name: parsed.name,
+      role: parsed.role,
+      status: parsed.status,
+    };
   } catch {
-    return DEFAULT_PERMISSION_USERS;
+    return null;
   }
 }
 
-export function savePermissionUsers(users: PermissionUser[]) {
+export function saveStoredCurrentUser(user: PermissionUser | null) {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
+  if (!user) {
+    window.localStorage.removeItem(STORAGE_KEYS.currentUser);
+  } else {
+    window.localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify(user));
+  }
   notifyPermissionsChanged();
 }
 
-export function loadCurrentUserAccount(): string {
-  if (typeof window === "undefined") {
-    return "admin";
-  }
-  return window.localStorage.getItem(STORAGE_KEYS.currentUserAccount) || "admin";
-}
-
-export function saveCurrentUserAccount(account: string) {
+export function clearAuthSession() {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(STORAGE_KEYS.currentUserAccount, account);
+  window.localStorage.removeItem(STORAGE_KEYS.authToken);
+  window.localStorage.removeItem(STORAGE_KEYS.currentUser);
   notifyPermissionsChanged();
 }
 
-export function getCurrentUser(users: PermissionUser[] = loadPermissionUsers()): PermissionUser {
-  const account = loadCurrentUserAccount();
-  return users.find((user) => user.account === account) ?? DEFAULT_PERMISSION_USERS[DEFAULT_PERMISSION_USERS.length - 1];
+export function getCurrentUser(): PermissionUser | null {
+  return loadStoredCurrentUser();
 }
 
 export function canViewCollectionTasks(role: UserRole) {
   return role === "DATA_ENGINEER" || role === "ADMIN";
 }
 
+export function isAdminRole(role: UserRole | null | undefined) {
+  return role === "ADMIN";
+}

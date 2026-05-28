@@ -43,6 +43,7 @@ import type {
   ScheduleJob,
 } from "./domain";
 import { buildApiUrl } from "./api-base";
+import { loadAuthToken, type PermissionUser } from "./auth-permissions";
 import { normalizeBusinessDateToken } from "./business-date";
 import {
   normalizeWideTableMode,
@@ -145,6 +146,10 @@ function buildCollectionPolicy(
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const url = buildApiUrl(path);
   const headers = new Headers(init?.headers);
+  const token = loadAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   const hasBody = init?.body !== undefined && init.body !== null;
   if (hasBody && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -240,6 +245,7 @@ function mapProject(raw: any): Project {
     id: raw.id,
     name: raw.name,
     createdBy: raw.created_by ?? "",
+    createdByAccount: raw.created_by_account ?? raw.createdByAccount ?? "",
     description: raw.description ?? "",
     businessBackground: raw.business_background ?? "",
     status: raw.status ?? "active",
@@ -420,8 +426,14 @@ function mapRequirement(raw: any): Requirement {
     title: raw.title,
     status: mapRequirementStatus(raw.status),
     schemaLocked: raw.schema_locked ?? undefined,
+    createdBy: raw.created_by ?? raw.createdBy ?? undefined,
+    createdByAccount: raw.created_by_account ?? raw.createdByAccount ?? undefined,
     owner: raw.owner ?? "",
+    ownerAccount: raw.owner_account ?? raw.ownerAccount ?? undefined,
     assignee: raw.assignee ?? "",
+    assigneeAccount: raw.assignee_account ?? raw.assigneeAccount ?? undefined,
+    acceptanceOwner: raw.acceptance_owner ?? raw.acceptanceOwner ?? "",
+    acceptanceOwnerAccount: raw.acceptance_owner_account ?? raw.acceptanceOwnerAccount ?? undefined,
     businessGoal: raw.business_goal ?? "",
     backgroundKnowledge: raw.background_knowledge ?? raw.business_goal ?? undefined,
     businessBoundary: raw.business_boundary ?? "",
@@ -886,9 +898,55 @@ function mapAcceptanceTicket(raw: any): AcceptanceTicket {
     requirementId: raw.requirement_id ?? raw.requirementId,
     status: raw.status,
     owner: raw.owner,
+    ownerAccount: raw.owner_account ?? raw.ownerAccount ?? undefined,
+    reviewer: raw.reviewer ?? undefined,
+    reviewerAccount: raw.reviewer_account ?? raw.reviewerAccount ?? undefined,
     feedback: raw.feedback ?? "",
     rowIds: parseNumberArray(rawRowIds),
     latestActionAt: raw.latest_action_at ?? raw.latestActionAt ?? "",
+  };
+}
+
+export type PersonalCenterCollectionTask = {
+  project: Project;
+  requirement: Requirement;
+  taskGroup: TaskGroup;
+};
+
+export type PersonalCenterAcceptanceTask = {
+  project: Project;
+  requirement: Requirement;
+  taskGroup: TaskGroup;
+  ticket?: AcceptanceTicket;
+  reviewStatus: "pending" | "approved" | "partial_approved" | "rejected";
+};
+
+export type PersonalCenterOverview = {
+  projects: Project[];
+  requirements: Requirement[];
+  collectionTasks: PersonalCenterCollectionTask[];
+  acceptanceTasks: PersonalCenterAcceptanceTask[];
+};
+
+function mapPersonalCenterProject(rawProject: any, rawRequirement: any): Project {
+  if (rawProject) {
+    return mapProject(rawProject);
+  }
+  return {
+    id: rawRequirement?.project_id ?? rawRequirement?.projectId ?? "",
+    name: rawRequirement?.project_id ?? rawRequirement?.projectId ?? "",
+    createdBy: "",
+    createdByAccount: "",
+    businessBackground: "",
+    description: "",
+    status: "active",
+    ownerTeam: "",
+    dataSource: {
+      search: { engines: [], sites: [], sitePolicy: "preferred" },
+      knowledgeBases: [],
+      fixedUrls: [],
+    },
+    createdAt: fallbackIso(undefined),
   };
 }
 
@@ -1217,6 +1275,7 @@ export async function createProject(data: {
   businessBackground?: string;
   dataSource?: any;
   createdBy: string;
+  createdByAccount?: string;
 }): Promise<Project> {
   const raw = await apiPost<any>("/api/projects", {
     name: data.name,
@@ -1224,6 +1283,7 @@ export async function createProject(data: {
     description: data.description,
     business_background: data.businessBackground,
     created_by: data.createdBy,
+    created_by_account: data.createdByAccount,
   });
   return mapProject(raw);
 }
@@ -1380,8 +1440,14 @@ export async function createRequirement(
   projectId: string,
   data: {
     title: string;
+    createdBy: string;
+    createdByAccount?: string;
     owner: string;
+    ownerAccount?: string;
     assignee: string;
+    assigneeAccount?: string;
+    acceptanceOwner: string;
+    acceptanceOwnerAccount?: string;
     backgroundKnowledge?: string;
     deliveryScope?: string;
     dataUpdateEnabled?: boolean;
@@ -1408,8 +1474,14 @@ export async function createRequirement(
   const raw = await apiPost<any>(`/api/projects/${projectId}/requirements`, {
     title: data.title,
     phase: "production",
+    created_by: data.createdBy,
+    created_by_account: data.createdByAccount,
     owner: data.owner,
+    owner_account: data.ownerAccount,
     assignee: data.assignee,
+    assignee_account: data.assigneeAccount,
+    acceptance_owner: data.acceptanceOwner,
+    acceptance_owner_account: data.acceptanceOwnerAccount,
     background_knowledge: data.backgroundKnowledge ?? "",
     delivery_scope: data.deliveryScope ?? "",
     data_update_enabled: data.dataUpdateEnabled,
@@ -1442,7 +1514,11 @@ export async function updateRequirement(
     title: string;
     status: Requirement["status"];
     owner: string;
+    ownerAccount: string | null;
     assignee: string;
+    assigneeAccount: string | null;
+    acceptanceOwner: string;
+    acceptanceOwnerAccount: string | null;
     businessGoal: string;
     backgroundKnowledge: string;
     deliveryScope: string;
@@ -1456,7 +1532,11 @@ export async function updateRequirement(
   if (data.title !== undefined) body.title = data.title;
   if (data.status !== undefined) body.status = toBackendRequirementStatus(data.status);
   if (data.owner !== undefined) body.owner = data.owner;
+  if (data.ownerAccount !== undefined) body.owner_account = data.ownerAccount;
   if (data.assignee !== undefined) body.assignee = data.assignee;
+  if (data.assigneeAccount !== undefined) body.assignee_account = data.assigneeAccount;
+  if (data.acceptanceOwner !== undefined) body.acceptance_owner = data.acceptanceOwner;
+  if (data.acceptanceOwnerAccount !== undefined) body.acceptance_owner_account = data.acceptanceOwnerAccount;
   if (data.businessGoal !== undefined) body.business_goal = data.businessGoal;
   if (data.backgroundKnowledge !== undefined) body.background_knowledge = data.backgroundKnowledge;
   if (data.deliveryScope !== undefined) body.delivery_scope = data.deliveryScope;
@@ -2023,13 +2103,14 @@ export async function publishWideTableToTarget(
 
 export async function approveAndPublishAcceptanceTicket(
   ticketId: string,
-  options?: { rowIds?: number[]; reviewer?: string },
+  options?: { rowIds?: number[]; reviewer?: string; reviewerAccount?: string },
 ): Promise<TargetPublishOutcome> {
   const body =
-    options?.rowIds || options?.reviewer
+    options?.rowIds || options?.reviewer || options?.reviewerAccount
       ? {
           ...(options.rowIds ? { row_ids: options.rowIds } : {}),
           ...(options.reviewer ? { reviewer: options.reviewer } : {}),
+          ...(options.reviewerAccount ? { reviewer_account: options.reviewerAccount } : {}),
         }
       : undefined;
   const raw = await apiPost<any>(
@@ -2205,6 +2286,7 @@ export async function createAcceptanceTicket(data: {
   taskGroupId?: string;
   wideTableId?: string;
   owner: string;
+  ownerAccount?: string;
   feedback?: string;
   status?: "pending" | "approved" | "partial_approved" | "rejected";
 }): Promise<AcceptanceTicket> {
@@ -2214,6 +2296,7 @@ export async function createAcceptanceTicket(data: {
     task_group_id: data.taskGroupId,
     wide_table_id: data.wideTableId,
     owner: data.owner,
+    owner_account: data.ownerAccount,
     feedback: data.feedback,
     status: data.status,
   });
@@ -2222,18 +2305,99 @@ export async function createAcceptanceTicket(data: {
 
 export async function updateAcceptanceTicket(
   ticketId: string,
-  data: { status?: string; feedback?: string },
+  data: {
+    status?: string;
+    feedback?: string;
+    owner?: string;
+    ownerAccount?: string | null;
+    reviewer?: string;
+    reviewerAccount?: string | null;
+  },
 ): Promise<void> {
-  await apiPut(`/api/acceptance-tickets/${ticketId}`, data);
+  const body: Record<string, unknown> = {};
+  if (data.status !== undefined) body.status = data.status;
+  if (data.feedback !== undefined) body.feedback = data.feedback;
+  if (data.owner !== undefined) body.owner = data.owner;
+  if (data.ownerAccount !== undefined) body.owner_account = data.ownerAccount;
+  if (data.reviewer !== undefined) body.reviewer = data.reviewer;
+  if (data.reviewerAccount !== undefined) body.reviewer_account = data.reviewerAccount;
+  await apiPut(`/api/acceptance-tickets/${ticketId}`, body);
+}
+
+function mapPermissionUser(raw: any): PermissionUser {
+  return {
+    account: String(raw.account ?? "").trim(),
+    name: String(raw.display_name ?? raw.displayName ?? raw.name ?? "").trim(),
+    role: raw.role,
+    status: raw.status,
+  };
+}
+
+export async function registerAccount(data: {
+  account: string;
+  password: string;
+  displayName: string;
+  role: PermissionUser["role"];
+}): Promise<PermissionUser> {
+  const raw = await apiPost<any>("/api/auth/register", {
+    account: data.account,
+    password: data.password,
+    display_name: data.displayName,
+    role: data.role,
+  });
+  return mapPermissionUser(raw);
+}
+
+export async function loginAccount(data: {
+  account: string;
+  password: string;
+}): Promise<{ token: string; user: PermissionUser }> {
+  const raw = await apiPost<any>("/api/auth/login", data);
+  return {
+    token: String(raw.token ?? "").trim(),
+    user: mapPermissionUser(raw.user ?? {}),
+  };
+}
+
+export async function fetchCurrentAccount(): Promise<PermissionUser> {
+  const raw = await apiGet<any>("/api/auth/me");
+  return mapPermissionUser(raw);
+}
+
+export async function fetchAccounts(): Promise<PermissionUser[]> {
+  const raw = await apiGet<any[]>("/api/accounts");
+  return raw.map(mapPermissionUser);
+}
+
+export async function fetchAssignableAccounts(): Promise<PermissionUser[]> {
+  const raw = await apiGet<any[]>("/api/accounts/options");
+  return raw.map(mapPermissionUser);
+}
+
+export async function updateAccount(
+  account: string,
+  data: Partial<{
+    displayName: string;
+    role: PermissionUser["role"];
+    status: PermissionUser["status"];
+  }>,
+): Promise<PermissionUser> {
+  const raw = await apiPut<any>(`/api/accounts/${encodeURIComponent(account)}`, {
+    display_name: data.displayName,
+    role: data.role,
+    status: data.status,
+  });
+  return mapPermissionUser(raw);
 }
 
 export async function rejectAcceptanceTicket(
   ticketId: string,
-  data: { feedback?: string; reviewer?: string } = {},
+  data: { feedback?: string; reviewer?: string; reviewerAccount?: string } = {},
 ): Promise<AcceptanceTicket> {
   const raw = await apiPost<any>(`/api/acceptance-tickets/${encodeURIComponent(ticketId)}/actions/reject`, {
     feedback: data.feedback,
     reviewer: data.reviewer,
+    reviewer_account: data.reviewerAccount,
   });
   return mapAcceptanceTicket(raw);
 }
@@ -2268,6 +2432,26 @@ export async function fetchTaskStatusCounts(): Promise<Array<{ status: string; c
 
 export async function fetchDataStatusCounts(): Promise<Array<{ status: string; count: number }>> {
   return apiGet("/api/ops/data-status-counts");
+}
+
+export async function fetchPersonalCenterOverview(): Promise<PersonalCenterOverview> {
+  const raw = await apiGet<any>("/api/personal-center");
+  return {
+    projects: (raw.projects ?? []).map(mapProject),
+    requirements: (raw.requirements ?? []).map(mapRequirement),
+    collectionTasks: (raw.collection_tasks ?? raw.collectionTasks ?? []).map((item: any) => ({
+      project: mapPersonalCenterProject(item.project, item.requirement),
+      requirement: mapRequirement(item.requirement ?? {}),
+      taskGroup: mapTaskGroup(item.task_group ?? item.taskGroup ?? {}),
+    })),
+    acceptanceTasks: (raw.acceptance_tasks ?? raw.acceptanceTasks ?? []).map((item: any) => ({
+      project: mapPersonalCenterProject(item.project, item.requirement),
+      requirement: mapRequirement(item.requirement ?? {}),
+      taskGroup: mapTaskGroup(item.task_group ?? item.taskGroup ?? {}),
+      ticket: item.ticket ? mapAcceptanceTicket(item.ticket) : undefined,
+      reviewStatus: (item.review_status ?? item.reviewStatus ?? "pending") as PersonalCenterAcceptanceTask["reviewStatus"],
+    })),
+  };
 }
 
 // ---- Execution Records ----

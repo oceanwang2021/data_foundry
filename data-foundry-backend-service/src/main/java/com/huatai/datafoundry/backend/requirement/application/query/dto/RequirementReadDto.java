@@ -11,8 +11,14 @@ public class RequirementReadDto {
   private String phase;
   private String status;
   private Boolean schemaLocked;
+  private String createdBy;
+  private String createdByAccount;
   private String owner;
+  private String ownerAccount;
   private String assignee;
+  private String assigneeAccount;
+  private String acceptanceOwner;
+  private String acceptanceOwnerAccount;
   private String businessGoal;
   private String backgroundKnowledge;
   private String businessBoundary;
@@ -72,6 +78,22 @@ public class RequirementReadDto {
     this.schemaLocked = schemaLocked;
   }
 
+  public String getCreatedBy() {
+    return createdBy;
+  }
+
+  public void setCreatedBy(String createdBy) {
+    this.createdBy = createdBy;
+  }
+
+  public String getCreatedByAccount() {
+    return createdByAccount;
+  }
+
+  public void setCreatedByAccount(String createdByAccount) {
+    this.createdByAccount = createdByAccount;
+  }
+
   public String getOwner() {
     return owner;
   }
@@ -80,12 +102,44 @@ public class RequirementReadDto {
     this.owner = owner;
   }
 
+  public String getOwnerAccount() {
+    return ownerAccount;
+  }
+
+  public void setOwnerAccount(String ownerAccount) {
+    this.ownerAccount = ownerAccount;
+  }
+
   public String getAssignee() {
     return assignee;
   }
 
   public void setAssignee(String assignee) {
     this.assignee = assignee;
+  }
+
+  public String getAssigneeAccount() {
+    return assigneeAccount;
+  }
+
+  public void setAssigneeAccount(String assigneeAccount) {
+    this.assigneeAccount = assigneeAccount;
+  }
+
+  public String getAcceptanceOwner() {
+    return acceptanceOwner;
+  }
+
+  public void setAcceptanceOwner(String acceptanceOwner) {
+    this.acceptanceOwner = acceptanceOwner;
+  }
+
+  public String getAcceptanceOwnerAccount() {
+    return acceptanceOwnerAccount;
+  }
+
+  public void setAcceptanceOwnerAccount(String acceptanceOwnerAccount) {
+    this.acceptanceOwnerAccount = acceptanceOwnerAccount;
   }
 
   public String getBusinessGoal() {
@@ -168,4 +222,3 @@ public class RequirementReadDto {
     this.wideTable = wideTable;
   }
 }
-

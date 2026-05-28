@@ -48,7 +48,8 @@ export default function CreateProjectModal({ isOpen, onClose, onSaved }: Props) 
         description: description.trim() || undefined,
         ownerTeam: ownerTeam.trim() || undefined,
         businessBackground: businessBackground.trim() || undefined,
-        createdBy: currentUser.name,
+        createdBy: currentUser?.name ?? "",
+        createdByAccount: currentUser?.account ?? undefined,
       });
       onSaved(project);
     } catch (err: any) {
@@ -94,7 +95,7 @@ export default function CreateProjectModal({ isOpen, onClose, onSaved }: Props) 
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">创建人（自动）</label>
               <input
-                value={currentUser.name}
+                value={currentUser?.name ?? ""}
                 disabled
                 className="w-full rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
               />
@@ -177,4 +178,3 @@ export default function CreateProjectModal({ isOpen, onClose, onSaved }: Props) 
     </div>
   );
 }
-

@@ -44,6 +44,7 @@ public class ProjectQueryService {
     out.setId(record.getId());
     out.setName(record.getName());
     out.setCreatedBy(record.getCreatedBy());
+    out.setCreatedByAccount(record.getCreatedByAccount());
     out.setBusinessBackground(record.getBusinessBackground());
     out.setDescription(record.getDescription());
     out.setStatus(record.getStatus());

@@ -33,6 +33,7 @@ export type Project = {
   id: string;
   name: string;
   createdBy?: string;
+  createdByAccount?: string;
   businessBackground?: string;
   description: string;
   status: "active" | "planning";
@@ -70,8 +71,14 @@ export type Requirement = {
   title: string;
   status: "draft" | "aligning" | "ready" | "running";
   schemaLocked?: boolean;
+  createdBy?: string;
+  createdByAccount?: string;
   owner: string;
+  ownerAccount?: string;
   assignee: string;
+  assigneeAccount?: string;
+  acceptanceOwner?: string;
+  acceptanceOwnerAccount?: string;
   businessGoal: string;
   backgroundKnowledge?: string;
   businessBoundary?: string;

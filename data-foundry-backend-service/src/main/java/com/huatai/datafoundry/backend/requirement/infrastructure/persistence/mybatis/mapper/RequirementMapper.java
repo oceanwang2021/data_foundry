@@ -10,21 +10,21 @@ import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface RequirementMapper {
-  @Insert("insert into requirements (id, project_id, title, phase, status, schema_locked, owner, assignee, "
+  @Insert("insert into requirements (id, project_id, title, phase, status, schema_locked, created_by, created_by_account, owner, owner_account, assignee, assignee_account, acceptance_owner, acceptance_owner_account, "
       + "business_goal, background_knowledge, business_boundary, delivery_scope, processing_rule_drafts, "
       + "collection_policy, data_update_enabled, data_update_mode) "
-      + "values (#{id}, #{projectId}, #{title}, #{phase}, #{status}, #{schemaLocked}, #{owner}, #{assignee}, "
+      + "values (#{id}, #{projectId}, #{title}, #{phase}, #{status}, #{schemaLocked}, #{createdBy}, #{createdByAccount}, #{owner}, #{ownerAccount}, #{assignee}, #{assigneeAccount}, #{acceptanceOwner}, #{acceptanceOwnerAccount}, "
       + "#{businessGoal}, #{backgroundKnowledge}, #{businessBoundary}, #{deliveryScope}, #{processingRuleDrafts}, "
       + "#{collectionPolicy}, #{dataUpdateEnabled}, #{dataUpdateMode})")
   int insert(RequirementRecord record);
 
-  @Select("select id, project_id, title, phase, status, schema_locked, owner, assignee, business_goal, "
+  @Select("select id, project_id, title, phase, status, schema_locked, created_by as createdBy, created_by_account as createdByAccount, owner, owner_account as ownerAccount, assignee, assignee_account as assigneeAccount, acceptance_owner as acceptanceOwner, acceptance_owner_account as acceptanceOwnerAccount, business_goal, "
       + "background_knowledge, business_boundary, delivery_scope, processing_rule_drafts, collection_policy, data_update_enabled, "
       + "data_update_mode, created_at, updated_at "
       + "from requirements where project_id = #{projectId} order by created_at desc")
   List<RequirementRecord> listByProject(@Param("projectId") String projectId);
 
-  @Select("select id, project_id, title, phase, status, schema_locked, owner, assignee, business_goal, "
+  @Select("select id, project_id, title, phase, status, schema_locked, created_by as createdBy, created_by_account as createdByAccount, owner, owner_account as ownerAccount, assignee, assignee_account as assigneeAccount, acceptance_owner as acceptanceOwner, acceptance_owner_account as acceptanceOwnerAccount, business_goal, "
       + "background_knowledge, business_boundary, delivery_scope, processing_rule_drafts, collection_policy, data_update_enabled, "
       + "data_update_mode, created_at, updated_at "
       + "from requirements where project_id = #{projectId} and id = #{requirementId}")
@@ -32,7 +32,7 @@ public interface RequirementMapper {
       @Param("projectId") String projectId,
       @Param("requirementId") String requirementId);
 
-  @Select("select id, project_id, title, phase, status, schema_locked, owner, assignee, business_goal, "
+  @Select("select id, project_id, title, phase, status, schema_locked, created_by as createdBy, created_by_account as createdByAccount, owner, owner_account as ownerAccount, assignee, assignee_account as assigneeAccount, acceptance_owner as acceptanceOwner, acceptance_owner_account as acceptanceOwnerAccount, business_goal, "
       + "background_knowledge, business_boundary, delivery_scope, processing_rule_drafts, collection_policy, data_update_enabled, "
       + "data_update_mode, created_at, updated_at "
       + "from requirements where id = #{requirementId}")
@@ -46,8 +46,14 @@ public interface RequirementMapper {
       "  <if test='phase != null'>phase = #{phase},</if>",
       "  <if test='status != null'>status = #{status},</if>",
       "  <if test='schemaLocked != null'>schema_locked = #{schemaLocked},</if>",
+      "  <if test='createdBy != null'>created_by = #{createdBy},</if>",
+      "  <if test='createdByAccount != null'>created_by_account = #{createdByAccount},</if>",
       "  <if test='owner != null'>owner = #{owner},</if>",
+      "  <if test='ownerAccount != null'>owner_account = #{ownerAccount},</if>",
       "  <if test='assignee != null'>assignee = #{assignee},</if>",
+      "  <if test='assigneeAccount != null'>assignee_account = #{assigneeAccount},</if>",
+      "  <if test='acceptanceOwner != null'>acceptance_owner = #{acceptanceOwner},</if>",
+      "  <if test='acceptanceOwnerAccount != null'>acceptance_owner_account = #{acceptanceOwnerAccount},</if>",
       "  <if test='businessGoal != null'>business_goal = #{businessGoal},</if>",
       "  <if test='backgroundKnowledge != null'>background_knowledge = #{backgroundKnowledge},</if>",
       "  <if test='businessBoundary != null'>business_boundary = #{businessBoundary},</if>",

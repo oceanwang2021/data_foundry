@@ -24,12 +24,27 @@ DROP TABLE IF EXISTS audit_rules;
 DROP TABLE IF EXISTS knowledge_bases;
 DROP TABLE IF EXISTS requirements;
 DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS accounts;
+
+CREATE TABLE accounts (
+  account             VARCHAR(255)  NOT NULL PRIMARY KEY,
+  password_hash       VARCHAR(255)  NOT NULL,
+  display_name        VARCHAR(255)  NOT NULL,
+  role                VARCHAR(32)   NOT NULL,
+  status              VARCHAR(32)   NOT NULL DEFAULT 'ACTIVE',
+  created_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_accounts_status (status),
+  INDEX idx_accounts_role (role),
+  INDEX idx_accounts_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE projects (
   id                  VARCHAR(64)   NOT NULL PRIMARY KEY,
   sort_order          INT           NOT NULL DEFAULT 0,
   name                VARCHAR(255)  NOT NULL,
   created_by          VARCHAR(255)  NOT NULL DEFAULT '',
+  created_by_account  VARCHAR(255)  NOT NULL DEFAULT '',
   owner_team          VARCHAR(255)  NOT NULL DEFAULT '',
   description         TEXT          NULL,
   status              VARCHAR(32)   NOT NULL DEFAULT 'active',
@@ -51,8 +66,14 @@ CREATE TABLE requirements (
   parent_requirement_id     VARCHAR(64)   NULL,
   schema_locked             TINYINT(1)    NULL,
   status                    VARCHAR(32)   NOT NULL DEFAULT 'draft',
+  created_by                VARCHAR(255)  NULL,
+  created_by_account        VARCHAR(255)  NULL,
   owner                     VARCHAR(255)  NULL,
+  owner_account             VARCHAR(255)  NULL,
   assignee                  VARCHAR(255)  NULL,
+  assignee_account          VARCHAR(255)  NULL,
+  acceptance_owner          VARCHAR(255)  NULL,
+  acceptance_owner_account  VARCHAR(255)  NULL,
   business_goal             TEXT          NULL,
   background_knowledge      TEXT          NULL,
   business_boundary         TEXT          NULL,
@@ -407,7 +428,9 @@ CREATE TABLE acceptance_tickets (
   scope_key          VARCHAR(128) NOT NULL,
   dataset            VARCHAR(255) NULL,
   owner              VARCHAR(128) NULL,
+  owner_account      VARCHAR(255) NULL,
   reviewer           VARCHAR(128) NULL,
+  reviewer_account   VARCHAR(255) NULL,
   status             VARCHAR(32)  NOT NULL DEFAULT 'pending',
   feedback           TEXT         NULL,
   row_ids_json       JSON         NULL,

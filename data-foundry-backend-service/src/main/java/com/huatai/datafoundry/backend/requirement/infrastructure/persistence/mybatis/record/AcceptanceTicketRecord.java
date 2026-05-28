@@ -11,7 +11,9 @@ public class AcceptanceTicketRecord {
   private String scopeKey;
   private String dataset;
   private String owner;
+  private String ownerAccount;
   private String reviewer;
+  private String reviewerAccount;
   private String status;
   private String feedback;
   private String rowIdsJson;
@@ -39,8 +41,12 @@ public class AcceptanceTicketRecord {
   public void setDataset(String dataset) { this.dataset = dataset; }
   public String getOwner() { return owner; }
   public void setOwner(String owner) { this.owner = owner; }
+  public String getOwnerAccount() { return ownerAccount; }
+  public void setOwnerAccount(String ownerAccount) { this.ownerAccount = ownerAccount; }
   public String getReviewer() { return reviewer; }
   public void setReviewer(String reviewer) { this.reviewer = reviewer; }
+  public String getReviewerAccount() { return reviewerAccount; }
+  public void setReviewerAccount(String reviewerAccount) { this.reviewerAccount = reviewerAccount; }
   public String getStatus() { return status; }
   public void setStatus(String status) { this.status = status; }
   public String getFeedback() { return feedback; }

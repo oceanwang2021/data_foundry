@@ -81,7 +81,11 @@ public class AcceptanceTicketFacadeController {
     out.put("scopeKey", record.getScopeKey());
     out.put("dataset", record.getDataset());
     out.put("owner", record.getOwner());
+    out.put("owner_account", record.getOwnerAccount());
+    out.put("ownerAccount", record.getOwnerAccount());
     out.put("reviewer", record.getReviewer());
+    out.put("reviewer_account", record.getReviewerAccount());
+    out.put("reviewerAccount", record.getReviewerAccount());
     out.put("status", record.getStatus());
     out.put("feedback", record.getFeedback());
     out.put("row_ids_json", record.getRowIdsJson());

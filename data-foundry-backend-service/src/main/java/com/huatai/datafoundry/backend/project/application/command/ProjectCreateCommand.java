@@ -6,6 +6,7 @@ public class ProjectCreateCommand {
   private String ownerTeam;
   private String businessBackground;
   private String createdBy;
+  private String createdByAccount;
 
   public String getName() {
     return name;
@@ -46,5 +47,12 @@ public class ProjectCreateCommand {
   public void setCreatedBy(String createdBy) {
     this.createdBy = createdBy;
   }
-}
 
+  public String getCreatedByAccount() {
+    return createdByAccount;
+  }
+
+  public void setCreatedByAccount(String createdByAccount) {
+    this.createdByAccount = createdByAccount;
+  }
+}

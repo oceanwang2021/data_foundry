@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @MapperScan(
     basePackages = {
+      "com.huatai.datafoundry.backend.account.infrastructure.persistence.mybatis.mapper",
       "com.huatai.datafoundry.backend.project.infrastructure.persistence.mybatis.mapper",
       "com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper",
       "com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.mapper"

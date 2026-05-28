@@ -615,8 +615,14 @@ public class RequirementQueryService {
         req.setPhase(row.getPhase());
         req.setStatus(row.getStatus());
         req.setSchemaLocked(row.getSchemaLocked());
+        req.setCreatedBy(row.getCreatedBy());
+        req.setCreatedByAccount(row.getCreatedByAccount());
         req.setOwner(row.getOwner());
+        req.setOwnerAccount(row.getOwnerAccount());
         req.setAssignee(row.getAssignee());
+        req.setAssigneeAccount(row.getAssigneeAccount());
+        req.setAcceptanceOwner(row.getAcceptanceOwner());
+        req.setAcceptanceOwnerAccount(row.getAcceptanceOwnerAccount());
         req.setCreatedAt(row.getCreatedAt());
         req.setUpdatedAt(row.getUpdatedAt());
 
@@ -665,8 +671,14 @@ public class RequirementQueryService {
     dto.setPhase(record.getPhase());
     dto.setStatus(record.getStatus());
     dto.setSchemaLocked(record.getSchemaLocked());
+    dto.setCreatedBy(record.getCreatedBy());
+    dto.setCreatedByAccount(record.getCreatedByAccount());
     dto.setOwner(record.getOwner());
+    dto.setOwnerAccount(record.getOwnerAccount());
     dto.setAssignee(record.getAssignee());
+    dto.setAssigneeAccount(record.getAssigneeAccount());
+    dto.setAcceptanceOwner(record.getAcceptanceOwner());
+    dto.setAcceptanceOwnerAccount(record.getAcceptanceOwnerAccount());
     dto.setBusinessGoal(record.getBusinessGoal());
     dto.setBackgroundKnowledge(record.getBackgroundKnowledge());
     dto.setBusinessBoundary(record.getBusinessBoundary());

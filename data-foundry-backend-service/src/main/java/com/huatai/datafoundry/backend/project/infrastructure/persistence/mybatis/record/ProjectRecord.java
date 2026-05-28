@@ -6,6 +6,7 @@ public class ProjectRecord {
   private String id;
   private String name;
   private String createdBy;
+  private String createdByAccount;
   private String businessBackground;
   private String description;
   private String status;
@@ -37,6 +38,14 @@ public class ProjectRecord {
 
   public void setCreatedBy(String createdBy) {
     this.createdBy = createdBy;
+  }
+
+  public String getCreatedByAccount() {
+    return createdByAccount;
+  }
+
+  public void setCreatedByAccount(String createdByAccount) {
+    this.createdByAccount = createdByAccount;
   }
 
   public String getBusinessBackground() {

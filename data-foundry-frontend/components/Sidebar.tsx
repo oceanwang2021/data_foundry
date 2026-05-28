@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
@@ -16,10 +15,18 @@ import {
   Settings,
   SlidersHorizontal,
   Users,
+  UserRound,
+  type LucideIcon,
 } from "lucide-react";
-import { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { canViewCollectionTasks, getCurrentUser, subscribePermissionsChanged, type UserRole } from "@/lib/auth-permissions";
+import {
+  canViewCollectionTasks,
+  getCurrentUser,
+  isAdminRole,
+  subscribePermissionsChanged,
+  type PermissionUser,
+  type UserRole,
+} from "@/lib/auth-permissions";
 
 type NavChildType = {
   name: string;
@@ -65,13 +72,14 @@ const mainNav: NavItemType[] = [
       nav === "requirements"
       || (!nav && (
         pathname === "/requirements"
-      || (
-        isRequirementDetailPath(pathname)
-        && !isRequirementTaskPath(pathname)
-        && tab !== "tasks"
-        && tab !== "acceptance"
-        && tab !== "audit"
-      ))),
+        || (
+          isRequirementDetailPath(pathname)
+          && !isRequirementTaskPath(pathname)
+          && tab !== "tasks"
+          && tab !== "acceptance"
+          && tab !== "audit"
+        )
+      )),
   },
   {
     name: "采集任务管理",
@@ -81,8 +89,8 @@ const mainNav: NavItemType[] = [
       nav === "tasks"
       || (!nav && (
         pathname === "/collection-tasks"
-      || isRequirementTaskPath(pathname)
-      || (isRequirementDetailPath(pathname) && tab === "tasks")
+        || isRequirementTaskPath(pathname)
+        || (isRequirementDetailPath(pathname) && tab === "tasks")
       )),
   },
   {
@@ -93,10 +101,10 @@ const mainNav: NavItemType[] = [
       nav === "acceptance"
       || (!nav && (
         pathname === "/acceptance"
-      || pathname.startsWith("/acceptance/")
-      || pathname === "/quality-audit"
-      || pathname.startsWith("/quality-audit/")
-      || (isRequirementDetailPath(pathname) && (tab === "acceptance" || tab === "audit"))
+        || pathname.startsWith("/acceptance/")
+        || pathname === "/quality-audit"
+        || pathname.startsWith("/quality-audit/")
+        || (isRequirementDetailPath(pathname) && (tab === "acceptance" || tab === "audit"))
       )),
   },
   { name: "知识库", href: "/knowledge-base", icon: BookOpen },
@@ -129,19 +137,45 @@ export default function Sidebar() {
   const nav = searchParams?.get("nav") ?? null;
   const context: MatchContext = { pathname: safePathname, tab, nav };
 
-  const [currentRole, setCurrentRole] = useState<UserRole>("ADMIN");
+  const [currentUser, setCurrentUser] = useState<PermissionUser | null>(() => getCurrentUser());
+  const currentRole: UserRole = currentUser?.role ?? "DATA_BA";
 
   useEffect(() => {
-    const refresh = () => setCurrentRole(getCurrentUser().role);
+    const refresh = () => setCurrentUser(getCurrentUser());
     refresh();
     return subscribePermissionsChanged(refresh);
   }, []);
 
   const visibleNav = useMemo(() => {
-    if (canViewCollectionTasks(currentRole)) {
-      return mainNav;
+    const filtered = mainNav
+      .filter((item) => canViewCollectionTasks(currentRole) || item.href !== "/collection-tasks")
+      .map((item) =>
+        item.href === "/settings/model-config"
+          ? {
+              ...item,
+              children: (item.children ?? []).filter(
+                (child) => child.href !== "/settings/permissions" || isAdminRole(currentRole),
+              ),
+            }
+          : item,
+      );
+
+    const settingsIndex = filtered.findIndex((item) => item.href === "/settings/model-config");
+    const personalCenterItem = {
+      name: "个人中心",
+      href: "/personal-center",
+      icon: UserRound,
+    } satisfies NavItemType;
+
+    if (settingsIndex < 0) {
+      return [...filtered, personalCenterItem];
     }
-    return mainNav.filter((item) => item.href !== "/collection-tasks");
+
+    return [
+      ...filtered.slice(0, settingsIndex),
+      personalCenterItem,
+      ...filtered.slice(settingsIndex),
+    ];
   }, [currentRole]);
 
   const isChildActive = (child: NavChildType) => {
@@ -167,10 +201,10 @@ export default function Sidebar() {
         >
           <item.icon className="h-4 w-4" />
           <span className="flex-1">{item.name}</span>
-          {item.children && <ChevronRight className="h-3 w-3 opacity-60" />}
+          {item.children ? <ChevronRight className="h-3 w-3 opacity-60" /> : null}
         </Link>
 
-        {item.children && (
+        {item.children ? (
           <div className="ml-6 space-y-1 border-l pl-2">
             {item.children.map((child) => {
               const childActive = isChildActive(child);
@@ -191,7 +225,7 @@ export default function Sidebar() {
               );
             })}
           </div>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -201,7 +235,7 @@ export default function Sidebar() {
       <div className="flex h-14 items-center border-b px-6">
         <span className="text-lg font-bold text-primary">Data Foundry</span>
       </div>
-      
+
       <div className="flex-1 overflow-y-auto py-4">
         <nav className="space-y-1 px-2">
           {visibleNav.map((item) => <NavItem key={item.name} item={item} />)}

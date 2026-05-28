@@ -5,8 +5,14 @@ import java.util.Map;
 public class RequirementCreateCommand {
   private String title;
   private String phase;
+  private String createdBy;
+  private String createdByAccount;
   private String owner;
+  private String ownerAccount;
   private String assignee;
+  private String assigneeAccount;
+  private String acceptanceOwner;
+  private String acceptanceOwnerAccount;
   private String businessGoal;
   private String backgroundKnowledge;
   private String deliveryScope;
@@ -31,6 +37,22 @@ public class RequirementCreateCommand {
     this.phase = phase;
   }
 
+  public String getCreatedBy() {
+    return createdBy;
+  }
+
+  public void setCreatedBy(String createdBy) {
+    this.createdBy = createdBy;
+  }
+
+  public String getCreatedByAccount() {
+    return createdByAccount;
+  }
+
+  public void setCreatedByAccount(String createdByAccount) {
+    this.createdByAccount = createdByAccount;
+  }
+
   public String getOwner() {
     return owner;
   }
@@ -39,12 +61,44 @@ public class RequirementCreateCommand {
     this.owner = owner;
   }
 
+  public String getOwnerAccount() {
+    return ownerAccount;
+  }
+
+  public void setOwnerAccount(String ownerAccount) {
+    this.ownerAccount = ownerAccount;
+  }
+
   public String getAssignee() {
     return assignee;
   }
 
   public void setAssignee(String assignee) {
     this.assignee = assignee;
+  }
+
+  public String getAssigneeAccount() {
+    return assigneeAccount;
+  }
+
+  public void setAssigneeAccount(String assigneeAccount) {
+    this.assigneeAccount = assigneeAccount;
+  }
+
+  public String getAcceptanceOwner() {
+    return acceptanceOwner;
+  }
+
+  public void setAcceptanceOwner(String acceptanceOwner) {
+    this.acceptanceOwner = acceptanceOwner;
+  }
+
+  public String getAcceptanceOwnerAccount() {
+    return acceptanceOwnerAccount;
+  }
+
+  public void setAcceptanceOwnerAccount(String acceptanceOwnerAccount) {
+    this.acceptanceOwnerAccount = acceptanceOwnerAccount;
   }
 
   public String getBusinessGoal() {
@@ -103,4 +157,3 @@ public class RequirementCreateCommand {
     this.wideTable = wideTable;
   }
 }
-

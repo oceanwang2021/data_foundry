@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Plus, X } from "lucide-react";
@@ -13,9 +13,11 @@ import type {
   WideTableSchema,
 } from "@/lib/types";
 import { createRequirement, listTargetTableColumns } from "@/lib/api-client";
+import { getCurrentUser } from "@/lib/auth-permissions";
 import { buildSelectableBusinessDates, formatBusinessDateLabel } from "@/lib/business-date";
 import { DEFAULT_RUNTIME_SETTINGS, loadRuntimeSettings } from "@/lib/runtime-settings";
 import { cn } from "@/lib/utils";
+import AccountSelect from "@/components/AccountSelect";
 import SchemaSelectorModal from "@/components/SchemaSelectorModal";
 
 type DimensionDraft = {
@@ -217,7 +219,11 @@ export default function CreateRequirementModal({
 
   const [title, setTitle] = useState("");
   const [owner, setOwner] = useState("");
+  const [ownerAccount, setOwnerAccount] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [assigneeAccount, setAssigneeAccount] = useState("");
+  const [acceptanceOwner, setAcceptanceOwner] = useState("");
+  const [acceptanceOwnerAccount, setAcceptanceOwnerAccount] = useState("");
   const [backgroundKnowledge, setBackgroundKnowledge] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState(projectId ?? defaultProjectId ?? project?.id ?? "");
 
@@ -240,6 +246,7 @@ export default function CreateRequirementModal({
 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const currentUser = getCurrentUser();
 
   const activeProject = useMemo(() => {
     if (project) {
@@ -254,7 +261,11 @@ export default function CreateRequirementModal({
     if (!isOpen) return;
     setTitle("");
     setOwner("");
+    setOwnerAccount("");
     setAssignee("");
+    setAssigneeAccount("");
+    setAcceptanceOwner("");
+    setAcceptanceOwnerAccount("");
     setBackgroundKnowledge("");
     setSelectedProjectId(projectId ?? defaultProjectId ?? project?.id ?? projectOptions[0]?.id ?? "");
     setEnabledSearchEngines(defaultSearchEngines);
@@ -299,7 +310,14 @@ export default function CreateRequirementModal({
 
   if (!isOpen) return null;
 
-  const canSave = title.trim() !== "" && activeProject != null && activeProjectId !== "" && !saving;
+  const canSave = title.trim() !== ""
+    && ownerAccount !== ""
+    && assigneeAccount !== ""
+    && acceptanceOwnerAccount !== ""
+    && currentUser?.account
+    && activeProject != null
+    && activeProjectId !== ""
+    && !saving;
 
   const toggleSearchEngine = (engine: SearchEngineProvider) => {
     setEnabledSearchEngines((prev) => {
@@ -374,8 +392,14 @@ export default function CreateRequirementModal({
 
       const created = await createRequirement(activeProjectId, {
         title: title.trim(),
+        createdBy: currentUser?.name ?? "",
+        createdByAccount: currentUser?.account ?? undefined,
         owner: owner.trim(),
+        ownerAccount: ownerAccount || undefined,
         assignee: assignee.trim(),
+        assigneeAccount: assigneeAccount || undefined,
+        acceptanceOwner: acceptanceOwner.trim(),
+        acceptanceOwnerAccount: acceptanceOwnerAccount || undefined,
         backgroundKnowledge: backgroundKnowledge.trim(),
         dataUpdateEnabled: dataUpdateEnabled === null ? undefined : dataUpdateEnabled,
         dataUpdateMode: null,
@@ -466,20 +490,38 @@ export default function CreateRequirementModal({
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">业务负责人</label>
-                <input
-                  value={owner}
-                  onChange={(e) => setOwner(e.target.value)}
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  placeholder="例如：业务-张宁"
+                <AccountSelect
+                  value={ownerAccount}
+                  displayName={owner}
+                  onChange={({ account, name }) => {
+                    setOwnerAccount(account);
+                    setOwner(name);
+                  }}
+                  placeholder="请选择业务负责人账号"
                 />
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">执行人</label>
-                <input
-                  value={assignee}
-                  onChange={(e) => setAssignee(e.target.value)}
-                  className="w-full rounded-md border px-3 py-2 text-sm"
-                  placeholder="例如：算法-陈飞"
+                <AccountSelect
+                  value={assigneeAccount}
+                  displayName={assignee}
+                  onChange={({ account, name }) => {
+                    setAssigneeAccount(account);
+                    setAssignee(name);
+                  }}
+                  placeholder="请选择执行人账号"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">数据验收负责人</label>
+                <AccountSelect
+                  value={acceptanceOwnerAccount}
+                  displayName={acceptanceOwner}
+                  onChange={({ account, name }) => {
+                    setAcceptanceOwnerAccount(account);
+                    setAcceptanceOwner(name);
+                  }}
+                  placeholder="请选择数据验收负责人账号"
                 />
               </div>
             </div>

@@ -106,7 +106,9 @@ public class AcceptanceTicketAppService {
     record.setScopeKey(scopeKey);
     record.setDataset(trimToNull(value(body, "dataset")));
     record.setOwner(trimToNull(value(body, "owner")));
+    record.setOwnerAccount(trimToNull(value(body, "owner_account", "ownerAccount")));
     record.setReviewer(trimToNull(value(body, "reviewer")));
+    record.setReviewerAccount(trimToNull(value(body, "reviewer_account", "reviewerAccount")));
     record.setStatus(normalizeStatus(firstNonBlank(value(body, "status"), "pending")));
     record.setFeedback(trimToNull(value(body, "feedback")));
     record.setLatestActionAt(now);
@@ -138,8 +140,14 @@ public class AcceptanceTicketAppService {
     if (has(body, "owner")) {
       patch.setOwner(trimToNull(value(body, "owner")));
     }
+    if (has(body, "owner_account") || has(body, "ownerAccount")) {
+      patch.setOwnerAccount(trimToNull(value(body, "owner_account", "ownerAccount")));
+    }
     if (has(body, "reviewer")) {
       patch.setReviewer(trimToNull(value(body, "reviewer")));
+    }
+    if (has(body, "reviewer_account") || has(body, "reviewerAccount")) {
+      patch.setReviewerAccount(trimToNull(value(body, "reviewer_account", "reviewerAccount")));
     }
     acceptanceTicketMapper.update(patch);
     return requireTicket(ticketId);
@@ -152,6 +160,7 @@ public class AcceptanceTicketAppService {
     patch.setStatus("rejected");
     patch.setFeedback(trimToNull(value(body, "feedback")));
     patch.setReviewer(trimToNull(value(body, "reviewer")));
+    patch.setReviewerAccount(trimToNull(value(body, "reviewer_account", "reviewerAccount")));
     patch.setLatestActionAt(LocalDateTime.now());
     acceptanceTicketMapper.update(patch);
     return requireTicket(ticketId);
@@ -177,6 +186,7 @@ public class AcceptanceTicketAppService {
     publishing.setStatus("publishing");
     publishing.setRowIdsJson(rowIds != null ? writeJson(rowIds) : null);
     publishing.setReviewer(trimToNull(value(body, "reviewer")));
+    publishing.setReviewerAccount(trimToNull(value(body, "reviewer_account", "reviewerAccount")));
     publishing.setLatestActionAt(now);
     acceptanceTicketMapper.update(publishing);
 

@@ -44,6 +44,7 @@ public class MybatisProjectRepository implements ProjectRepository {
     p.setId(record.getId());
     p.setName(record.getName());
     p.setCreatedBy(record.getCreatedBy());
+    p.setCreatedByAccount(record.getCreatedByAccount());
     p.setBusinessBackground(record.getBusinessBackground());
     p.setDescription(record.getDescription());
     p.setStatus(record.getStatus());
@@ -60,6 +61,7 @@ public class MybatisProjectRepository implements ProjectRepository {
     record.setId(project.getId());
     record.setName(project.getName());
     record.setCreatedBy(project.getCreatedBy());
+    record.setCreatedByAccount(project.getCreatedByAccount());
     record.setBusinessBackground(project.getBusinessBackground());
     record.setDescription(project.getDescription());
     record.setStatus(project.getStatus());

@@ -1,5 +1,7 @@
 package com.huatai.datafoundry.backend.requirement.interfaces.web.legacy;
 
+import com.huatai.datafoundry.backend.account.infrastructure.persistence.mybatis.record.AccountRecord;
+import com.huatai.datafoundry.backend.account.interfaces.web.AccountAuthSupport;
 import com.huatai.datafoundry.backend.requirement.application.command.RequirementCreateCommand;
 import com.huatai.datafoundry.backend.requirement.application.command.RequirementUpdateCommand;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
@@ -9,6 +11,7 @@ import com.huatai.datafoundry.backend.requirement.application.service.Requiremen
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import javax.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,11 +30,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class RequirementLegacyController {
   private final RequirementAppService requirementAppService;
   private final RequirementQueryService requirementQueryService;
+  private final AccountAuthSupport accountAuthSupport;
 
   public RequirementLegacyController(
-      RequirementAppService requirementAppService, RequirementQueryService requirementQueryService) {
+      RequirementAppService requirementAppService,
+      RequirementQueryService requirementQueryService,
+      AccountAuthSupport accountAuthSupport) {
     this.requirementAppService = requirementAppService;
     this.requirementQueryService = requirementQueryService;
+    this.accountAuthSupport = accountAuthSupport;
   }
 
   @GetMapping
@@ -41,7 +48,12 @@ public class RequirementLegacyController {
 
   @PostMapping
   public RequirementReadDto create(
-      @PathVariable("projectId") String projectId, @RequestBody RequirementCreateCommand request) {
+      @PathVariable("projectId") String projectId,
+      @RequestBody RequirementCreateCommand request,
+      HttpServletRequest httpRequest) {
+    AccountRecord currentUser = accountAuthSupport.requireCurrentUser(httpRequest);
+    request.setCreatedBy(currentUser.getDisplayName());
+    request.setCreatedByAccount(currentUser.getAccount());
     String requirementId = RequirementAppService.buildRequirementId();
     String wideTableId = buildWideTableId();
     requirementAppService.createRequirement(projectId, requirementId, wideTableId, request);
@@ -63,7 +75,9 @@ public class RequirementLegacyController {
   public RequirementReadDto update(
       @PathVariable("projectId") String projectId,
       @PathVariable("requirementId") String requirementId,
-      @RequestBody RequirementUpdateCommand request) {
+      @RequestBody RequirementUpdateCommand request,
+      HttpServletRequest httpRequest) {
+    accountAuthSupport.requireCurrentUser(httpRequest);
     requirementAppService.updateByProjectAndId(projectId, requirementId, request);
     return requirementQueryService.getByProjectAndId(projectId, requirementId);
   }
@@ -74,4 +88,3 @@ public class RequirementLegacyController {
     return String.format("WT-%d-%s", year, token);
   }
 }
-
