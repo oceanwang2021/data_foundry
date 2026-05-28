@@ -9,6 +9,8 @@ public interface FetchTaskRepository {
 
   FetchTask getByCollectionTaskId(String collectionTaskId);
 
+  List<FetchTask> listAll();
+
   List<FetchTask> listByRequirement(String requirementId);
 
   List<FetchTask> listByWideTable(String wideTableId);
@@ -16,6 +18,8 @@ public interface FetchTaskRepository {
   List<FetchTask> listByTaskGroup(String taskGroupId);
 
   int countByTaskGroup(String taskGroupId);
+
+  int deleteByTaskGroup(String taskGroupId);
 
   int upsertBatch(List<FetchTask> tasks);
 

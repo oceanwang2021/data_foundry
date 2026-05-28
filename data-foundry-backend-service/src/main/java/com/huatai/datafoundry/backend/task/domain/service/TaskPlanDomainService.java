@@ -187,10 +187,14 @@ public class TaskPlanDomainService {
     if (groups == null || groups.isEmpty()) {
       return null;
     }
-    if (groups.size() > 1 && partitionKey != null) {
+    if (partitionKey != null && !partitionKey.trim().isEmpty()) {
       for (IndicatorGroup g : groups) {
         if (partitionKey.equals(g.id)) return g;
       }
+      return null;
+    }
+    if (groups.size() > 1) {
+      return null;
     }
     return groups.get(0);
   }

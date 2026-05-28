@@ -18,11 +18,12 @@ export function buildTaskGroupExecutionSummary(
   fetchTasks: FetchTask[],
 ): TaskGroupExecutionSummary {
   const scopedTasks = fetchTasks.filter((task) => task.taskGroupId === taskGroup.id);
-  const totalTasks = Math.max(taskGroup.totalTasks, scopedTasks.length);
+  const totalTasks = Math.max(scopedTasks.length, taskGroup.totalTasks);
   const explicitCompletedTasks = scopedTasks.filter((task) => task.status === "completed").length;
   const explicitFailedTasks = scopedTasks.filter((task) => task.status === "failed").length;
-  const cancelledTasks = scopedTasks.filter((task) => task.status === "cancelled").length;
-  const invalidatedTasks = scopedTasks.filter((task) => task.status === "invalidated").length;
+  const explicitRunningTasks = scopedTasks.filter((task) => task.status === "running").length;
+  const explicitCancelledTasks = scopedTasks.filter((task) => task.status === "cancelled").length;
+  const explicitInvalidatedTasks = scopedTasks.filter((task) => task.status === "invalidated").length;
   const completedTasks = Math.max(
     explicitCompletedTasks,
     clamp(taskGroup.completedTasks, 0, totalTasks),
@@ -31,13 +32,31 @@ export function buildTaskGroupExecutionSummary(
     explicitFailedTasks,
     clamp(taskGroup.failedTasks, 0, Math.max(totalTasks - completedTasks, 0)),
   );
+  const cancelledTasks = Math.max(
+    explicitCancelledTasks,
+    clamp(taskGroup.cancelledTasks, 0, Math.max(totalTasks - completedTasks - failedTasks, 0)),
+  );
+  const invalidatedTasks = Math.max(
+    explicitInvalidatedTasks,
+    clamp(taskGroup.invalidatedTasks, 0, Math.max(totalTasks - completedTasks - failedTasks - cancelledTasks, 0)),
+  );
   const runningTasks = Math.max(
-    scopedTasks.filter((task) => task.status === "running").length,
+    explicitRunningTasks,
+    clamp(
+      taskGroup.runningTasks,
+      0,
+      Math.max(totalTasks - completedTasks - failedTasks - cancelledTasks - invalidatedTasks, 0),
+    ),
     resolveFallbackRunningTasks(taskGroup.status, totalTasks, completedTasks, failedTasks, cancelledTasks, invalidatedTasks),
   );
-  const pendingTasks = Math.max(
-    totalTasks - completedTasks - failedTasks - cancelledTasks - invalidatedTasks - runningTasks,
+  const explicitPendingTasks = Math.max(
+    totalTasks - explicitCompletedTasks - explicitFailedTasks - explicitCancelledTasks - explicitInvalidatedTasks - explicitRunningTasks,
     0,
+  );
+  const pendingTasks = clamp(
+    Math.max(explicitPendingTasks, taskGroup.pendingTasks),
+    0,
+    Math.max(totalTasks - completedTasks - failedTasks - cancelledTasks - invalidatedTasks, 0),
   );
   const status = resolveTaskGroupStatus(taskGroup.status, {
     totalTasks,

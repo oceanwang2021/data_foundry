@@ -2453,7 +2453,7 @@ function resolveIndicatorCellBinding(
 
 function buildPlannedTaskGroup(wideTableId: string, businessDate: string, planVersion: number, today: string): TaskGroup {
   const triggeredBy = businessDate <= today ? "backfill" : "schedule";
-  return { id: `tg_planned_${businessDate}`, wideTableId, businessDate, businessDateLabel: businessDate, planVersion, status: "pending", totalTasks: 0, runningTasks: 0, pendingTasks: 0, completedTasks: 0, failedTasks: 0, cancelledTasks: 0, invalidatedTasks: 0, triggeredBy, createdAt: "", updatedAt: "" };
+  return { id: `tg_planned_${businessDate}`, wideTableId, businessDate, businessDateLabel: businessDate, planVersion, status: "pending", totalTasks: 0, pendingTasks: 0, runningTasks: 0, completedTasks: 0, failedTasks: 0, cancelledTasks: 0, invalidatedTasks: 0, triggeredBy, createdAt: "", updatedAt: "" };
 }
 
 function taskRangeTone(index: number): ToneDefinition { return TASK_RANGE_TONES[Math.max(0, index) % TASK_RANGE_TONES.length]; }

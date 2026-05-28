@@ -33,6 +33,8 @@ public class TaskAppServiceIdempotencyTest {
     FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
     TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+    TaskGroupAggregateService taskGroupAggregateService = Mockito.mock(TaskGroupAggregateService.class);
+    when(taskPlanAppService.refreshPromptSnapshotsForCollection(any())).thenAnswer((invocation) -> invocation.getArgument(0));
     CollectionSearchGateway collectionSearchGateway = Mockito.mock(CollectionSearchGateway.class);
     CollectionResultRepository collectionResultRepository = Mockito.mock(CollectionResultRepository.class);
 
@@ -40,6 +42,11 @@ public class TaskAppServiceIdempotencyTest {
     tg.setId("TG1");
     tg.setStatus("pending");
     when(taskGroupRepository.getById("TG1")).thenReturn(tg);
+    FetchTask queuedTask = new FetchTask();
+    queuedTask.setId("T1");
+    queuedTask.setTaskGroupId("TG1");
+    queuedTask.setStatus("pending");
+    when(fetchTaskRepository.listByTaskGroup("TG1")).thenReturn(java.util.Collections.singletonList(queuedTask));
 
     TaskAppService svc =
         new TaskAppService(
@@ -51,6 +58,7 @@ public class TaskAppServiceIdempotencyTest {
             publisher,
             collectionSearchGateway,
             collectionResultRepository,
+            taskGroupAggregateService,
             new ObjectMapper());
 
     String key = "K-123";
@@ -71,6 +79,8 @@ public class TaskAppServiceIdempotencyTest {
     FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
     TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+    TaskGroupAggregateService taskGroupAggregateService = Mockito.mock(TaskGroupAggregateService.class);
+    when(taskPlanAppService.refreshPromptSnapshotsForCollection(any())).thenAnswer((invocation) -> invocation.getArgument(0));
     CollectionSearchGateway collectionSearchGateway = Mockito.mock(CollectionSearchGateway.class);
     CollectionResultRepository collectionResultRepository = Mockito.mock(CollectionResultRepository.class);
 
@@ -90,6 +100,7 @@ public class TaskAppServiceIdempotencyTest {
             publisher,
             collectionSearchGateway,
             collectionResultRepository,
+            taskGroupAggregateService,
             new ObjectMapper());
 
     String key = "K-456";

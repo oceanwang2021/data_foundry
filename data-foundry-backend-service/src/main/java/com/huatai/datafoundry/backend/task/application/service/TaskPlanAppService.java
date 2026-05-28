@@ -19,6 +19,9 @@ import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.PlanFetchTasksInput;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.Scope;
 import com.huatai.datafoundry.backend.targettable.application.query.service.TargetTableQueryService;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,8 +34,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
@@ -50,6 +51,9 @@ public class TaskPlanAppService {
   private final ObjectMapper objectMapper;
 
   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([^{}]+)\\}");
+  private static final Pattern YEAR_PATTERN = Pattern.compile("^(\\d{4})");
+  private static final Pattern YEAR_MONTH_PATTERN = Pattern.compile("^(\\d{4})[-/](\\d{1,2})");
+  private static final Pattern YEAR_QUARTER_PATTERN = Pattern.compile("^(\\d{4})[-/]?[Qq](\\d)");
   // Trial-run ids must fit into task_groups.id (VARCHAR(64)).
   private static final DateTimeFormatter TRIAL_ID_TIME_FMT =
       DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS", Locale.ROOT);
@@ -167,6 +171,8 @@ public class TaskPlanAppService {
     if (indicatorGroups == null || indicatorGroups.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No indicator groups available for trial run");
     }
+    Scope scope = parseScope(wideTable.getScopeJson());
+    String frequency = scope != null ? scope.frequency : null;
     Map<String, IndicatorGroup> indicatorGroupById = new HashMap<String, IndicatorGroup>();
     for (IndicatorGroup group : indicatorGroups) {
       if (group != null && group.id != null && !group.id.trim().isEmpty()) {
@@ -213,8 +219,12 @@ public class TaskPlanAppService {
         taskGroup.setPartitionType(indicatorGroups.size() > 1 ? "indicator_group" : "trial");
         taskGroup.setPartitionKey(indicatorGroups.size() > 1 ? indicatorGroup.id : null);
         taskGroup.setPartitionLabel(indicatorGroups.size() > 1 ? indicatorGroup.name : null);
+        taskGroup.setPendingTasks(0);
+        taskGroup.setRunningTasks(0);
         taskGroup.setCompletedTasks(0);
         taskGroup.setFailedTasks(0);
+        taskGroup.setCancelledTasks(0);
+        taskGroup.setInvalidatedTasks(0);
         taskGroup.setTriggeredBy("trial");
         taskGroup.setCreatedAt(now);
         taskGroup.setUpdatedAt(now);
@@ -230,6 +240,7 @@ public class TaskPlanAppService {
 
         List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
         taskGroup.setTotalTasks(drafts.size());
+        taskGroup.setPendingTasks(drafts.size());
         taskGroups.add(taskGroup);
 
         for (FetchTaskDraft draft : drafts) {
@@ -251,8 +262,8 @@ public class TaskPlanAppService {
           IndicatorGroup promptGroup = indicatorGroupById.get(draft.indicatorGroupId);
           String templateSnapshot = promptGroup != null ? promptGroup.promptTemplate : null;
           ft.setPromptTemplateSnapshot(templateSnapshot);
-          ft.setRenderedPromptText(renderPromptTemplate(templateSnapshot, draft.dimensionValues));
           ft.setBusinessDate(draft.businessDate);
+          ft.setRenderedPromptText(renderPromptTemplate(templateSnapshot, draft.dimensionValues, draft.businessDate, frequency));
           ft.setStatus("pending");
           ft.setCanRerun(Boolean.TRUE);
           ft.setOwner(effectiveOperator);
@@ -384,32 +395,41 @@ public class TaskPlanAppService {
     }
 
     List<ParameterRow> parameterRows = resolveScopeParameterRows(scope);
-    int dimensionCombinationCount = Math.max(1, parameterRows.isEmpty() ? scope.dimensionCombinationCount : parameterRows.size());
     int planVersion = 1;
     List<String> businessDates = taskPlanDomainService.buildBusinessDates(scope);
     int sortOrder = 0;
     String wideTableId = wideTable.getId();
+    List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTableId);
 
-    List<TaskGroup> taskGroups = new ArrayList<TaskGroup>(businessDates.size());
+    List<TaskGroup> taskGroups = new ArrayList<TaskGroup>(businessDates.size() * Math.max(1, indicatorGroups.size()));
     for (String businessDate : businessDates) {
-      TaskGroup tg = new TaskGroup();
-      tg.setId(taskPlanDomainService.buildTaskGroupId(wideTableId, businessDate, null, planVersion));
-      tg.setSortOrder(sortOrder++);
-      tg.setRequirementId(requirementId);
-      tg.setWideTableId(wideTableId);
-      tg.setBusinessDate(businessDate);
-      tg.setSourceType(businessDate.compareTo(todayMonth()) <= 0 ? "backfill" : "scheduled");
-      tg.setStatus("pending");
-      tg.setPlanVersion(planVersion);
-      tg.setGroupKind("baseline");
-      tg.setPartitionType("business_date");
-      tg.setPartitionKey(null);
-      tg.setPartitionLabel(null);
-      tg.setTotalTasks(dimensionCombinationCount);
-      tg.setCompletedTasks(0);
-      tg.setFailedTasks(0);
-      tg.setTriggeredBy(businessDate.compareTo(todayMonth()) <= 0 ? "backfill" : "schedule");
-      taskGroups.add(tg);
+      int totalTasks = parameterRows.isEmpty()
+          ? Math.max(1, scope.dimensionCombinationCount)
+          : resolveParameterRowsForTaskGroup(parameterRows, businessDate, scope.frequency).size();
+      for (IndicatorGroup indicatorGroup : indicatorGroups) {
+        TaskGroup tg = new TaskGroup();
+        tg.setId(taskPlanDomainService.buildTaskGroupId(wideTableId, businessDate, indicatorGroup.id, planVersion));
+        tg.setSortOrder(sortOrder++);
+        tg.setRequirementId(requirementId);
+        tg.setWideTableId(wideTableId);
+        tg.setBusinessDate(businessDate);
+        tg.setSourceType(businessDate.compareTo(todayMonth()) <= 0 ? "backfill" : "scheduled");
+        tg.setStatus("pending");
+        tg.setPlanVersion(planVersion);
+        tg.setGroupKind("baseline");
+        tg.setPartitionType("business_date");
+        tg.setPartitionKey(indicatorGroup.id);
+        tg.setPartitionLabel(indicatorGroup.name);
+        tg.setTotalTasks(totalTasks);
+        tg.setPendingTasks(totalTasks);
+        tg.setRunningTasks(0);
+        tg.setCompletedTasks(0);
+        tg.setFailedTasks(0);
+        tg.setCancelledTasks(0);
+        tg.setInvalidatedTasks(0);
+        tg.setTriggeredBy(businessDate.compareTo(todayMonth()) <= 0 ? "backfill" : "schedule");
+        taskGroups.add(tg);
+      }
     }
     if (!taskGroups.isEmpty()) {
       taskGroupRepository.upsertBatch(taskGroups);
@@ -426,6 +446,11 @@ public class TaskPlanAppService {
       List<Map<String, Object>> rawTaskGroups,
       boolean invalidateMissing) {
     if (rawTaskGroups == null || rawTaskGroups.isEmpty()) return;
+    WideTablePlanSource wideTable = wideTableReadRepository.getByIdForRequirement(requirementId, wideTableId);
+    List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(
+        wideTable != null ? wideTable.getIndicatorGroupsJson() : null,
+        wideTableId);
+    Map<String, IndicatorGroup> indicatorGroupById = buildIndicatorGroupById(indicatorGroups);
     List<TaskGroup> records = new ArrayList<TaskGroup>(rawTaskGroups.size());
     int idx = 0;
     for (Map<String, Object> raw : rawTaskGroups) {
@@ -445,11 +470,20 @@ public class TaskPlanAppService {
       tg.setPartitionType(asString(raw.get("partition_type")));
       tg.setPartitionKey(asString(raw.get("partition_key")));
       tg.setPartitionLabel(asString(raw.get("partition_label")));
-      tg.setTotalTasks(asIntOr(raw.get("total_tasks"), 0));
+      int totalTasks = asIntOr(raw.get("total_tasks"), 0);
+      tg.setTotalTasks(totalTasks);
+      tg.setPendingTasks(raw.get("pending_tasks") != null ? asIntOr(raw.get("pending_tasks"), 0) : totalTasks);
+      tg.setRunningTasks(asIntOr(raw.get("running_tasks"), 0));
       tg.setCompletedTasks(asIntOr(raw.get("completed_tasks"), 0));
       tg.setFailedTasks(asIntOr(raw.get("failed_tasks"), 0));
+      tg.setCancelledTasks(asIntOr(raw.get("cancelled_tasks"), 0));
+      tg.setInvalidatedTasks(asIntOr(raw.get("invalidated_tasks"), 0));
       tg.setTriggeredBy(asString(raw.get("triggered_by")));
       if (tg.getId() == null || tg.getId().trim().isEmpty()) {
+        continue;
+      }
+      normalizeTaskGroupPartition(tg, indicatorGroups, indicatorGroupById);
+      if (!isTaskGroupCompatibleWithIndicatorGroups(tg, indicatorGroups)) {
         continue;
       }
       records.add(tg);
@@ -485,13 +519,19 @@ public class TaskPlanAppService {
         throw new ResponseStatusException(HttpStatus.CONFLICT, "TaskGroup belongs to another wide table");
       }
 
-      // Idempotency/safety: do not regress status/counters when plan is re-applied.
-      String mergedStatus = preferMoreAdvancedStatus(e.getStatus(), r.getStatus());
-      r.setStatus(mergedStatus);
-      r.setPlanVersion(maxInt(e.getPlanVersion(), r.getPlanVersion()));
-      r.setTotalTasks(maxInt(e.getTotalTasks(), r.getTotalTasks()));
-      r.setCompletedTasks(maxInt(e.getCompletedTasks(), r.getCompletedTasks()));
-      r.setFailedTasks(maxInt(e.getFailedTasks(), r.getFailedTasks()));
+      if (shouldPreserveExistingTaskGroupState(e)) {
+        String mergedStatus = preferMoreAdvancedStatus(e.getStatus(), r.getStatus());
+        r.setStatus(mergedStatus);
+        r.setPlanVersion(maxInt(e.getPlanVersion(), r.getPlanVersion()));
+        r.setTotalTasks(maxInt(e.getTotalTasks(), r.getTotalTasks()));
+        r.setPendingTasks(maxInt(e.getPendingTasks(), r.getPendingTasks()));
+        r.setRunningTasks(maxInt(e.getRunningTasks(), r.getRunningTasks()));
+        r.setCompletedTasks(maxInt(e.getCompletedTasks(), r.getCompletedTasks()));
+        r.setFailedTasks(maxInt(e.getFailedTasks(), r.getFailedTasks()));
+        r.setCancelledTasks(maxInt(e.getCancelledTasks(), r.getCancelledTasks()));
+        r.setInvalidatedTasks(maxInt(e.getInvalidatedTasks(), r.getInvalidatedTasks()));
+        r.setLastAggregatedAt(e.getLastAggregatedAt());
+      }
     }
 
     taskGroupRepository.upsertBatch(records);
@@ -516,6 +556,24 @@ public class TaskPlanAppService {
       }
       if (!"pending".equalsIgnoreCase(asString(tg.getStatus()))) {
         continue;
+      }
+      List<FetchTask> existingTasks = fetchTaskRepository.listByTaskGroup(tg.getId());
+      if (!existingTasks.isEmpty()) {
+        boolean allPending = true;
+        for (FetchTask task : existingTasks) {
+          if (task == null) {
+            continue;
+          }
+          String status = asString(task.getStatus());
+          if (!"pending".equalsIgnoreCase(status)) {
+            allPending = false;
+            break;
+          }
+        }
+        if (!allPending) {
+          continue;
+        }
+        fetchTaskRepository.deleteByTaskGroup(tg.getId());
       }
       toInvalidate.add(tg.getId());
     }
@@ -556,9 +614,6 @@ public class TaskPlanAppService {
 
   public void ensureFetchTasksForTaskGroup(TaskGroup taskGroup) {
     if (taskGroup == null) return;
-    if (fetchTaskRepository.countByTaskGroup(taskGroup.getId()) > 0) {
-      return;
-    }
 
     WideTablePlanSource wideTable =
         wideTableReadRepository.getByIdForRequirement(taskGroup.getRequirementId(), taskGroup.getWideTableId());
@@ -568,6 +623,9 @@ public class TaskPlanAppService {
 
     Scope scope = parseScope(wideTable.getScopeJson());
     List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTable.getId());
+    if (!isTaskGroupCompatibleWithIndicatorGroups(taskGroup, indicatorGroups)) {
+      return;
+    }
     IndicatorGroup indicatorGroup = resolveIndicatorGroupForTaskGroup(taskGroup, indicatorGroups);
     if (indicatorGroup == null) {
       return;
@@ -586,8 +644,19 @@ public class TaskPlanAppService {
     input.schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion() : 1;
     input.partitionKey = taskGroup.getPartitionKey();
     input.dimensions = scope.dimensions;
-    input.parameterRows = resolveParameterRowsForTaskGroup(resolveScopeParameterRows(scope), taskGroup.getBusinessDate());
+    input.parameterRows = resolveParameterRowsForTaskGroup(resolveScopeParameterRows(scope), taskGroup.getBusinessDate(), scope.frequency);
     input.indicatorGroups = indicatorGroups;
+
+    List<FetchTask> existingTasks = fetchTaskRepository.listByTaskGroup(taskGroup.getId());
+    if (!existingTasks.isEmpty()) {
+      if (!shouldRebuildFetchTasks(taskGroup, indicatorGroup, existingTasks, input.parameterRows, scope)) {
+        if (taskGroup.getTotalTasks() == null || taskGroup.getTotalTasks().intValue() != existingTasks.size()) {
+          taskGroupRepository.upsert(withTotals(taskGroup, existingTasks.size()));
+        }
+        return;
+      }
+      fetchTaskRepository.deleteByTaskGroup(taskGroup.getId());
+    }
 
     List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
     if (drafts.isEmpty()) {
@@ -614,8 +683,8 @@ public class TaskPlanAppService {
       IndicatorGroup promptGroup = indicatorGroupById.get(draft.indicatorGroupId);
       String templateSnapshot = promptGroup != null ? promptGroup.promptTemplate : null;
       ft.setPromptTemplateSnapshot(templateSnapshot);
-      ft.setRenderedPromptText(renderPromptTemplate(templateSnapshot, draft.dimensionValues));
       ft.setBusinessDate(draft.businessDate);
+      ft.setRenderedPromptText(renderPromptTemplate(templateSnapshot, draft.dimensionValues, draft.businessDate, scope.frequency));
       ft.setStatus(draft.status);
       ft.setCanRerun(draft.canRerun);
       ft.setPlanVersion(draft.planVersion);
@@ -664,13 +733,16 @@ public class TaskPlanAppService {
         break;
       }
     }
-    if (matchedGroup == null && !indicatorGroups.isEmpty()) {
-      matchedGroup = indicatorGroups.get(0);
-    }
     Map<String, String> dimensionValues = parseStringMap(fetchTask.getDimensionValuesJson());
+    Scope scope = parseScope(wideTable.getScopeJson());
     String templateSnapshot = matchedGroup != null ? matchedGroup.promptTemplate : null;
     fetchTask.setPromptTemplateSnapshot(templateSnapshot);
-    fetchTask.setRenderedPromptText(renderPromptTemplate(templateSnapshot, dimensionValues));
+    fetchTask.setRenderedPromptText(
+        renderPromptTemplate(
+            templateSnapshot,
+            dimensionValues,
+            fetchTask.getBusinessDate(),
+            scope != null ? scope.frequency : null));
     return fetchTask;
   }
 
@@ -692,10 +764,92 @@ public class TaskPlanAppService {
     tg.setPartitionKey(taskGroup.getPartitionKey());
     tg.setPartitionLabel(taskGroup.getPartitionLabel());
     tg.setTotalTasks(total);
+    tg.setPendingTasks(taskGroup.getPendingTasks());
+    tg.setRunningTasks(taskGroup.getRunningTasks());
     tg.setCompletedTasks(taskGroup.getCompletedTasks());
     tg.setFailedTasks(taskGroup.getFailedTasks());
+    tg.setCancelledTasks(taskGroup.getCancelledTasks());
+    tg.setInvalidatedTasks(taskGroup.getInvalidatedTasks());
     tg.setTriggeredBy(taskGroup.getTriggeredBy());
+    tg.setLastAggregatedAt(taskGroup.getLastAggregatedAt());
     return tg;
+  }
+
+  private Map<String, IndicatorGroup> buildIndicatorGroupById(List<IndicatorGroup> indicatorGroups) {
+    if (indicatorGroups == null || indicatorGroups.isEmpty()) {
+      return Collections.emptyMap();
+    }
+    Map<String, IndicatorGroup> out = new LinkedHashMap<String, IndicatorGroup>();
+    for (IndicatorGroup indicatorGroup : indicatorGroups) {
+      if (indicatorGroup == null || indicatorGroup.id == null || indicatorGroup.id.trim().isEmpty()) {
+        continue;
+      }
+      out.put(indicatorGroup.id, indicatorGroup);
+    }
+    return out;
+  }
+
+  private void normalizeTaskGroupPartition(
+      TaskGroup taskGroup,
+      List<IndicatorGroup> indicatorGroups,
+      Map<String, IndicatorGroup> indicatorGroupById) {
+    if (taskGroup == null) {
+      return;
+    }
+    if (indicatorGroupById == null || indicatorGroupById.isEmpty()) {
+      return;
+    }
+    String partitionKey = asString(taskGroup.getPartitionKey());
+    if ((partitionKey == null || partitionKey.isEmpty()) && indicatorGroupById.size() == 1) {
+      partitionKey = indicatorGroups.get(0).id;
+      taskGroup.setPartitionKey(partitionKey);
+    }
+    if (partitionKey == null || partitionKey.isEmpty()) {
+      return;
+    }
+    IndicatorGroup indicatorGroup = indicatorGroupById.get(partitionKey);
+    if (indicatorGroup != null) {
+      taskGroup.setPartitionLabel(
+          indicatorGroup.name != null && !indicatorGroup.name.trim().isEmpty()
+              ? indicatorGroup.name
+              : taskGroup.getPartitionLabel());
+    }
+  }
+
+  private boolean isTaskGroupCompatibleWithIndicatorGroups(TaskGroup taskGroup, List<IndicatorGroup> indicatorGroups) {
+    if (taskGroup == null) {
+      return false;
+    }
+    if (indicatorGroups == null || indicatorGroups.isEmpty()) {
+      return true;
+    }
+    String partitionKey = asString(taskGroup.getPartitionKey());
+    if (indicatorGroups.size() == 1) {
+      if (partitionKey == null || partitionKey.isEmpty()) {
+        return true;
+      }
+      return indicatorGroups.get(0).id != null && indicatorGroups.get(0).id.equals(partitionKey);
+    }
+    if (partitionKey == null || partitionKey.isEmpty()) {
+      return false;
+    }
+    for (IndicatorGroup indicatorGroup : indicatorGroups) {
+      if (indicatorGroup != null && partitionKey.equals(indicatorGroup.id)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean shouldPreserveExistingTaskGroupState(TaskGroup existing) {
+    if (existing == null) {
+      return false;
+    }
+    String status = asString(existing.getStatus());
+    return "running".equalsIgnoreCase(status)
+        || "completed".equalsIgnoreCase(status)
+        || "failed".equalsIgnoreCase(status)
+        || "cancelled".equalsIgnoreCase(status);
   }
 
   private List<ParameterRow> buildTrialParameterRows(List<WideTableRowReadDto> rows) {
@@ -871,7 +1025,7 @@ public class TaskPlanAppService {
       return Collections.emptyList();
     }
     if (!"sql".equalsIgnoreCase(asString(scope.parameterSourceMode))) {
-      return scope.parameterRows != null ? scope.parameterRows : Collections.<ParameterRow>emptyList();
+      return normalizeParameterRows(scope.parameterRows, scope.frequency);
     }
     if (scope.parameterSourceSql == null || scope.parameterSourceSql.trim().isEmpty()) {
       return Collections.emptyList();
@@ -914,10 +1068,13 @@ public class TaskPlanAppService {
       }
       out.add(row);
     }
-    return out;
+    return normalizeParameterRows(out, scope.frequency);
   }
 
-  private List<ParameterRow> resolveParameterRowsForTaskGroup(List<ParameterRow> rows, String taskGroupBusinessDate) {
+  private List<ParameterRow> resolveParameterRowsForTaskGroup(
+      List<ParameterRow> rows,
+      String taskGroupBusinessDate,
+      String frequency) {
     if (rows == null || rows.isEmpty()) {
       return Collections.emptyList();
     }
@@ -926,11 +1083,118 @@ public class TaskPlanAppService {
       if (row == null) continue;
       String rowBizDate = row.businessDate != null ? row.businessDate.trim() : "";
       String groupBizDate = taskGroupBusinessDate != null ? taskGroupBusinessDate.trim() : "";
-      if (rowBizDate.isEmpty() || groupBizDate.isEmpty() || rowBizDate.equals(groupBizDate)) {
+      if (rowBizDate.isEmpty() || groupBizDate.isEmpty() || matchesBusinessDateSlot(rowBizDate, groupBizDate, frequency)) {
         matched.add(row);
       }
     }
     return matched;
+  }
+
+  private List<ParameterRow> normalizeParameterRows(List<ParameterRow> rows, String frequency) {
+    if (rows == null || rows.isEmpty()) {
+      return Collections.emptyList();
+    }
+    Map<String, ParameterRow> deduped = new LinkedHashMap<String, ParameterRow>();
+    int nextRowId = 1;
+    for (ParameterRow row : rows) {
+      if (row == null) {
+        continue;
+      }
+      ParameterRow normalizedRow = new ParameterRow();
+      normalizedRow.rowId = row.rowId > 0 ? row.rowId : nextRowId;
+      normalizedRow.businessDate = normalizeBusinessDateSlot(row.businessDate, frequency);
+      normalizedRow.values = new HashMap<String, String>();
+      if (row.values != null) {
+        for (Map.Entry<String, String> entry : row.values.entrySet()) {
+          if (entry == null || entry.getKey() == null) {
+            continue;
+          }
+          String key = entry.getKey().trim();
+          if (key.isEmpty()) {
+            continue;
+          }
+          normalizedRow.values.put(key, entry.getValue() == null ? "" : entry.getValue());
+        }
+      }
+      String dedupeKey = buildParameterRowDedupeKey(normalizedRow);
+      if (dedupeKey.isEmpty() || deduped.containsKey(dedupeKey)) {
+        continue;
+      }
+      normalizedRow.rowId = nextRowId++;
+      deduped.put(dedupeKey, normalizedRow);
+    }
+    return new ArrayList<ParameterRow>(deduped.values());
+  }
+
+  private String buildParameterRowDedupeKey(ParameterRow row) {
+    if (row == null) {
+      return "";
+    }
+    List<String> keys = new ArrayList<String>(row.values.keySet());
+    Collections.sort(keys);
+    StringBuilder sb = new StringBuilder();
+    String businessDate = row.businessDate != null ? row.businessDate.trim() : "";
+    sb.append(businessDate).append("::");
+    for (int i = 0; i < keys.size(); i++) {
+      String key = keys.get(i);
+      if (i > 0) {
+        sb.append("|");
+      }
+      sb.append(key).append("=").append(row.values.get(key));
+    }
+    return sb.toString();
+  }
+
+  private boolean shouldRebuildFetchTasks(
+      TaskGroup taskGroup,
+      IndicatorGroup indicatorGroup,
+      List<FetchTask> existingTasks,
+      List<ParameterRow> matchedParameterRows,
+      Scope scope) {
+    if (existingTasks == null || existingTasks.isEmpty()) {
+      return false;
+    }
+    for (FetchTask task : existingTasks) {
+      if (task == null) {
+        continue;
+      }
+      String status = task.getStatus() != null ? task.getStatus().trim().toLowerCase(Locale.ROOT) : "";
+      if (!"pending".equals(status)) {
+        return false;
+      }
+      if (!isFetchTaskCompatibleWithTaskGroup(task, taskGroup, indicatorGroup)) {
+        return true;
+      }
+    }
+    int expectedCount = !matchedParameterRows.isEmpty()
+        ? matchedParameterRows.size()
+        : Math.max(1, scope != null ? scope.dimensionCombinationCount : 1);
+    int existingCount = existingTasks.size();
+    return existingCount != expectedCount;
+  }
+
+  private boolean isFetchTaskCompatibleWithTaskGroup(
+      FetchTask task,
+      TaskGroup taskGroup,
+      IndicatorGroup indicatorGroup) {
+    if (task == null || taskGroup == null || indicatorGroup == null) {
+      return false;
+    }
+    if (task.getIndicatorGroupId() == null || !task.getIndicatorGroupId().equals(indicatorGroup.id)) {
+      return false;
+    }
+    String taskGroupBusinessDate = asString(taskGroup.getBusinessDate());
+    String taskBusinessDate = asString(task.getBusinessDate());
+    if (taskGroupBusinessDate != null
+        && !taskGroupBusinessDate.isEmpty()
+        && taskBusinessDate != null
+        && !taskBusinessDate.isEmpty()
+        && !taskGroupBusinessDate.equals(taskBusinessDate)) {
+      return false;
+    }
+    Set<String> expectedKeys = normalizeStringSet(indicatorGroup.indicatorColumns);
+    Set<String> actualKeys = parseStringSet(task.getIndicatorKeysJson());
+    return expectedKeys.equals(actualKeys);
   }
 
   private List<IndicatorGroup> parseIndicatorGroups(String indicatorGroupsJson, String wideTableId) {
@@ -997,12 +1261,13 @@ public class TaskPlanAppService {
     return groups.get(0);
   }
 
-  private String renderPromptTemplate(String promptTemplate, Map<String, String> parameterValues) {
+  private String renderPromptTemplate(
+      String promptTemplate,
+      Map<String, String> parameterValues,
+      String businessDate,
+      String frequency) {
     if (promptTemplate == null) {
       return null;
-    }
-    if (parameterValues == null || parameterValues.isEmpty()) {
-      return promptTemplate;
     }
 
     Matcher matcher = PLACEHOLDER_PATTERN.matcher(promptTemplate);
@@ -1010,17 +1275,7 @@ public class TaskPlanAppService {
       return promptTemplate;
     }
 
-    Map<String, String> normalized = new HashMap<String, String>();
-    for (Map.Entry<String, String> entry : parameterValues.entrySet()) {
-      if (entry == null || entry.getKey() == null) {
-        continue;
-      }
-      String key = entry.getKey().trim();
-      if (key.isEmpty()) {
-        continue;
-      }
-      normalized.put(key.toLowerCase(Locale.ROOT), entry.getValue() == null ? "" : entry.getValue());
-    }
+    Map<String, String> normalized = buildPromptRenderValues(parameterValues, businessDate, frequency);
 
     StringBuffer sb = new StringBuffer();
     do {
@@ -1035,6 +1290,108 @@ public class TaskPlanAppService {
     } while (matcher.find());
     matcher.appendTail(sb);
     return sb.toString();
+  }
+
+  private Map<String, String> buildPromptRenderValues(
+      Map<String, String> parameterValues,
+      String businessDate,
+      String frequency) {
+    Map<String, String> normalized = new HashMap<String, String>();
+    if (parameterValues != null) {
+      for (Map.Entry<String, String> entry : parameterValues.entrySet()) {
+        if (entry == null || entry.getKey() == null) {
+          continue;
+        }
+        String key = entry.getKey().trim();
+        if (key.isEmpty()) {
+          continue;
+        }
+        normalized.put(key.toLowerCase(Locale.ROOT), entry.getValue() == null ? "" : entry.getValue());
+      }
+    }
+
+    normalized.put("business_date", resolvePromptBusinessDate(businessDate, frequency));
+    return normalized;
+  }
+
+  private String resolvePromptBusinessDate(String businessDate, String frequency) {
+    String normalized = normalizeBusinessDateSlot(businessDate, frequency);
+    if (normalized != null && !normalized.isEmpty()) {
+      return normalized;
+    }
+    return LocalDate.now().toString();
+  }
+
+  private boolean matchesBusinessDateSlot(String rowBusinessDate, String taskGroupBusinessDate, String frequency) {
+    String normalizedRow = normalizeBusinessDateSlot(rowBusinessDate, frequency);
+    String normalizedGroup = normalizeBusinessDateSlot(taskGroupBusinessDate, frequency);
+    if (normalizedRow == null || normalizedGroup == null) {
+      return false;
+    }
+    return normalizedRow.equals(normalizedGroup);
+  }
+
+  private String normalizeBusinessDateSlot(String rawBusinessDate, String frequency) {
+    String businessDate = asString(rawBusinessDate);
+    if (businessDate == null || businessDate.isEmpty()) {
+      return null;
+    }
+    String normalizedFrequency = frequency != null ? frequency.trim().toLowerCase(Locale.ROOT) : "";
+    if ("yearly".equals(normalizedFrequency)) {
+      return extractYearToken(businessDate);
+    }
+    if ("monthly".equals(normalizedFrequency)) {
+      return extractYearMonthToken(businessDate);
+    }
+    if ("quarterly".equals(normalizedFrequency)) {
+      return extractQuarterToken(businessDate);
+    }
+    return businessDate;
+  }
+
+  private String extractYearToken(String rawBusinessDate) {
+    Matcher matcher = YEAR_PATTERN.matcher(rawBusinessDate);
+    return matcher.find() ? matcher.group(1) : rawBusinessDate;
+  }
+
+  private String extractYearMonthToken(String rawBusinessDate) {
+    Matcher matcher = YEAR_MONTH_PATTERN.matcher(rawBusinessDate);
+    if (matcher.find()) {
+      String year = matcher.group(1);
+      int month = parsePositiveInt(matcher.group(2));
+      if (month >= 1 && month <= 12) {
+        return String.format(Locale.ROOT, "%s-%02d", year, month);
+      }
+      return year + "-" + matcher.group(2);
+    }
+    return rawBusinessDate;
+  }
+
+  private String extractQuarterToken(String rawBusinessDate) {
+    Matcher quarterMatcher = YEAR_QUARTER_PATTERN.matcher(rawBusinessDate);
+    if (quarterMatcher.find()) {
+      return String.format(Locale.ROOT, "%s-Q%s", quarterMatcher.group(1), quarterMatcher.group(2));
+    }
+    Matcher monthMatcher = YEAR_MONTH_PATTERN.matcher(rawBusinessDate);
+    if (monthMatcher.find()) {
+      int month = parsePositiveInt(monthMatcher.group(2));
+      if (month >= 1 && month <= 12) {
+        int quarter = ((month - 1) / 3) + 1;
+        return String.format(Locale.ROOT, "%s-Q%d", monthMatcher.group(1), quarter);
+      }
+    }
+    return rawBusinessDate;
+  }
+
+  private int parsePositiveInt(String rawValue) {
+    if (rawValue == null) {
+      return -1;
+    }
+    try {
+      return Integer.parseInt(rawValue.trim());
+    } catch (Exception ex) {
+      return -1;
+    }
   }
 
   private Map<String, String> parseStringMap(String rawJson) {
@@ -1061,6 +1418,48 @@ public class TaskPlanAppService {
     } catch (Exception ex) {
       return Collections.emptyMap();
     }
+  }
+
+  private Set<String> parseStringSet(String rawJson) {
+    if (rawJson == null || rawJson.trim().isEmpty()) {
+      return Collections.emptySet();
+    }
+    try {
+      List<?> raw = objectMapper.readValue(rawJson, List.class);
+      if (raw == null || raw.isEmpty()) {
+        return Collections.emptySet();
+      }
+      Set<String> normalized = new LinkedHashSet<String>();
+      for (Object item : raw) {
+        if (item == null) {
+          continue;
+        }
+        String value = String.valueOf(item).trim();
+        if (!value.isEmpty()) {
+          normalized.add(value);
+        }
+      }
+      return normalized;
+    } catch (Exception ex) {
+      return Collections.emptySet();
+    }
+  }
+
+  private Set<String> normalizeStringSet(List<String> values) {
+    if (values == null || values.isEmpty()) {
+      return Collections.emptySet();
+    }
+    Set<String> normalized = new LinkedHashSet<String>();
+    for (String item : values) {
+      if (item == null) {
+        continue;
+      }
+      String value = item.trim();
+      if (!value.isEmpty()) {
+        normalized.add(value);
+      }
+    }
+    return normalized;
   }
 
   private String writeJson(Object value) {

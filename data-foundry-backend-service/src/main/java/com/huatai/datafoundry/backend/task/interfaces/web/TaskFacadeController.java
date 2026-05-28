@@ -4,6 +4,7 @@ import com.huatai.datafoundry.backend.requirement.application.query.dto.Collecti
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskResultsReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.MetricFieldMappingReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementTaskRuntimeReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.service.RequirementQueryService;
 import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
@@ -48,6 +49,13 @@ public class TaskFacadeController {
       @RequestParam("project_id") String projectId,
       @RequestParam("requirement_id") String requirementId) {
     return requirementQueryService.listFetchTasks(projectId, requirementId);
+  }
+
+  @GetMapping("/runtime")
+  public RequirementTaskRuntimeReadDto getTaskRuntime(
+      @RequestParam("project_id") String projectId,
+      @RequestParam("requirement_id") String requirementId) {
+    return requirementQueryService.getTaskRuntime(projectId, requirementId);
   }
 
   @GetMapping("/{taskId}/results")
@@ -122,6 +130,11 @@ public class TaskFacadeController {
   @GetMapping("/{taskId}/runs")
   public List<Map<String, Object>> listTaskRuns(@PathVariable("taskId") String taskId) {
     return requirementQueryService.listTaskRuns(taskId);
+  }
+
+  @GetMapping("/{taskId}/status-detail")
+  public Map<String, Object> getTaskStatusDetail(@PathVariable("taskId") String taskId) {
+    return taskAppService.getCollectionTaskStatusDetail(taskId);
   }
 
   @PostMapping("/task-groups/{taskGroupId}/actions/execute")

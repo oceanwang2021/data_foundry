@@ -4,6 +4,7 @@ import com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.re
 import java.math.BigDecimal;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -22,6 +23,16 @@ public interface FetchTaskMapper {
           + "where requirement_id = #{requirementId} "
           + "order by sort_order asc")
   List<FetchTaskRecord> listByRequirement(@Param("requirementId") String requirementId);
+
+  @Select(
+      "select "
+          + "id, sort_order, requirement_id, wide_table_id, task_group_id, batch_id, row_id, "
+          + "indicator_group_id, indicator_group_name, name, schema_version, execution_mode, "
+          + "indicator_keys_json, dimension_values_json, rendered_prompt_text, prompt_template_snapshot, collection_task_id, business_date, status, can_rerun, "
+          + "invalidated_reason, owner, confidence, plan_version, row_binding_key, created_at, updated_at "
+          + "from fetch_tasks "
+          + "order by requirement_id asc, sort_order asc")
+  List<FetchTaskRecord> listAll();
 
   @Select(
       "select "
@@ -70,6 +81,9 @@ public interface FetchTaskMapper {
   @Select("select count(1) from fetch_tasks where task_group_id = #{taskGroupId}")
   int countByTaskGroup(@Param("taskGroupId") String taskGroupId);
 
+  @Delete("delete from fetch_tasks where task_group_id = #{taskGroupId}")
+  int deleteByTaskGroup(@Param("taskGroupId") String taskGroupId);
+
   @Insert({
       "<script>",
       "insert into fetch_tasks (",
@@ -86,6 +100,10 @@ public interface FetchTaskMapper {
       "  </foreach>",
       "on duplicate key update ",
       "  status = values(status),",
+      "  indicator_group_name = coalesce(values(indicator_group_name), indicator_group_name),",
+      "  indicator_keys_json = coalesce(values(indicator_keys_json), indicator_keys_json),",
+      "  business_date = coalesce(values(business_date), business_date),",
+      "  row_binding_key = coalesce(values(row_binding_key), row_binding_key),",
       "  rendered_prompt_text = values(rendered_prompt_text),",
       "  prompt_template_snapshot = values(prompt_template_snapshot),",
       "  dimension_values_json = values(dimension_values_json),",

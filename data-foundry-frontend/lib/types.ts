@@ -258,13 +258,14 @@ export type TaskGroup = {
   rowSnapshots?: WideTableRecord[];
   status: TaskGroupStatus;
   totalTasks: number;
-  runningTasks: number;
   pendingTasks: number;
+  runningTasks: number;
   completedTasks: number;
   failedTasks: number;
   cancelledTasks: number;
   invalidatedTasks: number;
   triggeredBy: "schedule" | "backfill" | "manual" | "trial";
+  lastAggregatedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -283,6 +284,9 @@ export type FetchTask = {
   rowBindingKey?: string;
   indicatorGroupId: string;
   indicatorGroupName: string;
+  indicatorKeys?: string[];
+  dimensionValues?: Record<string, string>;
+  businessDate?: string;
   collectionTaskId?: string;
   status: FetchTaskStatus;
   confidence?: number;

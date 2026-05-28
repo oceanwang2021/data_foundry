@@ -40,6 +40,8 @@ type Props = {
   scheduleJobs: ScheduleJob[];
 };
 
+type RequirementUpdatePayload = Parameters<typeof updateRequirement>[2];
+
 const resolveBackTarget = (projectId: string, navSource?: NavSource, viewMode?: Props["viewMode"]) => {
   const source = navSource
     ?? (viewMode === "requirement" ? "requirements" : viewMode === "tasks" ? "tasks" : viewMode === "acceptance" ? "acceptance" : "projects");
@@ -101,23 +103,69 @@ export default function ProjectRequirementDetailPanel({
     [requirements, requirementId],
   );
 
-  const handleRequirementChange = (nextRequirement: Requirement) => {
+  const buildRequirementUpdatePayload = (
+    currentRequirement: Requirement,
+    nextRequirement: Requirement,
+  ): RequirementUpdatePayload => {
+    const payload: RequirementUpdatePayload = {};
+    if (nextRequirement.title !== currentRequirement.title) payload.title = nextRequirement.title;
+    if (nextRequirement.status !== currentRequirement.status) payload.status = nextRequirement.status;
+    if (nextRequirement.owner !== currentRequirement.owner) payload.owner = nextRequirement.owner;
+    if (nextRequirement.assignee !== currentRequirement.assignee) payload.assignee = nextRequirement.assignee;
+    if (nextRequirement.backgroundKnowledge !== currentRequirement.backgroundKnowledge) {
+      payload.backgroundKnowledge = nextRequirement.backgroundKnowledge;
+    }
+    if (nextRequirement.dataUpdateEnabled !== currentRequirement.dataUpdateEnabled) {
+      payload.dataUpdateEnabled = nextRequirement.dataUpdateEnabled;
+    }
+    if (nextRequirement.dataUpdateMode !== currentRequirement.dataUpdateMode) {
+      payload.dataUpdateMode = nextRequirement.dataUpdateMode;
+    }
+    if (JSON.stringify(nextRequirement.collectionPolicy ?? null) !== JSON.stringify(currentRequirement.collectionPolicy ?? null)) {
+      payload.collectionPolicy = nextRequirement.collectionPolicy;
+    }
+    if (JSON.stringify(nextRequirement.processingRuleDrafts ?? null) !== JSON.stringify(currentRequirement.processingRuleDrafts ?? null)) {
+      payload.processingRuleDrafts = nextRequirement.processingRuleDrafts;
+    }
+    return payload;
+  };
+
+  const persistRequirementChange = async (
+    nextRequirement: Requirement,
+    rethrowErrors = false,
+  ) => {
+    const currentRequirement = requirements.find((item) => item.id === nextRequirement.id);
+    if (!currentRequirement) {
+      return;
+    }
+
     setRequirements((prev) =>
       prev.map((item) => (item.id === nextRequirement.id ? nextRequirement : item)),
     );
 
-    void updateRequirement(project.id, nextRequirement.id, {
-      title: nextRequirement.title,
-      status: nextRequirement.status,
-      owner: nextRequirement.owner,
-      assignee: nextRequirement.assignee,
-      businessGoal: nextRequirement.businessGoal,
-      backgroundKnowledge: nextRequirement.backgroundKnowledge,
-      collectionPolicy: nextRequirement.collectionPolicy,
-      dataUpdateEnabled: nextRequirement.dataUpdateEnabled,
-      dataUpdateMode: nextRequirement.dataUpdateMode,
-      processingRuleDrafts: nextRequirement.processingRuleDrafts,
-    }).catch(() => {});
+    const payload = buildRequirementUpdatePayload(currentRequirement, nextRequirement);
+    if (Object.keys(payload).length === 0) {
+      return;
+    }
+
+    try {
+      await updateRequirement(project.id, nextRequirement.id, payload);
+    } catch (error) {
+      if (rethrowErrors) {
+        setRequirements((prev) =>
+          prev.map((item) => (item.id === currentRequirement.id ? currentRequirement : item)),
+        );
+        throw error;
+      }
+    }
+  };
+
+  const handleRequirementChange = (nextRequirement: Requirement) => {
+    void persistRequirementChange(nextRequirement);
+  };
+
+  const handleSubmitRequirement = async (nextRequirement: Requirement) => {
+    await persistRequirementChange(nextRequirement, true);
   };
 
   const refreshRequirementData = async () => {
@@ -305,6 +353,7 @@ export default function ProjectRequirementDetailPanel({
           taskGroups={reqTaskGroups}
           fetchTasks={reqFetchTasks}
           onRequirementChange={handleRequirementChange}
+          onSubmitRequirement={handleSubmitRequirement}
           onProjectChange={setProjectState}
           onWideTablesChange={handleReplaceRequirementWideTables}
           onWideTableRecordsChange={(nextWideTableRecords) => {

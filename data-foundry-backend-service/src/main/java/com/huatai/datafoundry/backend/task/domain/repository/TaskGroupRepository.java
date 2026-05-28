@@ -8,6 +8,8 @@ public interface TaskGroupRepository {
 
   TaskGroup getById(String taskGroupId);
 
+  List<TaskGroup> listAll();
+
   List<TaskGroup> listByIds(List<String> taskGroupIds);
 
   List<TaskGroup> listByRequirement(String requirementId);

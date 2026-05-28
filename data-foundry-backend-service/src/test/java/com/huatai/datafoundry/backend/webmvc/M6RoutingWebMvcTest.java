@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.huatai.datafoundry.backend.requirement.application.command.RequirementCreateCommand;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementTaskRuntimeReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableReadDto;
@@ -31,6 +32,7 @@ import com.huatai.datafoundry.backend.project.interfaces.web.ProjectFacadeContro
 import com.huatai.datafoundry.backend.ops.application.service.DemoDataService;
 import com.huatai.datafoundry.backend.task.application.service.ScheduleJobFacadeAppService;
 import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
+import com.huatai.datafoundry.backend.task.application.service.TaskRuntimeBackfillAppService;
 import com.huatai.datafoundry.backend.task.domain.model.ScheduleJob;
 import com.huatai.datafoundry.backend.task.interfaces.web.ScheduleJobFacadeController;
 import com.huatai.datafoundry.backend.task.interfaces.web.TaskFacadeController;
@@ -74,6 +76,7 @@ public class M6RoutingWebMvcTest {
   @MockBean private ProjectQueryService projectQueryService;
   @MockBean private ProjectAppService projectAppService;
   @MockBean private DemoDataService demoDataService;
+  @MockBean private TaskRuntimeBackfillAppService taskRuntimeBackfillAppService;
 
   @Test
   void legacyAndCanonicalRequirementListReturnWideTableSnakeCase() throws Exception {
@@ -164,6 +167,10 @@ public class M6RoutingWebMvcTest {
     ft.setId("FT1");
     when(requirementQueryService.listTaskGroups("P1", "R1")).thenReturn(Collections.singletonList(tg));
     when(requirementQueryService.listFetchTasks("P1", "R1")).thenReturn(Collections.singletonList(ft));
+    RequirementTaskRuntimeReadDto runtime = new RequirementTaskRuntimeReadDto();
+    runtime.setTaskGroups(Collections.singletonList(tg));
+    runtime.setFetchTasks(Collections.singletonList(ft));
+    when(requirementQueryService.getTaskRuntime("P1", "R1")).thenReturn(runtime);
 
     Map<String, Object> ok = new HashMap<String, Object>();
     ok.put("ok", true);
@@ -181,6 +188,18 @@ public class M6RoutingWebMvcTest {
         .perform(get("/api/tasks").queryParam("project_id", "P1").queryParam("requirement_id", "R1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].id").value("FT1"));
+
+    mockMvc
+        .perform(get("/api/tasks/runtime").queryParam("project_id", "P1").queryParam("requirement_id", "R1"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.task_groups[0].id").value("TG1"))
+        .andExpect(jsonPath("$.fetch_tasks[0].id").value("FT1"));
+
+    mockMvc
+        .perform(get("/api/projects/P1/requirements/R1/task-runtime"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.task_groups[0].id").value("TG1"))
+        .andExpect(jsonPath("$.fetch_tasks[0].id").value("FT1"));
 
     mockMvc
         .perform(

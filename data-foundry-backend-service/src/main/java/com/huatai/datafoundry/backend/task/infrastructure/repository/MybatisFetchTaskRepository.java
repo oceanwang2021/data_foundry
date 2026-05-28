@@ -30,6 +30,11 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   }
 
   @Override
+  public List<FetchTask> listAll() {
+    return toDomainList(fetchTaskMapper.listAll());
+  }
+
+  @Override
   public List<FetchTask> listByRequirement(String requirementId) {
     List<FetchTaskRecord> records = fetchTaskMapper.listByRequirement(requirementId);
     return toDomainList(records);
@@ -50,6 +55,11 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   @Override
   public int countByTaskGroup(String taskGroupId) {
     return fetchTaskMapper.countByTaskGroup(taskGroupId);
+  }
+
+  @Override
+  public int deleteByTaskGroup(String taskGroupId) {
+    return fetchTaskMapper.deleteByTaskGroup(taskGroupId);
   }
 
   @Override

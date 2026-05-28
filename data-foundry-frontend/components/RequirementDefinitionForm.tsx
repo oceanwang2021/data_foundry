@@ -96,6 +96,7 @@ type Props = {
   onTaskGroupsChange?: (taskGroups: TaskGroup[]) => void;
   onFetchTasksChange?: (fetchTasks: FetchTask[]) => void;
   onRequirementChange?: (requirement: Requirement) => void;
+  onSubmitRequirement?: (requirement: Requirement) => Promise<void>;
   onProjectChange?: (project: Project) => void;
   onRefreshData?: () => Promise<void>;
 };
@@ -175,6 +176,7 @@ export default function RequirementDefinitionForm({
   onTaskGroupsChange,
   onFetchTasksChange,
   onRequirementChange,
+  onSubmitRequirement,
   onProjectChange,
   onRefreshData,
 }: Props) {
@@ -415,12 +417,17 @@ export default function RequirementDefinitionForm({
     setIsSubmittingDefinition(true);
     try {
       await persistDefinition();
-      onRequirementChange?.({
+      const nextRequirement = {
         ...requirement,
-        status: "ready",
+        status: "ready" as const,
         schemaLocked: true,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      if (onSubmitRequirement) {
+        await onSubmitRequirement(nextRequirement);
+      } else {
+        await Promise.resolve(onRequirementChange?.(nextRequirement));
+      }
       setSubmitMessage("已提交需求。现在可以进入【任务】配置指标分组并生成任务组。");
       await onRefreshData?.();
     } catch (error) {
@@ -1126,7 +1133,7 @@ function BasicInfoSection({
         <EditableField label="背景知识" control={
           <textarea className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[72px] resize-y"
             value={requirement.backgroundKnowledge ?? requirement.businessGoal ?? ""}
-            onChange={(e) => update({ backgroundKnowledge: e.target.value, businessGoal: e.target.value })}
+            onChange={(e) => update({ backgroundKnowledge: e.target.value })}
             placeholder="补充业务背景、历史口径和上下文信息" />
         } />
       </div>

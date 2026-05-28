@@ -28,6 +28,11 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
   }
 
   @Override
+  public List<TaskGroup> listAll() {
+    return toDomainList(taskGroupMapper.listAll());
+  }
+
+  @Override
   public List<TaskGroup> listByIds(List<String> taskGroupIds) {
     List<TaskGroupRecord> records = taskGroupMapper.listByIds(taskGroupIds);
     return toDomainList(records);
@@ -99,9 +104,14 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     tg.setPartitionKey(record.getPartitionKey());
     tg.setPartitionLabel(record.getPartitionLabel());
     tg.setTotalTasks(record.getTotalTasks());
+    tg.setPendingTasks(record.getPendingTasks());
+    tg.setRunningTasks(record.getRunningTasks());
     tg.setCompletedTasks(record.getCompletedTasks());
     tg.setFailedTasks(record.getFailedTasks());
+    tg.setCancelledTasks(record.getCancelledTasks());
+    tg.setInvalidatedTasks(record.getInvalidatedTasks());
     tg.setTriggeredBy(record.getTriggeredBy());
+    tg.setLastAggregatedAt(record.getLastAggregatedAt());
     tg.setCreatedAt(record.getCreatedAt());
     tg.setUpdatedAt(record.getUpdatedAt());
     return tg;
@@ -125,10 +135,19 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     record.setPartitionType(taskGroup.getPartitionType());
     record.setPartitionKey(taskGroup.getPartitionKey());
     record.setPartitionLabel(taskGroup.getPartitionLabel());
-    record.setTotalTasks(taskGroup.getTotalTasks());
-    record.setCompletedTasks(taskGroup.getCompletedTasks());
-    record.setFailedTasks(taskGroup.getFailedTasks());
+    record.setTotalTasks(zeroIfNull(taskGroup.getTotalTasks()));
+    record.setPendingTasks(zeroIfNull(taskGroup.getPendingTasks()));
+    record.setRunningTasks(zeroIfNull(taskGroup.getRunningTasks()));
+    record.setCompletedTasks(zeroIfNull(taskGroup.getCompletedTasks()));
+    record.setFailedTasks(zeroIfNull(taskGroup.getFailedTasks()));
+    record.setCancelledTasks(zeroIfNull(taskGroup.getCancelledTasks()));
+    record.setInvalidatedTasks(zeroIfNull(taskGroup.getInvalidatedTasks()));
     record.setTriggeredBy(taskGroup.getTriggeredBy());
+    record.setLastAggregatedAt(taskGroup.getLastAggregatedAt());
     return record;
+  }
+
+  private static Integer zeroIfNull(Integer value) {
+    return value != null ? value : Integer.valueOf(0);
   }
 }

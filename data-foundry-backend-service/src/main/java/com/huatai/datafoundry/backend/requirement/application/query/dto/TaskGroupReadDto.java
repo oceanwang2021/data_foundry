@@ -20,9 +20,14 @@ public class TaskGroupReadDto {
   private String partitionKey;
   private String partitionLabel;
   private Integer totalTasks;
+  private Integer pendingTasks;
+  private Integer runningTasks;
   private Integer completedTasks;
   private Integer failedTasks;
+  private Integer cancelledTasks;
+  private Integer invalidatedTasks;
   private String triggeredBy;
+  private Object lastAggregatedAt;
   private Object createdAt;
   private Object updatedAt;
 
@@ -154,6 +159,22 @@ public class TaskGroupReadDto {
     this.totalTasks = totalTasks;
   }
 
+  public Integer getPendingTasks() {
+    return pendingTasks;
+  }
+
+  public void setPendingTasks(Integer pendingTasks) {
+    this.pendingTasks = pendingTasks;
+  }
+
+  public Integer getRunningTasks() {
+    return runningTasks;
+  }
+
+  public void setRunningTasks(Integer runningTasks) {
+    this.runningTasks = runningTasks;
+  }
+
   public Integer getCompletedTasks() {
     return completedTasks;
   }
@@ -170,12 +191,36 @@ public class TaskGroupReadDto {
     this.failedTasks = failedTasks;
   }
 
+  public Integer getCancelledTasks() {
+    return cancelledTasks;
+  }
+
+  public void setCancelledTasks(Integer cancelledTasks) {
+    this.cancelledTasks = cancelledTasks;
+  }
+
+  public Integer getInvalidatedTasks() {
+    return invalidatedTasks;
+  }
+
+  public void setInvalidatedTasks(Integer invalidatedTasks) {
+    this.invalidatedTasks = invalidatedTasks;
+  }
+
   public String getTriggeredBy() {
     return triggeredBy;
   }
 
   public void setTriggeredBy(String triggeredBy) {
     this.triggeredBy = triggeredBy;
+  }
+
+  public Object getLastAggregatedAt() {
+    return lastAggregatedAt;
+  }
+
+  public void setLastAggregatedAt(Object lastAggregatedAt) {
+    this.lastAggregatedAt = lastAggregatedAt;
   }
 
   public Object getCreatedAt() {
@@ -194,4 +239,3 @@ public class TaskGroupReadDto {
     this.updatedAt = updatedAt;
   }
 }
-

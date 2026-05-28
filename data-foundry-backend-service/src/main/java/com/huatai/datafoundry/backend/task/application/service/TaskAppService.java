@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,7 @@ public class TaskAppService {
   private final ApplicationEventPublisher eventPublisher;
   private final CollectionSearchGateway collectionSearchGateway;
   private final CollectionResultRepository collectionResultRepository;
+  private final TaskGroupAggregateService taskGroupAggregateService;
   private final ObjectMapper objectMapper;
 
   public TaskAppService(
@@ -54,6 +56,7 @@ public class TaskAppService {
       ApplicationEventPublisher eventPublisher,
       CollectionSearchGateway collectionSearchGateway,
       CollectionResultRepository collectionResultRepository,
+      TaskGroupAggregateService taskGroupAggregateService,
       ObjectMapper objectMapper) {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
@@ -63,6 +66,7 @@ public class TaskAppService {
     this.eventPublisher = eventPublisher;
     this.collectionSearchGateway = collectionSearchGateway;
     this.collectionResultRepository = collectionResultRepository;
+    this.taskGroupAggregateService = taskGroupAggregateService;
     this.objectMapper = objectMapper;
   }
 
@@ -236,6 +240,67 @@ public class TaskAppService {
     return out;
   }
 
+  public Map<String, Object> getCollectionTaskStatusDetail(String taskIdOrCollectionTaskId) {
+    String lookupKey = normalize(taskIdOrCollectionTaskId);
+    if (lookupKey == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "taskId is required");
+    }
+
+    FetchTask task = fetchTaskRepository.getByCollectionTaskId(lookupKey);
+    if (task == null) {
+      task = fetchTaskRepository.getById(lookupKey);
+    }
+
+    String externalTaskId = task != null ? normalize(task.getCollectionTaskId()) : lookupKey;
+    if (externalTaskId == null) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Task has no collection task id");
+    }
+    if (collectionSearchGateway == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Collection status service unavailable");
+    }
+
+    CollectionTaskStatusResult statusResult = collectionSearchGateway.getTaskStatus(externalTaskId);
+    if (statusResult == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Collection status service unavailable");
+    }
+
+    String rawResponseJson = statusResult.getRawResponseJson();
+    if (rawResponseJson != null && !rawResponseJson.trim().isEmpty()) {
+      try {
+        Object parsed = objectMapper.readValue(rawResponseJson, Object.class);
+        if (parsed instanceof Map) {
+          @SuppressWarnings("unchecked")
+          Map<String, Object> rawMap = (Map<String, Object>) parsed;
+          return rawMap;
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("success", statusResult.isSuccess());
+        out.put("data", parsed);
+        return out;
+      } catch (Exception ignored) {
+        // Fall through to synthesized response below.
+      }
+    }
+
+    Map<String, Object> data = new LinkedHashMap<String, Object>();
+    data.put("task_id", statusResult.getTaskId() != null ? statusResult.getTaskId() : externalTaskId);
+    if (statusResult.getStatus() != null) {
+      data.put("status", statusResult.getStatus());
+    }
+    if (task != null) {
+      data.put("fetch_task_id", task.getId());
+      data.put("collection_task_id", externalTaskId);
+    }
+
+    Map<String, Object> out = new LinkedHashMap<String, Object>();
+    out.put("success", statusResult.isSuccess());
+    out.put("data", data);
+    if (statusResult.getErrorMessage() != null && !statusResult.getErrorMessage().trim().isEmpty()) {
+      out.put("detail", statusResult.getErrorMessage());
+    }
+    return out;
+  }
+
   private void dispatchFetchTasks(List<FetchTask> fetchTasks, String requestId, String prefix) {
     List<FetchTask> preparedTasks = taskPlanAppService.refreshPromptSnapshotsForCollection(fetchTasks);
     for (FetchTask task : preparedTasks) {
@@ -361,74 +426,7 @@ public class TaskAppService {
   }
 
   private void refreshTaskGroupAggregates(List<String> taskGroupIds) {
-    if (taskGroupIds == null || taskGroupIds.isEmpty()) {
-      return;
-    }
-    for (String taskGroupId : taskGroupIds) {
-      if (taskGroupId == null || taskGroupId.trim().isEmpty()) {
-        continue;
-      }
-      TaskGroup taskGroup = taskGroupRepository.getById(taskGroupId);
-      if (taskGroup == null) {
-        continue;
-      }
-      List<FetchTask> tasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
-      int total = tasks != null ? tasks.size() : 0;
-      int running = 0;
-      int completed = 0;
-      int failed = 0;
-      int cancelled = 0;
-      int invalidated = 0;
-      if (tasks != null) {
-        for (FetchTask task : tasks) {
-          String status = normalize(task != null ? task.getStatus() : null);
-          if (TaskStatus.RUNNING.equals(status)) {
-            running++;
-          } else if (TaskStatus.COMPLETED.equals(status)) {
-            completed++;
-          } else if (TaskStatus.FAILED.equals(status)) {
-            failed++;
-          } else if (TaskStatus.CANCELLED.equals(status)) {
-            cancelled++;
-          } else if (TaskStatus.INVALIDATED.equals(status)) {
-            invalidated++;
-          }
-        }
-      }
-      int pending = Math.max(total - running - completed - failed - cancelled - invalidated, 0);
-      taskGroup.setTotalTasks(total);
-      taskGroup.setCompletedTasks(completed);
-      taskGroup.setFailedTasks(failed);
-      taskGroup.setStatus(
-          resolveAggregateTaskGroupStatus(pending, running, completed, failed, cancelled, invalidated));
-      taskGroupRepository.upsert(taskGroup);
-    }
-  }
-
-  private String resolveAggregateTaskGroupStatus(
-      int pending, int running, int completed, int failed, int cancelled, int invalidated) {
-    if (running > 0) {
-      return TaskStatus.RUNNING;
-    }
-    if (pending > 0 && completed == 0 && failed == 0 && cancelled == 0 && invalidated == 0) {
-      return TaskStatus.PENDING;
-    }
-    if (completed > 0 && failed == 0 && cancelled == 0 && pending == 0) {
-      return TaskStatus.COMPLETED;
-    }
-    if (cancelled > 0 && completed == 0 && failed == 0 && pending == 0 && invalidated == 0) {
-      return TaskStatus.CANCELLED;
-    }
-    if (failed > 0 && completed == 0 && cancelled == 0 && pending == 0) {
-      return TaskStatus.FAILED;
-    }
-    if (failed > 0 || completed > 0 || cancelled > 0) {
-      return "partial";
-    }
-    if (invalidated > 0 && pending == 0) {
-      return TaskStatus.INVALIDATED;
-    }
-    return TaskStatus.PENDING;
+    taskGroupAggregateService.refreshTaskGroups(taskGroupIds);
   }
 
   private String mapExternalTaskStatus(String rawStatus) {

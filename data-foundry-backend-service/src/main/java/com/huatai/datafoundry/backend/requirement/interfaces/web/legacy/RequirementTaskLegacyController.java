@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.requirement.interfaces.web.legacy;
 
 import com.huatai.datafoundry.backend.requirement.application.query.dto.FetchTaskReadDto;
+import com.huatai.datafoundry.backend.requirement.application.query.dto.RequirementTaskRuntimeReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.TaskGroupReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.service.RequirementQueryService;
 import java.util.List;
@@ -32,5 +33,11 @@ public class RequirementTaskLegacyController {
       @PathVariable("requirementId") String requirementId) {
     return requirementQueryService.listFetchTasks(projectId, requirementId);
   }
-}
 
+  @GetMapping("/task-runtime")
+  public RequirementTaskRuntimeReadDto getTaskRuntime(
+      @PathVariable("projectId") String projectId,
+      @PathVariable("requirementId") String requirementId) {
+    return requirementQueryService.getTaskRuntime(projectId, requirementId);
+  }
+}
