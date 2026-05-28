@@ -209,17 +209,19 @@ type DataSubTab = "raw" | "mapping" | "wide";
 const dataSubTabMeta: Record<DataSubTab, { title: string; description: string }> = {
   raw: {
     title: "采集明细",
-    description: "查看 Agent 原始回传，并将 final_report 第一张 Markdown 表转为 JSON。",
+    description: "按任务维度转换 normalized_rows_json",
   },
   mapping: {
     title: "指标映射",
-    description: "把 Agent 返回的指标搜索名称映射到目标宽表字段。",
+    description: "确认指标到宽表字段",
   },
   wide: {
     title: "结果预览",
-    description: "查看按需求结构聚合后的当前结果。",
+    description: "按映射生成回填预览",
   },
 };
+
+const dataSubTabs: DataSubTab[] = ["raw", "mapping", "wide"];
 
 export default function RequirementDataProcessingPanel({
   requirement,
@@ -320,28 +322,51 @@ export default function RequirementDataProcessingPanel({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border bg-card/90 p-2">
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          {(["raw", "mapping", "wide"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveSubTab(tab)}
-              className={cn(
-                "relative overflow-hidden rounded-lg border px-4 py-3 text-left transition-all",
-                activeSubTab === tab
-                  ? "border-primary/30 bg-primary/[0.08] shadow-sm ring-1 ring-primary/10 before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-primary"
-                  : "border-border/60 bg-transparent hover:border-border hover:bg-muted/25",
-              )}
-            >
-              <div className="text-sm font-medium">{dataSubTabMeta[tab].title}</div>
-              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                {dataSubTabMeta[tab].description}
-              </div>
-            </button>
-          ))}
+      <nav aria-label="数据产出流程" className="overflow-x-auto">
+        <div className="min-w-[560px] rounded-md border bg-card/80 px-2 py-1.5">
+          <div className="grid grid-cols-3 gap-1">
+            {dataSubTabs.map((tab, index) => {
+              const isActive = activeSubTab === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveSubTab(tab)}
+                  aria-current={isActive ? "step" : undefined}
+                  className={cn(
+                    "group relative flex min-w-0 items-center gap-2 rounded px-2.5 py-1.5 text-left transition-colors",
+                    isActive
+                      ? "bg-primary/[0.07] text-primary"
+                      : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold transition-colors",
+                      isActive
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background text-muted-foreground group-hover:border-primary/30 group-hover:text-primary",
+                    )}
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-medium">
+                      {dataSubTabMeta[tab].title}
+                    </span>
+                    <span className="block truncate text-[10px] leading-4 text-muted-foreground">
+                      {dataSubTabMeta[tab].description}
+                    </span>
+                  </span>
+                  {isActive ? (
+                    <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-primary" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </section>
+      </nav>
 
       {activeSubTab === "raw" ? (
         <RawCollectionResultsPanel
@@ -840,7 +865,7 @@ function RawCollectionResultsSection({
         }
         return next;
       });
-      setActionMessage("已完成 Markdown 表格转 JSON。");
+      setActionMessage("已按任务维度统一转换 normalized_rows_json。");
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "转换失败");
     } finally {
@@ -887,7 +912,7 @@ function RawCollectionResultsSection({
         }
         return next;
       });
-      setActionMessage(`已按首条表头转换 ${payload.collectionResults.length} 条原始结果。`);
+      setActionMessage(`已按任务维度统一转换 ${payload.collectionResults.length} 条原始结果。`);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "转换失败");
     } finally {
@@ -901,7 +926,7 @@ function RawCollectionResultsSection({
         <div className="space-y-1">
           <h2 className="text-sm font-semibold">{wideTable.name}</h2>
           <p className="text-xs text-muted-foreground">
-            查看 collection_results.final_report，并手动写入 normalized_rows_json。
+            查看 collection_results.final_report，并按任务维度统一转换 normalized_rows_json。
           </p>
         </div>
         <button
@@ -1089,10 +1114,10 @@ function buildAggregatedNormalizedRows(
     if (!parsedRows || parsedRows.length === 0) return;
     parsedRows.forEach((row) => {
       rows.push({
+        ...row,
         row_id: task?.rowId ?? result.rowId ?? "",
         fetch_task_id: result.fetchTaskId ?? task?.id ?? "",
         collection_result_id: result.id,
-        ...row,
       });
     });
   });
@@ -1130,13 +1155,32 @@ function buildNormalizedPreviewColumns(rows: Array<Record<string, unknown>> | nu
   if (!rows || rows.length === 0) {
     return [];
   }
-  const columns: string[] = [];
+  const discoveredColumns: string[] = [];
   rows.forEach((row) => {
     Object.keys(row).forEach((key) => {
-      if (!columns.includes(key)) columns.push(key);
+      if (!discoveredColumns.includes(key)) discoveredColumns.push(key);
     });
   });
-  return columns;
+  const fixedMetricColumns = [
+    "指标名称 (Metric Name)",
+    "指标值 (Value)",
+    "单位 (Unit)",
+    "数据时间 (Data Period)",
+    "数据来源 (Data Source)",
+    "逻辑说明及补充 (Notes)",
+    "Min_Value",
+    "Max_Value",
+    "Source_URL",
+    "Source_Evidence",
+  ];
+  const technicalColumns = ["row_id", "fetch_task_id", "collection_result_id"];
+  const orderedSet = new Set([...fixedMetricColumns, ...technicalColumns]);
+  const dimensionColumns = discoveredColumns.filter((column) => !orderedSet.has(column));
+  return [
+    ...dimensionColumns,
+    ...fixedMetricColumns.filter((column) => discoveredColumns.includes(column)),
+    ...technicalColumns.filter((column) => discoveredColumns.includes(column)),
+  ];
 }
 
 function summarizeText(value?: string | null): string {

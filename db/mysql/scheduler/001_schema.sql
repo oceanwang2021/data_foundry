@@ -1,10 +1,8 @@
 -- Scheduler DB schema (runtime/scheduling data)
 --
 -- Note:
--- - This script is aligned with Flyway migrations:
---   scheduler-service `V001__baseline.sql` + `V002__add_indexes.sql`.
--- - For environment alignment / incremental upgrades, prefer Flyway:
---   see `docs/db-migration-sop.md`.
+-- - This complete DDL consolidates the former scheduler-service migration
+--   scripts. For an existing old schema, use db/mysql/scheduler/002_incremental_upgrade.sql.
 
 CREATE TABLE IF NOT EXISTS schedule_jobs (
   id             VARCHAR(64)  NOT NULL PRIMARY KEY,

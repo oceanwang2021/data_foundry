@@ -32,6 +32,20 @@ public class MappedResultMaterializationAppService {
       new TypeReference<List<Map<String, Object>>>() {};
   private static final TypeReference<Map<String, Object>> MAP_REF =
       new TypeReference<Map<String, Object>>() {};
+  private static final String COL_METRIC_NAME = "\u6307\u6807\u540d\u79f0 (Metric Name)";
+  private static final String COL_VALUE = "\u6307\u6807\u503c (Value)";
+  private static final String COL_UNIT = "\u5355\u4f4d (Unit)";
+  private static final String COL_DATA_PERIOD = "\u6570\u636e\u65f6\u95f4 (Data Period)";
+  private static final String COL_DATA_SOURCE = "\u6570\u636e\u6765\u6e90 (Data Source)";
+  private static final String COL_NOTES = "\u903b\u8f91\u8bf4\u660e\u53ca\u8865\u5145 (Notes)";
+  private static final String COL_MIN_VALUE = "Min_Value";
+  private static final String COL_MAX_VALUE = "Max_Value";
+  private static final String COL_SOURCE_URL = "Source_URL";
+  private static final String COL_SOURCE_EVIDENCE = "Source_Evidence";
+  private static final String COL_ROW_ID = "row_id";
+  private static final String COL_FETCH_TASK_ID = "fetch_task_id";
+  private static final String COL_COLLECTION_RESULT_ID = "collection_result_id";
+  private static final String COL_BUSINESS_DATE = "business_date";
 
   private final CollectionResultRepository collectionResultRepository;
   private final MetricFieldMappingMapper metricFieldMappingMapper;
@@ -76,7 +90,8 @@ public class MappedResultMaterializationAppService {
 
       List<Map<String, Object>> normalizedRows = parseNormalizedRows(result.getNormalizedRowsJson());
       List<CollectionResultRow> detailRows = new ArrayList<CollectionResultRow>();
-      Map<String, Object> cellsToWrite = new LinkedHashMap<String, Object>();
+      Map<Integer, Map<String, Object>> cellsByRowId = new LinkedHashMap<Integer, Map<String, Object>>();
+      int acceptedMissingRowCount = 0;
       LocalDateTime collectedAt = result.getCollectedAt() != null ? result.getCollectedAt() : LocalDateTime.now();
 
       int index = 0;
@@ -97,22 +112,31 @@ public class MappedResultMaterializationAppService {
         detailRows.add(detailRow);
         detailRowCount++;
         if ("accepted".equals(detailRow.getStatus())) {
-          cellsToWrite.put(mapping.getTargetIndicatorKey(), buildCell(detailRow, collectedAt));
+          Integer targetRowId = detailRow.getRowId();
+          if (targetRowId == null) {
+            acceptedMissingRowCount++;
+          } else {
+            Map<String, Object> cellsToWrite = cellsByRowId.get(targetRowId);
+            if (cellsToWrite == null) {
+              cellsToWrite = new LinkedHashMap<String, Object>();
+              cellsByRowId.put(targetRowId, cellsToWrite);
+            }
+            cellsToWrite.put(mapping.getTargetIndicatorKey(), buildCell(detailRow, collectedAt));
+          }
         }
       }
       collectionResultRepository.insertRows(detailRows);
-      if (cellsToWrite.isEmpty()) {
+      skippedMissingRowCount += acceptedMissingRowCount;
+      if (cellsByRowId.isEmpty()) {
         continue;
       }
-      if (result.getRowId() == null) {
-        skippedMissingRowCount += cellsToWrite.size();
-        continue;
-      }
-      int updated = mergeWideTableCells(normalizedWideTableId, result.getRowId(), cellsToWrite);
-      if (updated > 0) {
-        cellCount += cellsToWrite.size();
-      } else {
-        skippedMissingRowCount += cellsToWrite.size();
+      for (Map.Entry<Integer, Map<String, Object>> entry : cellsByRowId.entrySet()) {
+        int updated = mergeWideTableCells(normalizedWideTableId, entry.getKey(), entry.getValue());
+        if (updated > 0) {
+          cellCount += entry.getValue().size();
+        } else {
+          skippedMissingRowCount += entry.getValue().size();
+        }
       }
     }
     return new MaterializationOutcome(
@@ -153,29 +177,29 @@ public class MappedResultMaterializationAppService {
     CollectionResultRow row = new CollectionResultRow();
     row.setId(buildStableId("crr_map", result.getId(), mapping.getTargetIndicatorKey(), String.valueOf(index)));
     row.setCollectionResultId(result.getId());
-    row.setFetchTaskId(result.getFetchTaskId());
+    row.setFetchTaskId(firstNonBlank(valueFromTechnicalColumn(normalizedRow, COL_FETCH_TASK_ID), result.getFetchTaskId()));
     row.setScheduleJobId(result.getScheduleJobId());
     row.setWideTableId(result.getWideTableId());
-    row.setRowId(result.getRowId());
+    row.setRowId(rowIdFromTechnicalColumn(normalizedRow, result.getRowId()));
     row.setSourceMetricName(mapping.getSourceMetricName());
     row.setTargetIndicatorKey(mapping.getTargetIndicatorKey());
     row.setIndicatorKey(mapping.getTargetIndicatorKey());
     row.setIndicatorName(firstNonBlank(mapping.getTargetIndicatorName(), mapping.getTargetIndicatorKey()));
     row.setBusinessDate(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.PUBLISHED_AT)));
-    row.setDimensionValuesJson(writeJson(normalizedRow));
+    row.setDimensionValuesJson(writeJson(extractDimensionValues(normalizedRow)));
     row.setRawValue(value);
     row.setCleanedValue(cleanedValue);
     row.setUnit(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.UNIT)));
     row.setPublishedAt(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.PUBLISHED_AT)));
-    row.setSourceSite("Agent final_report");
+    row.setSourceSite(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.DATA_SOURCE)));
     row.setSourceUrl(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.SOURCE_URL)));
     row.setQuoteText(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.QUOTE_TEXT)));
     row.setMaxValue(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.MAX_VALUE)));
     row.setMinValue(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.MIN_VALUE)));
     row.setConfidence(new BigDecimal("0.8600"));
     row.setStatus(cleanedValue == null ? "not_found" : "accepted");
-    row.setWarningMsg(result.getRowId() == null ? "collection result row_id is missing" : null);
-    row.setReasoning(null);
+    row.setWarningMsg(row.getRowId() == null ? "collection result row_id is missing" : null);
+    row.setReasoning(trimToNull(valueByKnownColumn(normalizedRow, ColumnKind.NOTES)));
     row.setWhyNotFound(cleanedValue == null ? "value is empty" : null);
     return row;
   }
@@ -240,6 +264,57 @@ public class MappedResultMaterializationAppService {
     return null;
   }
 
+  private Map<String, Object> extractDimensionValues(Map<String, Object> row) {
+    Map<String, Object> out = new LinkedHashMap<String, Object>();
+    if (row == null || row.isEmpty()) {
+      return out;
+    }
+    for (Map.Entry<String, Object> entry : row.entrySet()) {
+      String key = entry.getKey();
+      if (key == null || isFixedMetricOrTechnicalColumn(key)) {
+        continue;
+      }
+      out.put(key, entry.getValue());
+    }
+    return out;
+  }
+
+  private boolean isFixedMetricOrTechnicalColumn(String key) {
+    String raw = key == null ? "" : key.trim();
+    return COL_METRIC_NAME.equals(raw)
+        || COL_VALUE.equals(raw)
+        || COL_UNIT.equals(raw)
+        || COL_DATA_PERIOD.equals(raw)
+        || COL_DATA_SOURCE.equals(raw)
+        || COL_NOTES.equals(raw)
+        || COL_MIN_VALUE.equals(raw)
+        || COL_MAX_VALUE.equals(raw)
+        || COL_SOURCE_URL.equals(raw)
+        || COL_SOURCE_EVIDENCE.equals(raw)
+        || COL_ROW_ID.equals(raw)
+        || COL_FETCH_TASK_ID.equals(raw)
+        || COL_COLLECTION_RESULT_ID.equals(raw);
+  }
+
+  private String valueFromTechnicalColumn(Map<String, Object> row, String column) {
+    if (row == null || column == null) {
+      return null;
+    }
+    return trimToNull(asString(row.get(column)));
+  }
+
+  private Integer rowIdFromTechnicalColumn(Map<String, Object> row, Integer fallback) {
+    String raw = valueFromTechnicalColumn(row, COL_ROW_ID);
+    if (raw == null) {
+      return fallback;
+    }
+    try {
+      return Integer.valueOf(raw);
+    } catch (NumberFormatException ignored) {
+      return fallback;
+    }
+  }
+
   private boolean matchesColumn(ColumnKind kind, String key) {
     String raw = key == null ? "" : key.trim();
     String lower = raw.toLowerCase(Locale.ROOT);
@@ -265,6 +340,17 @@ public class MappedResultMaterializationAppService {
             || lower.contains("date")
             || raw.contains("\u6570\u636e\u65f6\u95f4")
             || raw.contains("\u6570\u636e\u53d1\u5e03\u65f6\u95f4");
+      case DATA_SOURCE:
+        return compact.contains("datasource")
+            || raw.contains("\u6570\u636e\u6765\u6e90")
+            || raw.contains("\u6765\u6e90\u7ad9\u70b9");
+      case NOTES:
+        return compact.contains("notes")
+            || compact.contains("reasoning")
+            || compact.contains("logic")
+            || raw.contains("\u903b\u8f91\u8bf4\u660e")
+            || raw.contains("\u6307\u6807\u903b\u8f91")
+            || raw.contains("\u903b\u8f91\u8865\u5145");
       case SOURCE_URL:
         return compact.contains("sourceurl") || lower.contains("source url") || raw.contains("\u6765\u6e90url");
       case QUOTE_TEXT:
@@ -344,6 +430,8 @@ public class MappedResultMaterializationAppService {
     VALUE,
     UNIT,
     PUBLISHED_AT,
+    DATA_SOURCE,
+    NOTES,
     SOURCE_URL,
     QUOTE_TEXT,
     MAX_VALUE,
