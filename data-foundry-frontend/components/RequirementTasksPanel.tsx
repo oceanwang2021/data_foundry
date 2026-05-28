@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -87,6 +87,13 @@ import {
 import CollectionTaskIndicatorsPopup from "@/components/CollectionTaskIndicatorsPopup";
 
 const MAX_BATCH_EXECUTION_CONCURRENCY = 5;
+
+type BatchExecutionTaskState = {
+  phase: "queued" | "running";
+  scopeKey: string;
+  rowLabel: string;
+  collectionTaskId?: string;
+};
 
 type Props = {
   requirement: Requirement;
@@ -197,7 +204,8 @@ export default function RequirementTasksPanel({
   const [isTrialTaskListExpanded, setIsTrialTaskListExpanded] = useState(true);
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
   const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
-  const [queuedTaskIds, setQueuedTaskIds] = useState<string[]>([]);
+  const [batchExecutionStateByTaskId, setBatchExecutionStateByTaskId] = useState<Record<string, BatchExecutionTaskState>>({});
+  const [batchExecutionTaskOrderByScope, setBatchExecutionTaskOrderByScope] = useState<Record<string, string[]>>({});
   const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
   const [bulkExecutingScopeKeys, setBulkExecutingScopeKeys] = useState<string[]>([]);
   const [selectedTaskIdsByScope, setSelectedTaskIdsByScope] = useState<Record<string, string[]>>({});
@@ -820,6 +828,173 @@ export default function RequirementTasksPanel({
     };
   }, [activeTaskSubTab, hasRunningCollectionInstances, onRefreshData, selectedWt]);
 
+  useEffect(() => {
+    if (Object.keys(batchExecutionStateByTaskId).length === 0) {
+      if (Object.keys(batchExecutionTaskOrderByScope).length > 0) {
+        setBatchExecutionTaskOrderByScope({});
+      }
+      if (bulkExecutingScopeKeys.length > 0) {
+        setBulkExecutingScopeKeys([]);
+      }
+      return;
+    }
+
+    const activeTaskIds = new Set(Object.keys(batchExecutionStateByTaskId));
+    const nextTaskOrderByScope: Record<string, string[]> = {};
+    let orderChanged = false;
+    for (const [scopeKey, taskIds] of Object.entries(batchExecutionTaskOrderByScope)) {
+      const retainedTaskIds = taskIds.filter((taskId) => activeTaskIds.has(taskId));
+      if (retainedTaskIds.length > 0) {
+        nextTaskOrderByScope[scopeKey] = retainedTaskIds;
+      }
+      if (retainedTaskIds.length !== taskIds.length) {
+        orderChanged = true;
+      }
+    }
+    if (
+      orderChanged
+      || Object.keys(nextTaskOrderByScope).length !== Object.keys(batchExecutionTaskOrderByScope).length
+    ) {
+      setBatchExecutionTaskOrderByScope(nextTaskOrderByScope);
+    }
+
+    const nextScopeKeys = Object.keys(nextTaskOrderByScope);
+    const scopeKeysChanged = nextScopeKeys.length !== bulkExecutingScopeKeys.length
+      || nextScopeKeys.some((scopeKey) => !bulkExecutingScopeKeys.includes(scopeKey));
+    if (scopeKeysChanged) {
+      setBulkExecutingScopeKeys(nextScopeKeys);
+    }
+  }, [batchExecutionStateByTaskId, batchExecutionTaskOrderByScope, bulkExecutingScopeKeys]);
+
+  useEffect(() => {
+    if (Object.keys(batchExecutionStateByTaskId).length === 0 || fetchTasks.length === 0) {
+      return;
+    }
+
+    const fetchTaskById = new Map(fetchTasks.map((task) => [task.id, task] as const));
+    const nextBatchExecutionStateByTaskId: Record<string, BatchExecutionTaskState> = {};
+    const releasedTaskIds: string[] = [];
+    let changed = false;
+
+    for (const [taskId, state] of Object.entries(batchExecutionStateByTaskId)) {
+      if (state.phase !== "running") {
+        nextBatchExecutionStateByTaskId[taskId] = state;
+        continue;
+      }
+
+      const actualTask = fetchTaskById.get(taskId);
+      const stillOccupiesSlot = Boolean(
+        actualTask
+        && (actualTask.status === "running" || actualTask.status === "pending"),
+      );
+
+      if (!stillOccupiesSlot) {
+        releasedTaskIds.push(taskId);
+        changed = true;
+        continue;
+      }
+
+      if (!state.collectionTaskId && actualTask?.collectionTaskId) {
+        nextBatchExecutionStateByTaskId[taskId] = {
+          ...state,
+          collectionTaskId: actualTask.collectionTaskId,
+        };
+        changed = true;
+        continue;
+      }
+
+      nextBatchExecutionStateByTaskId[taskId] = state;
+    }
+
+    if (changed) {
+      setBatchExecutionStateByTaskId(nextBatchExecutionStateByTaskId);
+    }
+    if (releasedTaskIds.length > 0) {
+      setRunningTaskIds((prev) => prev.filter((taskId) => !releasedTaskIds.includes(taskId)));
+    }
+  }, [batchExecutionStateByTaskId, fetchTasks]);
+
+  useEffect(() => {
+    const dispatchCandidates = Object.entries(batchExecutionTaskOrderByScope).flatMap(([scopeKey, orderedTaskIds]) => {
+      const scopedStates = orderedTaskIds
+        .map((taskId) => [taskId, batchExecutionStateByTaskId[taskId]] as const)
+        .filter((entry): entry is [string, BatchExecutionTaskState] => Boolean(entry[1]));
+      const runningCount = scopedStates.filter(([, state]) => state.phase === "running").length;
+      const availableSlots = Math.max(0, MAX_BATCH_EXECUTION_CONCURRENCY - runningCount);
+      if (availableSlots === 0) {
+        return [];
+      }
+      return scopedStates
+        .filter(([, state]) => state.phase === "queued")
+        .slice(0, availableSlots)
+        .map(([taskId, state]) => ({
+          taskId,
+          scopeKey,
+          rowLabel: state.rowLabel,
+        }));
+    });
+
+    if (dispatchCandidates.length === 0) {
+      return;
+    }
+
+    setBatchExecutionStateByTaskId((prev) => {
+      const next = { ...prev };
+      for (const { taskId } of dispatchCandidates) {
+        const current = next[taskId];
+        if (!current) {
+          continue;
+        }
+        next[taskId] = {
+          ...current,
+          phase: "running",
+          collectionTaskId: undefined,
+        };
+      }
+      return next;
+    });
+
+    for (const { taskId, rowLabel } of dispatchCandidates) {
+      void (async () => {
+        const result = await dispatchSingleTaskExecution(taskId, rowLabel, {
+          refreshAfterExecution: false,
+          silent: true,
+          optimistic: false,
+          preserveRunningState: true,
+        });
+
+        if (result.ok) {
+          setBatchExecutionStateByTaskId((prev) => {
+            const current = prev[taskId];
+            if (!current) {
+              return prev;
+            }
+            return {
+              ...prev,
+              [taskId]: {
+                ...current,
+                phase: "running",
+                collectionTaskId: result.collectionTaskId,
+              },
+            };
+          });
+          return;
+        }
+
+        setBatchExecutionStateByTaskId((prev) => {
+          if (!prev[taskId]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[taskId];
+          return next;
+        });
+        setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
+        setTaskActionMessage(`批量执行中有实例发起失败：${rowLabel}，错误：${result.error}`);
+      })();
+    }
+  }, [batchExecutionStateByTaskId, batchExecutionTaskOrderByScope]);
+
   const handleAddIndicatorGroup = () => {
     if (!selectedWt) {
       return;
@@ -1350,14 +1525,31 @@ export default function RequirementTasksPanel({
     }
   };
 
+  const getTaskInstanceBatchExecutionState = (taskId: string): BatchExecutionTaskState | undefined =>
+    batchExecutionStateByTaskId[taskId];
+
   const getTaskInstanceDisplayStatus = (row: Pick<TaskInstanceRowView, "fetchTaskId" | "status">): string => {
-    if (queuedTaskIds.includes(row.fetchTaskId)) {
+    const batchExecutionState = getTaskInstanceBatchExecutionState(row.fetchTaskId);
+    if (batchExecutionState?.phase === "queued") {
       return "queued";
     }
-    if (runningTaskIds.includes(row.fetchTaskId)) {
+    if (batchExecutionState?.phase === "running" || runningTaskIds.includes(row.fetchTaskId)) {
       return "running";
     }
     return row.status;
+  };
+
+  const getTaskInstanceDisplayCollectionTaskId = (
+    row: Pick<TaskInstanceRowView, "fetchTaskId" | "collectionTaskId">,
+  ): string | undefined => {
+    const batchExecutionState = getTaskInstanceBatchExecutionState(row.fetchTaskId);
+    if (batchExecutionState?.phase === "queued") {
+      return undefined;
+    }
+    if (batchExecutionState?.phase === "running") {
+      return batchExecutionState.collectionTaskId;
+    }
+    return row.collectionTaskId;
   };
 
   const canSelectTaskInstance = (row: Pick<TaskInstanceRowView, "fetchTaskId" | "status">): boolean => {
@@ -1402,7 +1594,7 @@ export default function RequirementTasksPanel({
       optimistic?: boolean;
       preserveRunningState?: boolean;
     },
-  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+  ): Promise<{ ok: true; collectionTaskId?: string; status?: string } | { ok: false; error: string }> => {
     const {
       refreshAfterExecution: shouldRefresh = true,
       silent = false,
@@ -1473,9 +1665,10 @@ export default function RequirementTasksPanel({
       const dispatchResult = targetTask.status === "failed"
         ? await retryTask(taskId)
         : await executeTask(taskId);
-      if (optimisticFetchTasks && (dispatchResult.collectionTaskId || dispatchResult.status)) {
+      if (dispatchResult.collectionTaskId || dispatchResult.status) {
+        const sourceFetchTasks = optimisticFetchTasks ?? fetchTasks;
         onFetchTasksChange(
-          optimisticFetchTasks.map((task) => (
+          sourceFetchTasks.map((task) => (
             task.id === taskId
               ? {
                   ...task,
@@ -1492,7 +1685,11 @@ export default function RequirementTasksPanel({
       } else if (preserveRunningState) {
         keepRunningState = true;
       }
-      return { ok: true };
+      return {
+        ok: true,
+        collectionTaskId: dispatchResult.collectionTaskId,
+        status: dispatchResult.status,
+      };
     } catch (error) {
       const errorMessage = formatTaskActionError(error);
       if (!silent) {
@@ -1520,68 +1717,44 @@ export default function RequirementTasksPanel({
 
     const rowMap = new Map(rows.map((row) => [row.fetchTaskId, row] as const));
     setBulkExecutingScopeKeys((prev) => (prev.includes(scopeKey) ? prev : [...prev, scopeKey]));
-    setQueuedTaskIds((prev) => Array.from(new Set([...prev, ...selectedTaskIds])));
-    setTaskActionMessage(`已选择 ${selectedTaskIds.length} 个采集实例，正在分批发起执行（最多 ${MAX_BATCH_EXECUTION_CONCURRENCY} 个并发）。`);
-
-    let successCount = 0;
-    let failedCount = 0;
-
-    try {
-      for (let index = 0; index < selectedTaskIds.length; index += MAX_BATCH_EXECUTION_CONCURRENCY) {
-        const batchTaskIds = selectedTaskIds.slice(index, index + MAX_BATCH_EXECUTION_CONCURRENCY);
-        const results = await Promise.all(batchTaskIds.map(async (taskId) => {
-          const row = rowMap.get(taskId);
-          if (!row) {
-            return { ok: false as const };
-          }
-          setQueuedTaskIds((prev) => prev.filter((id) => id !== taskId));
-          return dispatchSingleTaskExecution(taskId, row.rowLabel, {
-            refreshAfterExecution: false,
-            silent: true,
-            optimistic: false,
-            preserveRunningState: true,
-          });
-        }));
-
-        for (const result of results) {
-          if (result.ok) {
-            successCount += 1;
-          } else {
-            failedCount += 1;
-          }
-        }
-      }
-
-      await refreshAfterExecution();
-      setTaskActionMessage(
-        failedCount > 0
-          ? `已发起 ${successCount} 个采集实例，${failedCount} 个发起失败，其余任务已同步最新状态。`
-          : `已发起 ${successCount} 个采集实例，正在同步最新状态。`,
-      );
-    } catch (error) {
-      setTaskActionMessage(`批量执行失败：${formatTaskActionError(error)}`);
-    } finally {
-      setQueuedTaskIds((prev) => prev.filter((id) => !selectedTaskIds.includes(id)));
-      setRunningTaskIds((prev) => prev.filter((id) => !selectedTaskIds.includes(id)));
-      setBulkExecutingScopeKeys((prev) => prev.filter((key) => key !== scopeKey));
-      clearScopedTaskSelection(scopeKey);
-    }
+    setBatchExecutionStateByTaskId((prev) => ({
+      ...prev,
+      ...Object.fromEntries(selectedTaskIds.map((taskId) => [taskId, {
+        phase: "queued" as const,
+        scopeKey,
+        rowLabel: rowMap.get(taskId)?.rowLabel ?? taskId,
+      }])),
+    }));
+    setBatchExecutionTaskOrderByScope((prev) => ({
+      ...prev,
+      [scopeKey]: [
+        ...(prev[scopeKey] ?? []),
+        ...selectedTaskIds.filter((taskId) => !(prev[scopeKey] ?? []).includes(taskId)),
+      ],
+    }));
+    clearScopedTaskSelection(scopeKey);
+    setTaskActionMessage(`已加入 ${selectedTaskIds.length} 个采集实例队列，最多同时执行 ${MAX_BATCH_EXECUTION_CONCURRENCY} 个，其余实例保持排队中。`);
   };
 
   const handleRequestTaskRerun = async (taskId: string, rowLabel: string) => {
     await dispatchSingleTaskExecution(taskId, rowLabel);
   };
 
-  const handleCancelTask = async (taskId: string, rowLabel: string) => {
+  const handleCancelTask = async (taskId: string, rowLabel: string, collectionTaskIdOverride?: string) => {
     const targetTask = fetchTasks.find((task) => task.id === taskId);
-    if (!targetTask || targetTask.status !== "running" || !targetTask.collectionTaskId) {
+    const effectiveCollectionTaskId = collectionTaskIdOverride ?? targetTask?.collectionTaskId;
+    if (
+      !targetTask
+      || getTaskInstanceDisplayStatus({ fetchTaskId: taskId, status: targetTask.status }) !== "running"
+      || !effectiveCollectionTaskId
+    ) {
       return;
     }
 
     setCancellingTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
     setTaskActionMessage(`正在取消采集任务 ${taskId}（${rowLabel}）...`);
     try {
-      await cancelTask(targetTask.collectionTaskId);
+      await cancelTask(effectiveCollectionTaskId);
       await refreshAfterExecution();
       setTaskActionMessage(`已取消采集任务 ${taskId}（${rowLabel}）。`);
     } catch (error) {
@@ -1774,6 +1947,7 @@ export default function RequirementTasksPanel({
 
   const renderSelectableTaskInstanceActions = (row: TaskInstanceRowView) => {
     const displayStatus = getTaskInstanceDisplayStatus(row);
+    const displayCollectionTaskId = getTaskInstanceDisplayCollectionTaskId(row);
     const isRunning = displayStatus === "running";
     const isQueued = displayStatus === "queued";
     const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
@@ -1792,10 +1966,10 @@ export default function RequirementTasksPanel({
           >
             {isQueued ? "排队中..." : isRunning ? "采集中..." : actionLabel}
           </button>
-          {isRunning && row.collectionTaskId ? (
+          {isRunning && displayCollectionTaskId ? (
             <button
               type="button"
-              onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
+              onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel, displayCollectionTaskId)}
               disabled={cancellingTaskIds.includes(row.fetchTaskId)}
               className={cn(
                 "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
@@ -1806,10 +1980,10 @@ export default function RequirementTasksPanel({
             </button>
           ) : null}
         </div>
-        {isRunning && row.collectionTaskId ? (
+        {isRunning && displayCollectionTaskId ? (
           <button
             type="button"
-            onClick={() => void handleOpenTaskStatusLog(row.collectionTaskId!, row.rowLabel)}
+            onClick={() => void handleOpenTaskStatusLog(displayCollectionTaskId, row.rowLabel)}
             className={cn(
               "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
               "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
@@ -1924,6 +2098,7 @@ export default function RequirementTasksPanel({
             <tbody className="divide-y">
               {rows.map((row) => {
                 const displayStatus = getTaskInstanceDisplayStatus(row);
+                const displayCollectionTaskId = getTaskInstanceDisplayCollectionTaskId(row);
                 const isSelected = selectedTaskIds.includes(row.fetchTaskId);
                 const isSelectable = canSelectTaskInstance(row);
                 return (
@@ -1955,7 +2130,7 @@ export default function RequirementTasksPanel({
                       </div>
                     </td>
                     <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
-                      {row.collectionTaskId ?? "-"}
+                      {displayCollectionTaskId ?? "-"}
                     </td>
                     <td className="px-3 py-3 align-top">
                       <StatusBadge status={displayStatus} />
