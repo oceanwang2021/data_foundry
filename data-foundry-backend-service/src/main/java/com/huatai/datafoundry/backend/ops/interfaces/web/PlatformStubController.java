@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.ops.interfaces.web;
 
 import com.huatai.datafoundry.backend.ops.application.service.DemoDataService;
+import com.huatai.datafoundry.backend.ops.application.query.service.OpsMonitoringQueryService;
 import com.huatai.datafoundry.backend.task.application.service.TaskRuntimeBackfillAppService;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,14 +24,17 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 public class PlatformStubController {
   private final DemoDataService demoDataService;
+  private final OpsMonitoringQueryService opsMonitoringQueryService;
   private final TaskRuntimeBackfillAppService taskRuntimeBackfillAppService;
   private final boolean adminEnabled;
 
   public PlatformStubController(
       DemoDataService demoDataService,
+      OpsMonitoringQueryService opsMonitoringQueryService,
       TaskRuntimeBackfillAppService taskRuntimeBackfillAppService,
       @Value("${datafoundry.admin.enabled:false}") boolean adminEnabled) {
     this.demoDataService = demoDataService;
+    this.opsMonitoringQueryService = opsMonitoringQueryService;
     this.taskRuntimeBackfillAppService = taskRuntimeBackfillAppService;
     this.adminEnabled = adminEnabled;
   }
@@ -65,17 +69,17 @@ public class PlatformStubController {
 
   @GetMapping("/api/ops/overview")
   public List<Map<String, Object>> opsOverview() {
-    return new ArrayList<Map<String, Object>>();
+    return opsMonitoringQueryService.listOpsOverview(false);
   }
 
   @GetMapping("/api/ops/task-status-counts")
   public List<Map<String, Object>> taskStatusCounts() {
-    return new ArrayList<Map<String, Object>>();
+    return opsMonitoringQueryService.listTaskStatusCounts(false);
   }
 
   @GetMapping("/api/ops/data-status-counts")
   public List<Map<String, Object>> dataStatusCounts() {
-    return new ArrayList<Map<String, Object>>();
+    return opsMonitoringQueryService.listDataStatusCounts(false);
   }
 
   @PostMapping("/api/admin/seed")

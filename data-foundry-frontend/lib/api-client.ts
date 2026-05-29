@@ -37,6 +37,7 @@ import type {
   AcceptanceTicket,
   AuditRule,
   PreprocessRule,
+  OpsMonitoringSummary,
   OpsOverview,
   DataLineage,
   RuntimeSettings,
@@ -2432,6 +2433,58 @@ export async function fetchTaskStatusCounts(): Promise<Array<{ status: string; c
 
 export async function fetchDataStatusCounts(): Promise<Array<{ status: string; count: number }>> {
   return apiGet("/api/ops/data-status-counts");
+}
+
+export async function fetchOpsMonitoringSummary(): Promise<OpsMonitoringSummary> {
+  const raw = await apiGet<any>("/api/ops/monitoring/summary");
+  return {
+    generatedAt: raw.generated_at ?? raw.generatedAt ?? "",
+    overview: {
+      healthScore: Number(raw.overview?.health_score ?? raw.overview?.healthScore ?? 0),
+      taskCompletionRate: Number(raw.overview?.task_completion_rate ?? raw.overview?.taskCompletionRate ?? 0),
+      dataCollectionRate: Number(raw.overview?.data_collection_rate ?? raw.overview?.dataCollectionRate ?? 0),
+      dataReviewRate: Number(raw.overview?.data_review_rate ?? raw.overview?.dataReviewRate ?? 0),
+    },
+    serviceHealth: (raw.service_health ?? raw.serviceHealth ?? []).map((item: any) => ({
+      service: String(item.service ?? ""),
+      label: String(item.label ?? item.stage ?? ""),
+      status: (item.status ?? "warning") as OpsMonitoringSummary["serviceHealth"][number]["status"],
+      detail: String(item.detail ?? ""),
+    })),
+    taskMonitoring: {
+      total: Number(raw.task_monitoring?.total ?? raw.taskMonitoring?.total ?? 0),
+      completionRate: Number(raw.task_monitoring?.completion_rate ?? raw.taskMonitoring?.completionRate ?? 0),
+      runningTaskCount: Number(raw.task_monitoring?.running_task_count ?? raw.taskMonitoring?.runningTaskCount ?? 0),
+      failedTaskCount: Number(raw.task_monitoring?.failed_task_count ?? raw.taskMonitoring?.failedTaskCount ?? 0),
+      successRate: Number(raw.task_monitoring?.success_rate ?? raw.taskMonitoring?.successRate ?? 0),
+      statusCounts: (raw.task_monitoring?.status_counts ?? raw.taskMonitoring?.statusCounts ?? []).map((item: any) => ({
+        status: String(item.status ?? ""),
+        label: String(item.label ?? item.status ?? ""),
+        count: Number(item.count ?? 0),
+        ratio: Number(item.ratio ?? 0),
+      })),
+    },
+    dataMonitoring: {
+      totalUnits: Number(raw.data_monitoring?.total_units ?? raw.dataMonitoring?.totalUnits ?? 0),
+      collectionRate: Number(raw.data_monitoring?.collection_rate ?? raw.dataMonitoring?.collectionRate ?? 0),
+      reviewRate: Number(raw.data_monitoring?.review_rate ?? raw.dataMonitoring?.reviewRate ?? 0),
+      approvalRate: Number(raw.data_monitoring?.approval_rate ?? raw.dataMonitoring?.approvalRate ?? 0),
+      stageCounts: (raw.data_monitoring?.stage_counts ?? raw.dataMonitoring?.stageCounts ?? []).map((item: any) => ({
+        status: String(item.status ?? ""),
+        label: String(item.label ?? item.stage ?? ""),
+        count: Number(item.count ?? 0),
+        ratio: Number(item.ratio ?? 0),
+      })),
+    },
+    riskCards: (raw.risk_cards ?? raw.riskCards ?? []).map((item: any) => ({
+      code: String(item.code ?? ""),
+      label: String(item.label ?? ""),
+      severity: (item.severity ?? "low") as OpsMonitoringSummary["riskCards"][number]["severity"],
+      count: Number(item.count ?? 0),
+      description: String(item.description ?? ""),
+      target: String(item.target ?? "/ops-monitoring"),
+    })),
+  };
 }
 
 export async function fetchPersonalCenterOverview(): Promise<PersonalCenterOverview> {

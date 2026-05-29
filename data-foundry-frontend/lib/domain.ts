@@ -100,11 +100,61 @@ export type AcceptanceTicket = {
 };
 
 export type OpsOverview = {
-  environment: "demo" | "production";
+  environment: string;
   stage: string;
   status: "healthy" | "warning" | "error";
   runningTasks: number;
   failedTasks: number;
+};
+
+export type OpsMonitoringServiceHealth = {
+  service: string;
+  label: string;
+  status: "healthy" | "warning" | "error";
+  detail: string;
+};
+
+export type OpsMonitoringDistributionItem = {
+  status: string;
+  label: string;
+  count: number;
+  ratio: number;
+};
+
+export type OpsMonitoringRiskCard = {
+  code: string;
+  label: string;
+  severity: "low" | "medium" | "high";
+  count: number;
+  description: string;
+  target: string;
+};
+
+export type OpsMonitoringSummary = {
+  generatedAt: string;
+  overview: {
+    healthScore: number;
+    taskCompletionRate: number;
+    dataCollectionRate: number;
+    dataReviewRate: number;
+  };
+  serviceHealth: OpsMonitoringServiceHealth[];
+  taskMonitoring: {
+    total: number;
+    completionRate: number;
+    runningTaskCount: number;
+    failedTaskCount: number;
+    successRate: number;
+    statusCounts: OpsMonitoringDistributionItem[];
+  };
+  dataMonitoring: {
+    totalUnits: number;
+    collectionRate: number;
+    reviewRate: number;
+    approvalRate: number;
+    stageCounts: OpsMonitoringDistributionItem[];
+  };
+  riskCards: OpsMonitoringRiskCard[];
 };
 
 export type PromptTemplateDefinition = {
