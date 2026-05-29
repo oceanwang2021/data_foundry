@@ -12,10 +12,8 @@ import {
 } from "@/lib/collection-task-list-view";
 import {
   ensureTaskGroupTasks,
+  fetchCollectionTasksOverview,
   fetchFetchTasks,
-  fetchProjects,
-  fetchRequirementWideTables,
-  fetchTaskGroups,
 } from "@/lib/api-client";
 import type { FetchTask, Project, Requirement, TaskGroup, WideTable } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -65,38 +63,13 @@ export default function CollectionTasksPage() {
   const [isTrialSectionExpanded, setIsTrialSectionExpanded] = useState(false);
 
   useEffect(() => {
-    fetchProjects()
-      .then(async (projectList) => {
-        setProjects(projectList);
-
-        const requirementWideTableResults = await Promise.all(
-          projectList.map((project) => (
-            fetchRequirementWideTables(project.id)
-              .catch(() => ({ requirements: [] as Requirement[], wideTables: [] as WideTable[] }))
-          )),
-        );
-        const nextRequirements = requirementWideTableResults.flatMap((result) => result.requirements);
-        const nextWideTables = requirementWideTableResults.flatMap((result) => result.wideTables);
-        setRequirements(nextRequirements);
-        setWideTables(nextWideTables);
-
-        const taskGroupArrays = await Promise.all(
-          projectList.flatMap((project) => (
-            nextRequirements
-              .filter((requirement) => requirement.projectId === project.id)
-              .map((requirement) => fetchTaskGroups(project.id, requirement.id).catch(() => [] as TaskGroup[]))
-          )),
-        );
-        setTaskGroups(taskGroupArrays.flat());
-
-        const fetchTaskArrays = await Promise.all(
-          projectList.flatMap((project) => (
-            nextRequirements
-              .filter((requirement) => requirement.projectId === project.id)
-              .map((requirement) => fetchFetchTasks(project.id, requirement.id).catch(() => [] as FetchTask[]))
-          )),
-        );
-        setAllFetchTasks(fetchTaskArrays.flat());
+    fetchCollectionTasksOverview()
+      .then((data) => {
+        setProjects(data.projects);
+        setRequirements(data.requirements);
+        setWideTables(data.wideTables);
+        setTaskGroups(data.taskGroups);
+        setAllFetchTasks(data.fetchTasks);
       })
       .catch(() => {});
   }, []);
@@ -136,7 +109,9 @@ export default function CollectionTasksPage() {
   );
 
   const refreshFetchTasksForRow = async (row: CollectionTaskListRowView) => {
-    const latest = await fetchFetchTasks(row.projectId, row.requirementId).catch(() => [] as FetchTask[]);
+    const latest = await fetchFetchTasks(row.projectId, row.requirementId, {
+      includeCollectionRows: false,
+    }).catch(() => [] as FetchTask[]);
     const scopedWideTableIds = new Set(
       wideTables
         .filter((wideTable) => wideTable.requirementId === row.requirementId)

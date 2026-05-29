@@ -7,6 +7,7 @@ import com.huatai.datafoundry.backend.requirement.application.query.service.Requ
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,14 +31,18 @@ public class RequirementTaskLegacyController {
   @GetMapping("/tasks")
   public List<FetchTaskReadDto> listTasks(
       @PathVariable("projectId") String projectId,
-      @PathVariable("requirementId") String requirementId) {
-    return requirementQueryService.listFetchTasks(projectId, requirementId);
+      @PathVariable("requirementId") String requirementId,
+      @RequestParam(value = "include_collection_rows", required = false, defaultValue = "true")
+          boolean includeCollectionRows) {
+    return requirementQueryService.listFetchTasks(projectId, requirementId, includeCollectionRows);
   }
 
   @GetMapping("/task-runtime")
   public RequirementTaskRuntimeReadDto getTaskRuntime(
       @PathVariable("projectId") String projectId,
-      @PathVariable("requirementId") String requirementId) {
-    return requirementQueryService.getTaskRuntime(projectId, requirementId);
+      @PathVariable("requirementId") String requirementId,
+      @RequestParam(value = "include_collection_rows", required = false, defaultValue = "true")
+          boolean includeCollectionRows) {
+    return requirementQueryService.getTaskRuntime(projectId, requirementId, includeCollectionRows);
   }
 }

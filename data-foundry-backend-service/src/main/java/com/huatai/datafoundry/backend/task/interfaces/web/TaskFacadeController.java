@@ -47,15 +47,19 @@ public class TaskFacadeController {
   @GetMapping
   public List<FetchTaskReadDto> listFetchTasks(
       @RequestParam("project_id") String projectId,
-      @RequestParam("requirement_id") String requirementId) {
-    return requirementQueryService.listFetchTasks(projectId, requirementId);
+      @RequestParam("requirement_id") String requirementId,
+      @RequestParam(value = "include_collection_rows", required = false, defaultValue = "true")
+          boolean includeCollectionRows) {
+    return requirementQueryService.listFetchTasks(projectId, requirementId, includeCollectionRows);
   }
 
   @GetMapping("/runtime")
   public RequirementTaskRuntimeReadDto getTaskRuntime(
       @RequestParam("project_id") String projectId,
-      @RequestParam("requirement_id") String requirementId) {
-    return requirementQueryService.getTaskRuntime(projectId, requirementId);
+      @RequestParam("requirement_id") String requirementId,
+      @RequestParam(value = "include_collection_rows", required = false, defaultValue = "true")
+          boolean includeCollectionRows) {
+    return requirementQueryService.getTaskRuntime(projectId, requirementId, includeCollectionRows);
   }
 
   @GetMapping("/{taskId}/results")

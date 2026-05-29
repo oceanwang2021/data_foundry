@@ -16,6 +16,7 @@ export default function ProjectRequirementDetailPage() {
   const requestedGuide = searchParams?.get("guide") ?? undefined;
   const viewMode = searchParams?.get("view") ?? undefined;
   const navSource = searchParams?.get("nav") ?? undefined;
+  const shouldPreloadOperationalData = true;
 
   const [project, setProject] = useState<Project | null>(null);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -34,7 +35,9 @@ export default function ProjectRequirementDetailPage() {
       return;
     }
 
-    loadRequirementDetailData(id, reqId)
+    loadRequirementDetailData(id, reqId, {
+      includeOperationalData: shouldPreloadOperationalData,
+    })
       .then((data) => {
         setProject(data.project);
         setRequirements(data.requirements);
@@ -49,7 +52,7 @@ export default function ProjectRequirementDetailPage() {
         setProject(null);
       })
       .finally(() => setLoading(false));
-  }, [id, reqId]);
+  }, [id, reqId, shouldPreloadOperationalData]);
 
   if (loading) {
     return (
@@ -100,6 +103,7 @@ export default function ProjectRequirementDetailPage() {
       fetchTasks={fetchTasks}
       acceptanceTickets={acceptanceTickets}
       scheduleJobs={scheduleJobs}
+      initialOperationalDataLoaded={shouldPreloadOperationalData}
     />
   );
 }

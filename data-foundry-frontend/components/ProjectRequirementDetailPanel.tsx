@@ -11,7 +11,11 @@ import type {
   Project,
 } from "@/lib/types";
 import type { AcceptanceTicket, ScheduleJob } from "@/lib/domain";
-import { loadRequirementDetailData, updateRequirement } from "@/lib/api-client";
+import {
+  loadRequirementDetailData,
+  loadRequirementOperationalData,
+  updateRequirement,
+} from "@/lib/api-client";
 import { ArrowLeft, ClipboardList } from "lucide-react";
 import { formatBusinessDateLabel } from "@/lib/business-date";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
@@ -38,6 +42,7 @@ type Props = {
   fetchTasks: FetchTask[];
   acceptanceTickets: AcceptanceTicket[];
   scheduleJobs: ScheduleJob[];
+  initialOperationalDataLoaded?: boolean;
 };
 
 type RequirementUpdatePayload = Parameters<typeof updateRequirement>[2];
@@ -68,6 +73,7 @@ export default function ProjectRequirementDetailPanel({
   fetchTasks,
   acceptanceTickets,
   scheduleJobs,
+  initialOperationalDataLoaded = true,
 }: Props) {
   const [projectState, setProjectState] = useState<Project>(project);
   const [requirements, setRequirements] = useState<Requirement[]>(initialRequirements);
@@ -77,6 +83,8 @@ export default function ProjectRequirementDetailPanel({
   const [fetchTasksState, setFetchTasksState] = useState<FetchTask[]>(fetchTasks);
   const [taskGroupRunsState, setTaskGroupRunsState] = useState<ScheduleJob[]>(scheduleJobs);
   const [acceptanceTicketsState, setAcceptanceTicketsState] = useState<AcceptanceTicket[]>(acceptanceTickets);
+  const [operationalDataLoaded, setOperationalDataLoaded] = useState<boolean>(initialOperationalDataLoaded);
+  const [operationalLoading, setOperationalLoading] = useState(false);
   const hydrated = true;
   const fallbackBackTarget = resolveBackTarget(project.id, navSource, viewMode);
 
@@ -96,7 +104,9 @@ export default function ProjectRequirementDetailPanel({
     setFetchTasksState(sanitizedState.fetchTasks);
     setTaskGroupRunsState(sanitizedState.scheduleJobs);
     setAcceptanceTicketsState(acceptanceTickets);
-  }, [project, initialRequirements, wideTables, wideTableRecords, taskGroups, fetchTasks, scheduleJobs, acceptanceTickets]);
+    setOperationalDataLoaded(initialOperationalDataLoaded);
+    setOperationalLoading(false);
+  }, [project, initialRequirements, wideTables, wideTableRecords, taskGroups, fetchTasks, scheduleJobs, acceptanceTickets, initialOperationalDataLoaded]);
 
   const requirement = useMemo(
     () => requirements.find((r) => r.id === requirementId) ?? null,
@@ -181,7 +191,9 @@ export default function ProjectRequirementDetailPanel({
   };
 
   const refreshRequirementData = async () => {
-    const data = await loadRequirementDetailData(project.id, requirementId);
+    const data = await loadRequirementDetailData(project.id, requirementId, {
+      includeOperationalData: operationalDataLoaded,
+    });
     const sanitizedState = sanitizeProjectRequirementState({
       wideTables: data.wideTables,
       wideTableRecords: data.wideTableRecords,
@@ -311,6 +323,62 @@ export default function ProjectRequirementDetailPanel({
       ? "acceptance"
     : "requirement";
 
+  useEffect(() => {
+    if (activeTab === "requirement" || operationalDataLoaded || operationalLoading) {
+      return;
+    }
+
+    let cancelled = false;
+    setOperationalLoading(true);
+    void loadRequirementOperationalData(project.id, requirementId, reqWideTables)
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        const sanitizedState = sanitizeProjectRequirementState({
+          wideTables: data.wideTables,
+          wideTableRecords: data.wideTableRecords,
+          taskGroups: data.taskGroups,
+          fetchTasks: data.fetchTasks,
+          scheduleJobs: data.scheduleJobs,
+        });
+        setWideTablesState((prev) => [
+          ...prev.filter((wideTable) => wideTable.requirementId !== requirementId),
+          ...sanitizedState.wideTables,
+        ]);
+        setWideTableRecordsState((prev) => [
+          ...prev.filter((record) => !reqWtIds.has(record.wideTableId)),
+          ...sanitizedState.wideTableRecords,
+        ]);
+        setTaskGroupsState((prev) => [
+          ...prev.filter((taskGroup) => !reqWtIds.has(taskGroup.wideTableId)),
+          ...sanitizedState.taskGroups,
+        ]);
+        setFetchTasksState((prev) => [
+          ...prev.filter((task) => !reqWtIds.has(task.wideTableId)),
+          ...sanitizedState.fetchTasks,
+        ]);
+        setTaskGroupRunsState((prev) => [
+          ...prev.filter((run) => !sanitizedState.taskGroups.some((taskGroup) => taskGroup.id === run.taskGroupId)),
+          ...sanitizedState.scheduleJobs,
+        ]);
+        setAcceptanceTicketsState((prev) => [
+          ...prev.filter((ticket) => ticket.requirementId !== requirementId),
+          ...data.acceptanceTickets,
+        ]);
+        setOperationalDataLoaded(true);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setOperationalLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, operationalDataLoaded, operationalLoading, project.id, requirementId, reqWideTables, reqWtIds]);
+
   return (
     <div className="p-8 space-y-6">
       <header className="space-y-2">
@@ -355,6 +423,12 @@ export default function ProjectRequirementDetailPanel({
         </div>
       ) : null}
 
+      {activeTab !== "requirement" && !operationalDataLoaded ? (
+        <div className="rounded-xl border bg-card px-4 py-6 text-sm text-muted-foreground">
+          {operationalLoading ? "正在加载任务与验收数据..." : "准备加载任务与验收数据..."}
+        </div>
+      ) : null}
+
       {activeTab === "requirement" ? (
         <RequirementDefinitionForm
           project={projectState}
@@ -390,7 +464,7 @@ export default function ProjectRequirementDetailPanel({
         />
       ) : null}
 
-      {activeTab === "tasks" ? (
+      {activeTab === "tasks" && operationalDataLoaded ? (
         <RequirementTasksPanel
           requirement={requirement}
           initialSubTab={initialTaskSubTab}
@@ -431,7 +505,7 @@ export default function ProjectRequirementDetailPanel({
         />
       ) : null}
 
-      {activeTab === "acceptance" ? (
+      {activeTab === "acceptance" && operationalDataLoaded ? (
         <RequirementAcceptancePanel
           requirement={requirement}
           navSource={resolvedNavSource}

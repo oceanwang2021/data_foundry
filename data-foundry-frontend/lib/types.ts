@@ -251,6 +251,7 @@ export type TaskGroupStatus = "pending" | "running" | "completed" | "failed" | "
 
 export type TaskGroup = {
   id: string;
+  requirementId?: string;
   wideTableId: string;
   businessDate: string;
   businessDateLabel: string;

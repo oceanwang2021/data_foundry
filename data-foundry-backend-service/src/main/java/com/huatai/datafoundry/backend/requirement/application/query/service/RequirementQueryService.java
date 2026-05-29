@@ -182,6 +182,11 @@ public class RequirementQueryService {
   }
 
   public List<FetchTaskReadDto> listFetchTasks(String projectId, String requirementId) {
+    return listFetchTasks(projectId, requirementId, true);
+  }
+
+  public List<FetchTaskReadDto> listFetchTasks(
+      String projectId, String requirementId, boolean includeCollectionRows) {
     assertRequirementExists(projectId, requirementId);
     List<TaskGroup> taskGroups = taskGroupRepository.listByRequirement(requirementId);
     Map<String, WideTablePlanContext> contextByWideTableId = buildWideTablePlanContextByTaskGroups(requirementId, taskGroups);
@@ -236,7 +241,9 @@ public class RequirementQueryService {
       dto.setConfidence(record.getConfidence());
       dto.setPlanVersion(record.getPlanVersion());
       dto.setRowBindingKey(record.getRowBindingKey());
-      dto.setCollectionRows(mapCollectionResultRows(collectionResultAppService.listRowsByTask(record.getId())));
+      if (includeCollectionRows) {
+        dto.setCollectionRows(mapCollectionResultRows(collectionResultAppService.listRowsByTask(record.getId())));
+      }
       dto.setCreatedAt(record.getCreatedAt());
       dto.setUpdatedAt(record.getUpdatedAt());
       out.add(dto);
@@ -245,9 +252,14 @@ public class RequirementQueryService {
   }
 
   public RequirementTaskRuntimeReadDto getTaskRuntime(String projectId, String requirementId) {
+    return getTaskRuntime(projectId, requirementId, true);
+  }
+
+  public RequirementTaskRuntimeReadDto getTaskRuntime(
+      String projectId, String requirementId, boolean includeCollectionRows) {
     RequirementTaskRuntimeReadDto dto = new RequirementTaskRuntimeReadDto();
     dto.setTaskGroups(listTaskGroups(projectId, requirementId));
-    dto.setFetchTasks(listFetchTasks(projectId, requirementId));
+    dto.setFetchTasks(listFetchTasks(projectId, requirementId, includeCollectionRows));
     return dto;
   }
 

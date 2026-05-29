@@ -2,7 +2,6 @@ package com.huatai.datafoundry.backend.ops.application.query.service;
 
 import com.huatai.datafoundry.backend.requirement.application.service.AcceptanceTicketAppService;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.AcceptanceTicketRecord;
-import com.huatai.datafoundry.backend.task.application.service.TaskGroupAggregateService;
 import com.huatai.datafoundry.backend.task.domain.gateway.ScheduleJobGateway;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.ScheduleJob;
@@ -35,6 +34,7 @@ import org.springframework.web.client.RestTemplate;
 @Service
 public class OpsMonitoringQueryService {
   private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
+  private static final long SERVICE_HEALTH_CACHE_TTL_MS = 30_000L;
   private static final Set<String> COLLECTION_COMPLETED_STATUSES =
       new LinkedHashSet<String>(Arrays.asList(TaskStatus.COMPLETED, "partial"));
   private static final Set<String> TASK_GROUP_EXCEPTION_STATUSES =
@@ -51,19 +51,18 @@ public class OpsMonitoringQueryService {
   private final TaskGroupRepository taskGroupRepository;
   private final FetchTaskRepository fetchTaskRepository;
   private final AcceptanceTicketAppService acceptanceTicketAppService;
-  private final TaskGroupAggregateService taskGroupAggregateService;
   private final ScheduleJobGateway scheduleJobGateway;
   private final JdbcTemplate jdbcTemplate;
   private final RestTemplate schedulerRestTemplate;
   private final RestTemplate collectionRestTemplate;
   private final String schedulerBaseUrl;
   private final String collectionBaseUrl;
+  private volatile CachedServiceHealthSnapshot cachedServiceHealthSnapshot;
 
   public OpsMonitoringQueryService(
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       AcceptanceTicketAppService acceptanceTicketAppService,
-      TaskGroupAggregateService taskGroupAggregateService,
       ScheduleJobGateway scheduleJobGateway,
       JdbcTemplate jdbcTemplate,
       @Qualifier("schedulerRestTemplate") RestTemplate schedulerRestTemplate,
@@ -73,7 +72,6 @@ public class OpsMonitoringQueryService {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.acceptanceTicketAppService = acceptanceTicketAppService;
-    this.taskGroupAggregateService = taskGroupAggregateService;
     this.scheduleJobGateway = scheduleJobGateway;
     this.jdbcTemplate = jdbcTemplate;
     this.schedulerRestTemplate = schedulerRestTemplate;
@@ -141,10 +139,6 @@ public class OpsMonitoringQueryService {
   }
 
   private MonitoringContext buildContext(boolean includeTrial) {
-    List<TaskGroup> rawTaskGroups = safeTaskGroups(taskGroupRepository.listAll());
-    List<FetchTask> rawFetchTasks = safeFetchTasks(fetchTaskRepository.listAll());
-    refreshStaleTaskGroups(rawTaskGroups, rawFetchTasks);
-
     List<TaskGroup> taskGroups = safeTaskGroups(taskGroupRepository.listAll());
     List<FetchTask> fetchTasks = safeFetchTasks(fetchTaskRepository.listAll());
     Map<String, AcceptanceTicketRecord> acceptanceTicketByTaskGroupId =
@@ -158,42 +152,8 @@ public class OpsMonitoringQueryService {
     context.scheduleJobs = scheduleJobs;
     deriveTaskMetrics(context);
     deriveDataMetrics(context);
-    context.serviceHealthItems = buildServiceHealth(context);
+    context.serviceHealthItems = getCachedServiceHealth(context);
     return context;
-  }
-
-  private void refreshStaleTaskGroups(List<TaskGroup> taskGroups, List<FetchTask> fetchTasks) {
-    if (taskGroups.isEmpty()) {
-      return;
-    }
-    Map<String, LocalDateTime> latestTaskUpdateByTaskGroupId = new LinkedHashMap<String, LocalDateTime>();
-    for (FetchTask fetchTask : fetchTasks) {
-      if (fetchTask == null || isBlank(fetchTask.getTaskGroupId()) || fetchTask.getUpdatedAt() == null) {
-        continue;
-      }
-      LocalDateTime current = latestTaskUpdateByTaskGroupId.get(fetchTask.getTaskGroupId());
-      if (current == null || fetchTask.getUpdatedAt().isAfter(current)) {
-        latestTaskUpdateByTaskGroupId.put(fetchTask.getTaskGroupId(), fetchTask.getUpdatedAt());
-      }
-    }
-
-    List<String> staleTaskGroupIds = new ArrayList<String>();
-    for (TaskGroup taskGroup : taskGroups) {
-      if (taskGroup == null || isBlank(taskGroup.getId())) {
-        continue;
-      }
-      LocalDateTime latestTaskUpdate = latestTaskUpdateByTaskGroupId.get(taskGroup.getId());
-      if (taskGroup.getLastAggregatedAt() == null) {
-        staleTaskGroupIds.add(taskGroup.getId());
-        continue;
-      }
-      if (latestTaskUpdate != null && latestTaskUpdate.isAfter(taskGroup.getLastAggregatedAt())) {
-        staleTaskGroupIds.add(taskGroup.getId());
-      }
-    }
-    if (!staleTaskGroupIds.isEmpty()) {
-      taskGroupAggregateService.refreshTaskGroups(staleTaskGroupIds);
-    }
   }
 
   private void deriveTaskMetrics(MonitoringContext context) {
@@ -376,6 +336,23 @@ public class OpsMonitoringQueryService {
         collectionBaseUrl,
         "用于创建采集任务、同步任务状态与读取采集结果"));
     return out;
+  }
+
+  private List<Map<String, Object>> getCachedServiceHealth(MonitoringContext context) {
+    long now = System.currentTimeMillis();
+    CachedServiceHealthSnapshot snapshot = cachedServiceHealthSnapshot;
+    if (snapshot != null && (now - snapshot.cachedAtMillis) < SERVICE_HEALTH_CACHE_TTL_MS) {
+      return snapshot.items;
+    }
+    synchronized (this) {
+      snapshot = cachedServiceHealthSnapshot;
+      if (snapshot != null && (now - snapshot.cachedAtMillis) < SERVICE_HEALTH_CACHE_TTL_MS) {
+        return snapshot.items;
+      }
+      List<Map<String, Object>> items = buildServiceHealth(context);
+      cachedServiceHealthSnapshot = new CachedServiceHealthSnapshot(now, items);
+      return items;
+    }
   }
 
   private Map<String, Object> probeBackendHealth() {
@@ -631,6 +608,16 @@ public class OpsMonitoringQueryService {
   private String safeMessage(Exception ex) {
     String message = ex != null ? trimToNull(ex.getMessage()) : null;
     return message != null ? message : "unknown error";
+  }
+
+  private static final class CachedServiceHealthSnapshot {
+    private final long cachedAtMillis;
+    private final List<Map<String, Object>> items;
+
+    private CachedServiceHealthSnapshot(long cachedAtMillis, List<Map<String, Object>> items) {
+      this.cachedAtMillis = cachedAtMillis;
+      this.items = items;
+    }
   }
 
   private static final class MonitoringContext {

@@ -30,9 +30,11 @@ public class WideTableRowFacadeController {
   @GetMapping
   public List<WideTableRowReadDto> listRows(
       @PathVariable("wideTableId") String wideTableId,
-      @RequestParam(value = "batch_id", required = false) String batchId) {
+      @RequestParam(value = "batch_id", required = false) String batchId,
+      @RequestParam(value = "page", required = false) Integer page,
+      @RequestParam(value = "page_size", required = false) Integer pageSize) {
     // batch_id is reserved for future snapshot reads; current scope uses wide_table_rows only.
-    return wideTableRowQueryService.listByWideTableId(wideTableId);
+    return wideTableRowQueryService.listByWideTableId(wideTableId, page, pageSize);
   }
 
   @PutMapping("/{rowId}")
@@ -46,4 +48,3 @@ public class WideTableRowFacadeController {
     return out;
   }
 }
-

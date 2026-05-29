@@ -3,7 +3,11 @@ package com.huatai.datafoundry.backend.task.interfaces.web;
 import com.huatai.datafoundry.backend.task.application.service.ScheduleJobFacadeAppService;
 import com.huatai.datafoundry.backend.task.domain.model.ScheduleJob;
 import com.huatai.datafoundry.backend.task.domain.model.ScheduleJobCreateCommand;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,9 +29,18 @@ public class ScheduleJobFacadeController {
   @GetMapping("/api/schedule-jobs")
   public List<ScheduleJob> listScheduleJobs(
       @RequestParam(value = "trigger_type", required = false) String triggerType,
-      @RequestParam(value = "status", required = false) String status) {
+      @RequestParam(value = "status", required = false) String status,
+      @RequestParam(value = "task_group_id", required = false) String taskGroupId,
+      @RequestParam(value = "task_group_ids", required = false) String taskGroupIds) {
     try {
-      return scheduleJobFacadeAppService.list(triggerType, status);
+      List<ScheduleJob> jobs = scheduleJobFacadeAppService.list(triggerType, status);
+      Set<String> requestedTaskGroupIds = buildTaskGroupFilter(taskGroupId, taskGroupIds);
+      if (requestedTaskGroupIds.isEmpty()) {
+        return jobs;
+      }
+      return jobs.stream()
+          .filter(job -> job != null && requestedTaskGroupIds.contains(job.getTaskGroupId()))
+          .collect(Collectors.toList());
     } catch (ResponseStatusException ex) {
       throw ex;
     } catch (Exception ex) {
@@ -106,5 +119,19 @@ public class ScheduleJobFacadeController {
     public void setBackfillRequestId(String backfillRequestId) {
       this.backfillRequestId = backfillRequestId;
     }
+  }
+
+  private Set<String> buildTaskGroupFilter(String taskGroupId, String taskGroupIds) {
+    LinkedHashSet<String> out = new LinkedHashSet<String>();
+    if (taskGroupId != null && taskGroupId.trim().length() > 0) {
+      out.add(taskGroupId.trim());
+    }
+    if (taskGroupIds != null && taskGroupIds.trim().length() > 0) {
+      out.addAll(Arrays.stream(taskGroupIds.split(","))
+          .map(String::trim)
+          .filter(value -> value.length() > 0)
+          .collect(Collectors.toList()));
+    }
+    return out;
   }
 }

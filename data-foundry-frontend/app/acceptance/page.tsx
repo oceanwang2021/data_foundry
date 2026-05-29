@@ -6,12 +6,7 @@ import { ShieldCheck, CheckCircle2, XCircle, Wrench, ArrowRight, type LucideIcon
 import { cn } from "@/lib/utils";
 import type { Project, Requirement } from "@/lib/types";
 import type { AcceptanceTicket } from "@/lib/domain";
-import {
-  fetchAcceptanceTickets,
-  fetchProjects,
-  fetchRequirementWideTables,
-  fetchTaskGroups,
-} from "@/lib/api-client";
+import { fetchAcceptanceOverview } from "@/lib/api-client";
 
 type AcceptanceReviewStatus = "pending" | "approved" | "partial_approved" | "rejected";
 
@@ -66,37 +61,10 @@ export default function AcceptancePage() {
     setLoading(true);
     setErrorMessage("");
     try {
-      const projectList = await fetchProjects();
-      const requirementResults = await Promise.all(
-        projectList.map((project) =>
-          fetchRequirementWideTables(project.id).catch(() => ({
-            requirements: [] as Requirement[],
-            wideTables: [],
-          })),
-        ),
-      );
-      const requirementList = requirementResults.flatMap((result) => result.requirements);
-      const acceptanceTickets = await fetchAcceptanceTickets();
-
-      const taskGroupResults = await Promise.all(
-        requirementList.map((req) =>
-          fetchTaskGroups(req.projectId, req.id)
-            .then((groups) => ({
-              projectId: req.projectId,
-              requirementId: req.id,
-              groups,
-            }))
-            .catch(() => ({
-              projectId: req.projectId,
-              requirementId: req.id,
-              groups: [],
-            })),
-        ),
-      );
-      const rows: TaskGroupRow[] = taskGroupResults.flatMap((result) =>
-        result.groups.map((tg) => ({
-          projectId: result.projectId,
-          requirementId: result.requirementId,
+      const overview = await fetchAcceptanceOverview();
+      const rows: TaskGroupRow[] = overview.taskGroups.map((tg) => ({
+          projectId: overview.requirements.find((requirement) => requirement.id === tg.requirementId)?.projectId ?? "",
+          requirementId: tg.requirementId,
           taskGroup: {
             id: tg.id,
             wideTableId: tg.wideTableId,
@@ -105,13 +73,12 @@ export default function AcceptancePage() {
             status: tg.status,
             updatedAt: tg.updatedAt,
           },
-        })),
-      );
+        }));
 
-      setProjects(projectList);
-      setRequirements(requirementList);
+      setProjects(overview.projects);
+      setRequirements(overview.requirements);
       setTaskGroupRows(rows);
-      setTickets(acceptanceTickets);
+      setTickets(overview.tickets);
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载失败，请稍后重试。";
       setErrorMessage(message);

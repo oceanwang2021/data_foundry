@@ -3,29 +3,21 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Project, Requirement } from "@/lib/types";
-import { fetchProjects, fetchRequirements } from "@/lib/api-client";
+import type { Project } from "@/lib/types";
+import { fetchProjectsOverview } from "@/lib/api-client";
 import { FolderKanban, ArrowRight, Plus } from "lucide-react";
 import CreateProjectModal from "@/components/CreateProjectModal";
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [projectCards, setProjectCards] = useState<Array<{ project: Project; requirementCount: number }>>([]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   useEffect(() => {
-    fetchProjects()
-      .then(setProjects)
-      .catch(() => setProjects([]));
+    fetchProjectsOverview()
+      .then(setProjectCards)
+      .catch(() => setProjectCards([]));
   }, []);
-
-  useEffect(() => {
-    if (projects.length === 0) return;
-    Promise.all(projects.map((p) => fetchRequirements(p.id).catch(() => [])))
-      .then((arrays) => setRequirements(arrays.flat()))
-      .catch(() => setRequirements([]));
-  }, [projects]);
 
   return (
     <div className="p-8 space-y-6">
@@ -51,8 +43,7 @@ export default function ProjectsPage() {
       </header>
 
       <div className="grid gap-5 md:grid-cols-2">
-        {projects.map((project) => {
-          const reqs = requirements.filter((r) => r.projectId === project.id);
+        {projectCards.map(({ project, requirementCount }) => {
           return (
             <div key={project.id} className="rounded-xl border bg-card p-5 shadow-sm">
               <div className="flex items-start gap-2">
@@ -62,7 +53,7 @@ export default function ProjectsPage() {
                 </div>
               </div>
               <div className="mt-4 text-sm text-muted-foreground">
-                <p>需求数量：{reqs.length}</p>
+                <p>需求数量：{requirementCount}</p>
                 <p>状态：{project.status === "active" ? "运行中" : "规划中"}</p>
               </div>
               <Link

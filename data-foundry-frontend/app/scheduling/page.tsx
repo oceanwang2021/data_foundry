@@ -4,10 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { TaskGroup } from "@/lib/types";
 import type { ScheduleJob } from "@/lib/domain";
 import {
-  fetchProjects,
-  fetchRequirementWideTables,
   fetchScheduleJobs,
-  fetchTaskGroups,
+  fetchSchedulingContext,
   createScheduleJob,
 } from "@/lib/api-client";
 import { ComponentType } from "react";
@@ -55,27 +53,9 @@ export default function SchedulingPage() {
   }, [loadJobs]);
 
   useEffect(() => {
-    fetchProjects()
-      .then(async (ps) => {
-        const results = await Promise.all(
-          ps.map((p) =>
-            fetchRequirementWideTables(p.id).catch(() => ({
-              requirements: [],
-              wideTables: [],
-            })),
-          ),
-        );
-        const reqs = results.flatMap((r) => r.requirements);
-        const tgArrays = await Promise.all(
-          ps.flatMap((p) =>
-            reqs
-              .filter((r) => r.projectId === p.id)
-              .map((r) =>
-                fetchTaskGroups(p.id, r.id).catch(() => [] as TaskGroup[]),
-              ),
-          ),
-        );
-        setTaskGroups(tgArrays.flat());
+    fetchSchedulingContext()
+      .then((data) => {
+        setTaskGroups(data.taskGroups);
       })
       .catch(() => {});
   }, []);

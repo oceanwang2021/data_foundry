@@ -24,10 +24,21 @@ public class WideTableRowQueryService {
   }
 
   public List<WideTableRowReadDto> listByWideTableId(String wideTableId) {
+    return listByWideTableId(wideTableId, null, null);
+  }
+
+  public List<WideTableRowReadDto> listByWideTableId(
+      String wideTableId, Integer page, Integer pageSize) {
     List<WideTableRowRecord> records = wideTableRowMapper.listByWideTableId(wideTableId);
     List<WideTableRowReadDto> out = new ArrayList<WideTableRowReadDto>();
     if (records == null) return out;
-    for (WideTableRowRecord record : records) {
+    int fromIndex = 0;
+    int toIndex = records.size();
+    if (page != null && pageSize != null && page > 0 && pageSize > 0) {
+      fromIndex = Math.min((page - 1) * pageSize, records.size());
+      toIndex = Math.min(fromIndex + pageSize, records.size());
+    }
+    for (WideTableRowRecord record : records.subList(fromIndex, toIndex)) {
       if (record == null) continue;
       out.add(map(record));
     }
@@ -59,4 +70,3 @@ public class WideTableRowQueryService {
     }
   }
 }
-
