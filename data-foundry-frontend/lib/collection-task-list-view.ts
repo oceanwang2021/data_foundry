@@ -1,7 +1,7 @@
 import type { FetchTask, Project, Requirement, TaskGroup, TaskGroupStatus, WideTable } from "@/lib/types";
 
 const COLLECTION_TASK_DEFAULT_KEY = "__default__";
-const COLLECTION_TASK_DEFAULT_LABEL = "统一提示词";
+const COLLECTION_TASK_DEFAULT_LABEL = "默认分组";
 
 const FREQUENCY_LABELS: Record<string, string> = {
   daily: "日频",
@@ -10,6 +10,14 @@ const FREQUENCY_LABELS: Record<string, string> = {
   quarterly: "季频",
   yearly: "年频",
 };
+
+const STATUS_LABELS = {
+  pending: "待执行",
+  running: "执行中",
+  completed: "已完成",
+  failed: "失败",
+  invalidated: "已失效",
+} as const;
 
 export type CollectionTaskExecutionMode = "formal" | "trial";
 
@@ -36,14 +44,6 @@ export type CollectionTaskListRowView = {
   lastUpdatedAt: string;
   totalTasks: number;
 };
-
-const STATUS_LABELS = {
-  pending: "待执行",
-  running: "执行中",
-  completed: "已完成",
-  failed: "失败",
-  invalidated: "已失效",
-} as const;
 
 export function resolveCollectionTaskKey(taskGroup: TaskGroup): string {
   return taskGroup.partitionKey ?? COLLECTION_TASK_DEFAULT_KEY;
@@ -72,10 +72,10 @@ export function formatIndicatorSummary(indicatorNames: string[], previewCount = 
 
   const preview = indicatorNames.slice(0, previewCount);
   if (indicatorNames.length <= previewCount) {
-    return `${indicatorNames.length} 个指标｜${preview.join("、")}`;
+    return `${indicatorNames.length} 个指标 | ${preview.join("、")}`;
   }
 
-  return `${indicatorNames.length} 个指标｜${preview.join("、")} 等`;
+  return `${indicatorNames.length} 个指标 | ${preview.join("、")} 等`;
 }
 
 export function formatCollectionTaskDisplaySummary(
@@ -83,7 +83,7 @@ export function formatCollectionTaskDisplaySummary(
   indicatorNames: string[],
   previewCount = 3,
 ): string {
-  return `${normalizeCollectionTaskLabel(label)}｜${formatIndicatorSummary(indicatorNames, previewCount)}`;
+  return `${normalizeCollectionTaskLabel(label)} · ${formatIndicatorSummary(indicatorNames, previewCount)}`;
 }
 
 export function formatCollectionTaskDateTime(value?: string): string {
@@ -119,16 +119,19 @@ export function buildCollectionTaskListRows(params: {
     fetchTasksByTaskGroupId.set(fetchTask.taskGroupId, scopedTasks);
   }
 
-  const groupedRows = new Map<string, {
-    key: string;
-    collectionTaskKey: string;
-    collectionTaskLabel: string;
-    executionMode: CollectionTaskExecutionMode;
-    requirement: Requirement;
-    project?: Project;
-    wideTable: WideTable;
-    taskGroups: TaskGroup[];
-  }>();
+  const groupedRows = new Map<
+    string,
+    {
+      key: string;
+      collectionTaskKey: string;
+      collectionTaskLabel: string;
+      executionMode: CollectionTaskExecutionMode;
+      requirement: Requirement;
+      project?: Project;
+      wideTable: WideTable;
+      taskGroups: TaskGroup[];
+    }
+  >();
 
   for (const taskGroup of taskGroups) {
     const wideTable = wideTableById.get(taskGroup.wideTableId);
@@ -203,10 +206,11 @@ function buildRowView(
   const invalidatedTasks = orderedTaskGroups.reduce((sum, taskGroup) => sum + (taskGroup.invalidatedTasks ?? 0), 0);
 
   const aggregateStatus = resolveAggregateStatus(orderedTaskGroups.map((taskGroup) => taskGroup.status));
-  const lastUpdatedAt = [orderedTaskGroups, scopedFetchTasks]
-    .flat()
-    .map((item) => item.updatedAt ?? item.createdAt ?? "")
-    .sort((left, right) => right.localeCompare(left))[0] ?? "";
+  const lastUpdatedAt =
+    [orderedTaskGroups, scopedFetchTasks]
+      .flat()
+      .map((item) => item.updatedAt ?? item.createdAt ?? "")
+      .sort((left, right) => right.localeCompare(left))[0] ?? "";
 
   return {
     key: row.key,
@@ -296,12 +300,13 @@ function resolveAggregateStatus(statuses: TaskGroupStatus[]): keyof typeof STATU
 }
 
 function resolveScheduleLabel(requirement: Requirement, wideTable: WideTable): string {
-  const frequencyLabel = FREQUENCY_LABELS[wideTable.businessDateRange.frequency] ?? wideTable.businessDateRange.frequency ?? "-";
+  const frequencyLabel =
+    FREQUENCY_LABELS[wideTable.businessDateRange.frequency] ?? wideTable.businessDateRange.frequency ?? "-";
   if (requirement.dataUpdateEnabled === false) {
-    return `一次性交付｜${frequencyLabel}`;
+    return `一次性交付 | ${frequencyLabel}`;
   }
   if (requirement.dataUpdateEnabled === true) {
-    return `定期更新｜${frequencyLabel}`;
+    return `定期更新 | ${frequencyLabel}`;
   }
   return frequencyLabel;
 }

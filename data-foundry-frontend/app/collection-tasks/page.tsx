@@ -50,6 +50,14 @@ type SelectedIndicatorTaskState = {
   indicatorNames: string[];
 };
 
+type SectionOptions = {
+  description?: string;
+  emptyText?: string;
+  collapsible?: boolean;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
+};
+
 export default function CollectionTasksPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -59,7 +67,8 @@ export default function CollectionTasksPage() {
   const [expandedCollectionTaskKey, setExpandedCollectionTaskKey] = useState<string | null>(null);
   const [expandedTaskGroupId, setExpandedTaskGroupId] = useState<string | null>(null);
   const [loadingTaskGroupId, setLoadingTaskGroupId] = useState<string | null>(null);
-  const [selectedIndicatorTask, setSelectedIndicatorTask] = useState<SelectedIndicatorTaskState | null>(null);
+  const [selectedIndicatorTask, setSelectedIndicatorTask] =
+    useState<SelectedIndicatorTaskState | null>(null);
   const [isTrialSectionExpanded, setIsTrialSectionExpanded] = useState(false);
 
   useEffect(() => {
@@ -90,19 +99,22 @@ export default function CollectionTasksPage() {
   }, [allFetchTasks]);
 
   const collectionTaskRows = useMemo(
-    () => buildCollectionTaskListRows({
-      projects,
-      requirements,
-      wideTables,
-      taskGroups,
-      fetchTasks: allFetchTasks,
-    }),
+    () =>
+      buildCollectionTaskListRows({
+        projects,
+        requirements,
+        wideTables,
+        taskGroups,
+        fetchTasks: allFetchTasks,
+      }),
     [projects, requirements, wideTables, taskGroups, allFetchTasks],
   );
+
   const formalCollectionTaskRows = useMemo(
     () => collectionTaskRows.filter((row) => row.executionMode === "formal"),
     [collectionTaskRows],
   );
+
   const trialCollectionTaskRows = useMemo(
     () => collectionTaskRows.filter((row) => row.executionMode === "trial"),
     [collectionTaskRows],
@@ -148,13 +160,7 @@ export default function CollectionTasksPage() {
   const renderCollectionTaskSection = (
     title: string,
     rows: CollectionTaskListRowView[],
-    options?: {
-      description?: string;
-      emptyText?: string;
-      collapsible?: boolean;
-      expanded?: boolean;
-      onToggleExpanded?: () => void;
-    },
+    options?: SectionOptions,
   ) => {
     const {
       description = "",
@@ -167,21 +173,17 @@ export default function CollectionTasksPage() {
     return (
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <div className="text-base font-semibold">{title}</div>
-            {description ? (
-              <div className="text-xs text-muted-foreground">{description}</div>
-            ) : null}
+            {description ? <div className="text-xs text-muted-foreground">{description}</div> : null}
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-xs text-muted-foreground">
-              {rows.length} 个采集任务
-            </div>
+            <div className="text-xs text-muted-foreground">{rows.length} 个采集任务</div>
             {collapsible ? (
               <button
                 type="button"
                 onClick={onToggleExpanded}
-                className="rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                className="text-xs text-muted-foreground hover:text-foreground"
               >
                 {expanded ? "收起" : "展开"}
               </button>
@@ -190,31 +192,27 @@ export default function CollectionTasksPage() {
         </div>
 
         {collapsible && !expanded ? null : (
-          <div className="rounded-lg border">
-            <div className="grid grid-cols-[minmax(0,2.1fr)_minmax(0,1.8fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1.1fr)_minmax(0,2.3fr)_minmax(0,1.7fr)_minmax(0,1.2fr)_auto] gap-4 bg-muted/30 px-4 py-3 text-xs font-medium text-muted-foreground">
+          <div>
+            <div className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,1.9fr)_minmax(0,1.4fr)_minmax(0,2.6fr)_minmax(0,1.8fr)_minmax(0,1.2fr)_auto] gap-4 bg-muted/30 px-4 py-2.5 text-xs font-medium text-muted-foreground">
               <div>采集任务</div>
               <div>关联需求</div>
               <div>所属项目</div>
-              <div>目标表</div>
-              <div>采集周期</div>
               <div>指标摘要</div>
               <div>运行状态</div>
               <div>最近更新</div>
               <div className="text-right">操作</div>
             </div>
 
-            <div className="divide-y">
+            <div className="divide-y divide-slate-200/80">
               {rows.length === 0 ? (
-                <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-                  {emptyText}
-                </div>
+                <div className="px-4 py-12 text-center text-sm text-muted-foreground">{emptyText}</div>
               ) : (
                 rows.map((row) => {
                   const isExpanded = expandedCollectionTaskKey === row.key;
 
                   return (
                     <div key={row.key} className="px-4 py-3">
-                      <div className="grid grid-cols-[minmax(0,2.1fr)_minmax(0,1.8fr)_minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1.1fr)_minmax(0,2.3fr)_minmax(0,1.7fr)_minmax(0,1.2fr)_auto] items-start gap-4">
+                      <div className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,1.9fr)_minmax(0,1.4fr)_minmax(0,2.6fr)_minmax(0,1.8fr)_minmax(0,1.2fr)_auto] items-start gap-4">
                         <button
                           type="button"
                           onClick={() => toggleCollectionTask(row.key)}
@@ -249,8 +247,6 @@ export default function CollectionTasksPage() {
                         </div>
 
                         <div className="truncate text-sm">{row.projectName}</div>
-                        <div className="truncate text-sm">{row.wideTableName}</div>
-                        <div className="text-sm">{row.scheduleLabel}</div>
 
                         <div className="min-w-0">
                           <div className="truncate text-sm">{row.indicatorSummary}</div>
@@ -258,12 +254,14 @@ export default function CollectionTasksPage() {
                             <button
                               type="button"
                               className="mt-1 text-xs text-primary hover:underline"
-                              onClick={() => setSelectedIndicatorTask({
-                                collectionTaskLabel: row.collectionTaskLabel,
-                                requirementTitle: row.requirementTitle,
-                                wideTableName: row.wideTableName,
-                                indicatorNames: row.indicatorNames,
-                              })}
+                              onClick={() =>
+                                setSelectedIndicatorTask({
+                                  collectionTaskLabel: row.collectionTaskLabel,
+                                  requirementTitle: row.requirementTitle,
+                                  wideTableName: row.wideTableName,
+                                  indicatorNames: row.indicatorNames,
+                                })
+                              }
                             >
                               查看全部
                             </button>
@@ -285,13 +283,13 @@ export default function CollectionTasksPage() {
                           <button
                             type="button"
                             onClick={() => toggleCollectionTask(row.key)}
-                            className="rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                            className="text-xs text-muted-foreground hover:text-foreground"
                           >
                             {isExpanded ? "收起实例" : "展开实例"}
                           </button>
                           <Link
                             href={`/projects/${row.projectId}/requirements/${row.requirementId}?nav=projects&tab=tasks&wt=${encodeURIComponent(row.wideTableId)}`}
-                            className="rounded-md border px-2.5 py-1.5 text-xs text-primary hover:bg-primary/5"
+                            className="text-xs text-primary hover:underline"
                           >
                             查看详情
                           </Link>
@@ -299,7 +297,7 @@ export default function CollectionTasksPage() {
                       </div>
 
                       {isExpanded ? (
-                        <div className="mt-4 rounded-lg border bg-muted/10 p-4">
+                        <div className="mt-4 border-t border-slate-200/70 bg-muted/10 pb-1 pl-7 pt-4">
                           <div className="mb-3 flex items-center justify-between gap-3">
                             <div>
                               <div className="text-sm font-semibold">任务实例</div>
@@ -315,24 +313,26 @@ export default function CollectionTasksPage() {
                           <div className="space-y-2">
                             {row.taskGroups.map((taskGroup) => {
                               const wideTable = wideTableById.get(taskGroup.wideTableId);
-                              const progressPercent = taskGroup.totalTasks > 0
-                                ? Math.round((taskGroup.completedTasks / taskGroup.totalTasks) * 100)
-                                : 0;
+                              const progressPercent =
+                                taskGroup.totalTasks > 0
+                                  ? Math.round((taskGroup.completedTasks / taskGroup.totalTasks) * 100)
+                                  : 0;
                               const isTaskGroupExpanded = expandedTaskGroupId === taskGroup.id;
                               const isLoading = loadingTaskGroupId === taskGroup.id;
                               const scopedFetchTasks = fetchTasksByTaskGroupId.get(taskGroup.id) ?? [];
-                              const taskGroupDisplayStatus = taskGroup.status === "partial"
-                                ? "failed"
-                                : taskGroup.status === "cancelled"
-                                  ? "invalidated"
-                                  : taskGroup.status;
+                              const taskGroupDisplayStatus =
+                                taskGroup.status === "partial"
+                                  ? "failed"
+                                  : taskGroup.status === "cancelled"
+                                    ? "invalidated"
+                                    : taskGroup.status;
 
                               return (
-                                <div key={taskGroup.id} className="rounded-md border bg-background">
+                                <div key={taskGroup.id} className="border-b border-slate-200/70 last:border-b-0">
                                   <button
                                     type="button"
                                     onClick={() => void toggleTaskGroup(row, taskGroup)}
-                                    className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left"
+                                    className="flex w-full items-center justify-between gap-3 py-3 text-left"
                                   >
                                     <div className="flex min-w-0 items-center gap-2">
                                       {isTaskGroupExpanded ? (
@@ -374,7 +374,7 @@ export default function CollectionTasksPage() {
                                   </button>
 
                                   {isTaskGroupExpanded ? (
-                                    <div className="px-3 pb-3">
+                                    <div className="pb-3 pl-6">
                                       <div className="mb-2 flex items-center gap-1 text-xs font-semibold">
                                         <Boxes className="h-3 w-3" />
                                         采集实例
@@ -385,7 +385,7 @@ export default function CollectionTasksPage() {
                                       ) : (
                                         <div className="grid gap-2 md:grid-cols-2">
                                           {scopedFetchTasks.slice(0, 6).map((fetchTask) => (
-                                            <div key={fetchTask.id} className="rounded border bg-muted/10 p-3">
+                                            <div key={fetchTask.id} className="rounded-md bg-background/70 p-3">
                                               <div className="truncate text-xs font-medium">
                                                 {fetchTask.id} · 行 {fetchTask.rowId} · {fetchTask.indicatorGroupName}
                                               </div>
@@ -402,7 +402,7 @@ export default function CollectionTasksPage() {
                                           ))}
 
                                           {scopedFetchTasks.length > 6 ? (
-                                            <div className="rounded border border-dashed bg-background p-3 text-xs text-muted-foreground">
+                                            <div className="rounded-md bg-background/50 p-3 text-xs text-muted-foreground">
                                               其余 {scopedFetchTasks.length - 6} 个实例请进入详情页查看。
                                             </div>
                                           ) : null}
@@ -435,24 +435,28 @@ export default function CollectionTasksPage() {
           采集任务管理
         </h1>
         <p className="text-sm text-muted-foreground">
-          直接展示采集任务清单，并查看任务关联需求、所属项目、目标表、指标摘要与任务实例。
+          直接展示采集任务清单，并查看任务关联需求、所属项目、指标摘要与任务实例。
         </p>
       </header>
 
-      <section className="rounded-xl border bg-card p-6 space-y-6">
-        {renderCollectionTaskSection("正式采集任务", formalCollectionTaskRows, {
-          description: "仅展示正式生成的采集任务、任务组和正式实例，不混入试运行数据。",
-          emptyText: "当前暂无正式采集任务。",
-        })}
+      <section className="space-y-5">
+        <div className="rounded-xl border bg-card p-5">
+          {renderCollectionTaskSection("正式采集任务", formalCollectionTaskRows, {
+            description: "仅展示正式生成的采集任务、任务组和正式实例，不混入试运行数据。",
+            emptyText: "当前暂无正式采集任务。",
+          })}
+        </div>
 
         {trialCollectionTaskRows.length > 0 ? (
-          renderCollectionTaskSection("试运行任务", trialCollectionTaskRows, {
-            description: "仅用于验证提示词或参数，不计入正式采集进度与正式实例统计。",
-            emptyText: "当前暂无试运行任务。",
-            collapsible: true,
-            expanded: isTrialSectionExpanded,
-            onToggleExpanded: () => setIsTrialSectionExpanded((current) => !current),
-          })
+          <div className="rounded-xl border bg-card p-5">
+            {renderCollectionTaskSection("试运行任务", trialCollectionTaskRows, {
+              description: "仅用于验证提示词或参数，不计入正式采集进度与正式实例统计。",
+              emptyText: "当前暂无试运行任务。",
+              collapsible: true,
+              expanded: isTrialSectionExpanded,
+              onToggleExpanded: () => setIsTrialSectionExpanded((current) => !current),
+            })}
+          </div>
         ) : null}
       </section>
 
