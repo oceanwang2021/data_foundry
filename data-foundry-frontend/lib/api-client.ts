@@ -1394,8 +1394,8 @@ export async function fetchCollectionTasksOverview(): Promise<{
   const raw = await apiGet<any>("/api/collection-tasks/overview");
   const requirements = (raw.requirements ?? []).map((item: any) => mapRequirement(item.requirement ?? item));
   const wideTablesFromRequirements = requirements
-    .map((requirement) => requirement.wideTable)
-    .filter((wideTable): wideTable is WideTable => Boolean(wideTable));
+    .map((requirement: Requirement) => requirement.wideTable)
+    .filter((wideTable: Requirement["wideTable"]): wideTable is WideTable => Boolean(wideTable));
   return {
     projects: (raw.projects ?? []).map(mapProject),
     requirements,
