@@ -43,7 +43,9 @@ public class TaskExecutionCallbackAppService {
     }
     String callbackStatus = command.getStatus();
 
-    if (command.getTaskGroupId() != null && command.getTaskGroupId().trim().length() > 0) {
+    if ((command.getTaskId() == null || command.getTaskId().trim().isEmpty())
+        && command.getTaskGroupId() != null
+        && command.getTaskGroupId().trim().length() > 0) {
       TaskGroup tg = taskGroupRepository.getById(command.getTaskGroupId().trim());
       if (tg == null) {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, "TaskGroup not found");
@@ -59,6 +61,20 @@ public class TaskExecutionCallbackAppService {
       if (task == null) {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found");
       }
+      String callbackExternalTaskId = command.getAgentResult() != null
+          ? firstNonBlank(command.getAgentResult().getExternalTaskId(), command.getAgentResult().getTaskId())
+          : null;
+      String currentExternalTaskId = normalize(task.getCollectionTaskId());
+      if (callbackExternalTaskId != null
+          && currentExternalTaskId != null
+          && !callbackExternalTaskId.equals(currentExternalTaskId)) {
+        recalculateTaskGroup(command.getTaskGroupId(), task.getTaskGroupId());
+        Map<String, Object> out = new HashMap<String, Object>();
+        out.put("ok", true);
+        out.put("ignored", true);
+        out.put("reason", "stale collection task callback");
+        return out;
+      }
 
       String effectiveCallbackStatus = callbackStatus;
       java.math.BigDecimal confidence = null;
@@ -70,10 +86,21 @@ public class TaskExecutionCallbackAppService {
 
       String merged = taskExecutionDomainService.mergeStatusOnCallback(task.getStatus(), effectiveCallbackStatus);
       if (merged != null) {
+        String currentStatus = normalize(task.getStatus());
+        int updated;
         if (confidence != null) {
-          fetchTaskRepository.updateStatusAndConfidence(task.getId(), merged, confidence);
+          updated = fetchTaskRepository.updateStatusAndConfidenceIfCurrent(
+              task.getId(), currentStatus, merged, confidence);
         } else {
-          fetchTaskRepository.updateStatus(task.getId(), merged);
+          updated = fetchTaskRepository.updateStatusIfCurrent(task.getId(), currentStatus, merged);
+        }
+        if (updated <= 0) {
+          recalculateTaskGroup(command.getTaskGroupId(), task.getTaskGroupId());
+          Map<String, Object> out = new HashMap<String, Object>();
+          out.put("ok", true);
+          out.put("ignored", true);
+          out.put("reason", "task status changed before callback update");
+          return out;
         }
       }
       recalculateTaskGroup(command.getTaskGroupId(), task.getTaskGroupId());
@@ -90,6 +117,19 @@ public class TaskExecutionCallbackAppService {
             ? callbackTaskGroupId.trim()
             : taskTaskGroupId;
     taskGroupAggregateService.refreshTaskGroup(taskGroupId);
+  }
+
+  private static String firstNonBlank(String first, String second) {
+    String normalizedFirst = normalize(first);
+    return normalizedFirst != null ? normalizedFirst : normalize(second);
+  }
+
+  private static String normalize(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    String normalized = raw.trim();
+    return normalized.isEmpty() ? null : normalized;
   }
 }
 

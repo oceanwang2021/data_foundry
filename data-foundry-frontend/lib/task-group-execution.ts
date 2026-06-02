@@ -68,7 +68,7 @@ export function buildTaskGroupExecutionSummary(
     invalidatedTasks,
   });
   const progressPercent = totalTasks > 0
-    ? Math.round(((completedTasks + failedTasks + cancelledTasks + invalidatedTasks) / totalTasks) * 100)
+    ? Math.round((completedTasks / totalTasks) * 100)
     : 0;
   const lastUpdatedAt = scopedTasks.reduce(
     (latest, task) => (task.updatedAt > latest ? task.updatedAt : latest),

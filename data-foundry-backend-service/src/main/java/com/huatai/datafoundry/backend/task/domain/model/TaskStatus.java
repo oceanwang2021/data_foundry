@@ -33,6 +33,9 @@ public final class TaskStatus {
   }
 
   public static String preferMoreAdvanced(String existing, String incoming) {
+    if (CANCELLED.equalsIgnoreCase(existing)) {
+      return existing;
+    }
     if (rank(existing) >= rank(incoming)) {
       return existing;
     }

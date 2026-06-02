@@ -84,8 +84,26 @@ public class MybatisFetchTaskRepository implements FetchTaskRepository {
   }
 
   @Override
+  public int updateStatusIfCurrent(String taskId, String expectedStatus, String status) {
+    return fetchTaskMapper.updateStatusIfCurrent(taskId, expectedStatus, status);
+  }
+
+  @Override
+  public int updateStatusIfCurrent(
+      String taskId, String expectedStatus, String status, String collectionTaskId) {
+    return fetchTaskMapper.updateStatusAndCollectionTaskIdIfCurrent(
+        taskId, expectedStatus, status, collectionTaskId);
+  }
+
+  @Override
   public int updateStatusAndConfidence(String taskId, String status, BigDecimal confidence) {
     return fetchTaskMapper.updateStatusAndConfidence(taskId, status, confidence);
+  }
+
+  @Override
+  public int updateStatusAndConfidenceIfCurrent(
+      String taskId, String expectedStatus, String status, BigDecimal confidence) {
+    return fetchTaskMapper.updateStatusAndConfidenceIfCurrent(taskId, expectedStatus, status, confidence);
   }
 
   private static List<FetchTask> toDomainList(List<FetchTaskRecord> records) {

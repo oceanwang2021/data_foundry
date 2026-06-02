@@ -121,6 +121,13 @@ public interface FetchTaskMapper {
 
   @Update(
       "update fetch_tasks "
+          + "set status = #{status}, updated_at = current_timestamp "
+          + "where id = #{id} and status = #{expectedStatus}")
+  int updateStatusIfCurrent(
+      @Param("id") String id, @Param("expectedStatus") String expectedStatus, @Param("status") String status);
+
+  @Update(
+      "update fetch_tasks "
           + "set status = #{status}, collection_task_id = #{collectionTaskId}, updated_at = current_timestamp "
           + "where id = #{id}")
   int updateStatusAndCollectionTaskId(
@@ -128,8 +135,28 @@ public interface FetchTaskMapper {
 
   @Update(
       "update fetch_tasks "
+          + "set status = #{status}, collection_task_id = #{collectionTaskId}, updated_at = current_timestamp "
+          + "where id = #{id} and status = #{expectedStatus}")
+  int updateStatusAndCollectionTaskIdIfCurrent(
+      @Param("id") String id,
+      @Param("expectedStatus") String expectedStatus,
+      @Param("status") String status,
+      @Param("collectionTaskId") String collectionTaskId);
+
+  @Update(
+      "update fetch_tasks "
           + "set status = #{status}, confidence = #{confidence}, updated_at = current_timestamp "
           + "where id = #{id}")
   int updateStatusAndConfidence(
       @Param("id") String id, @Param("status") String status, @Param("confidence") BigDecimal confidence);
+
+  @Update(
+      "update fetch_tasks "
+          + "set status = #{status}, confidence = #{confidence}, updated_at = current_timestamp "
+          + "where id = #{id} and status = #{expectedStatus}")
+  int updateStatusAndConfidenceIfCurrent(
+      @Param("id") String id,
+      @Param("expectedStatus") String expectedStatus,
+      @Param("status") String status,
+      @Param("confidence") BigDecimal confidence);
 }

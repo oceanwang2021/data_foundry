@@ -16,6 +16,7 @@ public class TaskExecutionDomainServiceTest {
   @Test
   void nextStatusOnStartDoesNothingForTerminal() {
     assertNull(svc.nextStatusOnStart(TaskStatus.COMPLETED));
+    assertNull(svc.nextStatusOnStart(TaskStatus.CANCELLED));
     assertNull(svc.nextStatusOnStart(TaskStatus.INVALIDATED));
   }
 
@@ -29,6 +30,7 @@ public class TaskExecutionDomainServiceTest {
   @Test
   void nextStatusOnCompleteDoesNothingForTerminal() {
     assertNull(svc.nextStatusOnComplete(TaskStatus.COMPLETED));
+    assertNull(svc.nextStatusOnComplete(TaskStatus.CANCELLED));
     assertNull(svc.nextStatusOnComplete(TaskStatus.INVALIDATED));
   }
 
@@ -51,5 +53,11 @@ public class TaskExecutionDomainServiceTest {
     assertEquals(TaskStatus.PENDING, svc.nextStatusOnRetry(TaskStatus.COMPLETED));
     assertEquals(TaskStatus.PENDING, svc.nextStatusOnRetry(TaskStatus.PENDING));
   }
-}
 
+  @Test
+  void mergeStatusOnCallbackPreservesCancelled() {
+    assertNull(svc.mergeStatusOnCallback(TaskStatus.CANCELLED, TaskStatus.FAILED));
+    assertNull(svc.mergeStatusOnCallback(TaskStatus.CANCELLED, TaskStatus.COMPLETED));
+    assertNull(svc.mergeStatusOnCallback(TaskStatus.CANCELLED, TaskStatus.RUNNING));
+  }
+}

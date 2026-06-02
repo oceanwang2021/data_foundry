@@ -365,20 +365,35 @@ public class TaskAppService {
         summary.errorCount++;
         continue;
       }
+      FetchTask latestTask = fetchTaskRepository.getById(fetchTask.getId());
+      if (latestTask == null) {
+        summary.errorCount++;
+        continue;
+      }
+      String latestExternalTaskId = normalize(latestTask.getCollectionTaskId());
+      if (latestExternalTaskId == null || !latestExternalTaskId.equals(externalTaskId)) {
+        continue;
+      }
       String downstreamStatus = mapExternalTaskStatus(statusResult.getStatus());
-      String currentStatus = normalize(fetchTask.getStatus());
+      String currentStatus = normalize(latestTask.getStatus());
       String nextStatus = mergeCollectionTaskStatus(currentStatus, downstreamStatus);
+      String effectiveStatus = nextStatus != null ? nextStatus : currentStatus;
       if (nextStatus != null && !nextStatus.equalsIgnoreCase(currentStatus)) {
-        fetchTaskRepository.updateStatus(fetchTask.getId(), nextStatus, externalTaskId);
-        fetchTask.setStatus(nextStatus);
+        int updated = fetchTaskRepository.updateStatusIfCurrent(
+            fetchTask.getId(), currentStatus, nextStatus, externalTaskId);
+        if (updated <= 0) {
+          continue;
+        }
+        latestTask.setStatus(nextStatus);
+        latestTask.setCollectionTaskId(externalTaskId);
       }
       summary.syncedTaskCount++;
-      if (TaskStatus.COMPLETED.equalsIgnoreCase(nextStatus)) {
+      if (TaskStatus.COMPLETED.equalsIgnoreCase(effectiveStatus)) {
         summary.completedTaskCount++;
-        upsertCompletedCollectionResult(fetchTask, externalTaskId);
-      } else if (TaskStatus.FAILED.equalsIgnoreCase(nextStatus)) {
+        upsertCompletedCollectionResult(latestTask, externalTaskId);
+      } else if (TaskStatus.FAILED.equalsIgnoreCase(effectiveStatus)) {
         summary.failedTaskCount++;
-      } else if (TaskStatus.CANCELLED.equalsIgnoreCase(nextStatus)) {
+      } else if (TaskStatus.CANCELLED.equalsIgnoreCase(effectiveStatus)) {
         summary.cancelledTaskCount++;
       }
     }

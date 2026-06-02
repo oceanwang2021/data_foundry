@@ -27,6 +27,13 @@ public interface FetchTaskRepository {
 
   int updateStatus(String taskId, String status, String collectionTaskId);
 
+  int updateStatusIfCurrent(String taskId, String expectedStatus, String status);
+
+  int updateStatusIfCurrent(String taskId, String expectedStatus, String status, String collectionTaskId);
+
   int updateStatusAndConfidence(String taskId, String status, BigDecimal confidence);
+
+  int updateStatusAndConfidenceIfCurrent(
+      String taskId, String expectedStatus, String status, BigDecimal confidence);
 
 }
