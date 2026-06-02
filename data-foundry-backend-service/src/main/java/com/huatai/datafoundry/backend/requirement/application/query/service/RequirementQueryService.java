@@ -121,7 +121,12 @@ public class RequirementQueryService {
     if (record == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Requirement not found");
     }
-    return mapRequirement(record);
+    RequirementReadDto dto = mapRequirement(record);
+    WideTable primaryWideTable = requirementRepository.getPrimaryWideTableByRequirement(requirementId);
+    if (primaryWideTable != null) {
+      dto.setWideTable(mapWideTable(primaryWideTable));
+    }
+    return dto;
   }
 
   public WideTableReadDto getPrimaryWideTableByRequirement(String requirementId) {

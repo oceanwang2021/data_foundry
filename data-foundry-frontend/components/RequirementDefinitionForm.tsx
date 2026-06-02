@@ -274,6 +274,12 @@ export default function RequirementDefinitionForm({
     if (!selectedWt) {
       throw new Error("尚未关联数据表，无法保存。");
     }
+    if (
+      selectedWt.name === UNLINKED_DATA_TABLE_NAME
+      || isTransientDraftWideTable(requirement.id, selectedWt.id)
+    ) {
+      throw new Error("当前详情页未加载到真实宽表，请刷新页面后重试。");
+    }
 
     const persistWideTableDimensionRows = async (wideTable: WideTable) => {
       const allRecordsForTable = wideTableRecords.filter((record) => record.wideTableId === wideTable.id);
@@ -822,6 +828,7 @@ export default function RequirementDefinitionForm({
         selectedWt={selectedWt}
         selectedWideTableRecords={selectedWideTableRecords}
         onSelectWt={setSelectedWtId}
+        onRequirementChange={onRequirementChange}
         onUpdateWideTable={handleUpdateWideTable}
         onReplaceWideTableRecords={handleReplaceWideTableRecords}
         taskGroups={taskGroups ?? []}
@@ -1805,7 +1812,6 @@ function WideTableSchemaSection({
 
   useEffect(() => {
     setSchemaActionMessage("");
-    setIsSchemaSelectorOpen(false);
   }, [selectedWtId, selectedWt?.name]);
 
   const handleColumnMetadataChange = (columnId: string, patch: Partial<ColumnDefinition>) => {
@@ -2367,6 +2373,7 @@ function ScopeAndGroupSection({
   selectedWt,
   selectedWideTableRecords,
   onSelectWt,
+  onRequirementChange,
   onUpdateWideTable,
   onReplaceWideTableRecords,
   taskGroups,
@@ -2394,6 +2401,7 @@ function ScopeAndGroupSection({
   selectedWt?: WideTable;
   selectedWideTableRecords: WideTableRecord[];
   onSelectWt: (id: string) => void;
+  onRequirementChange?: (requirement: Requirement) => void;
   onUpdateWideTable?: (wideTableId: string, updater: (wideTable: WideTable) => WideTable) => void;
   onReplaceWideTableRecords?: (wideTableId: string, nextWideTableRecords: WideTableRecord[]) => void;
   taskGroups: TaskGroup[];
@@ -2605,6 +2613,14 @@ function ScopeAndGroupSection({
     onUpdateWideTable(selectedWt.id, (wideTable) => normalizeWideTableMode(updater(wideTable)));
   };
 
+  const updateRequirement = (patch: Partial<Requirement>) => {
+    onRequirementChange?.({
+      ...requirement,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
   const normalizeParameterHeaderKey = (value: string) => value.trim().toLowerCase();
 
   const clearDraftParameterFileImport = () => {
@@ -2798,7 +2814,22 @@ function ScopeAndGroupSection({
   const handleBusinessDateRangeChange = (
     patch: Partial<WideTable["businessDateRange"]>,
   ) => {
-    setRangeMessage("时间范围已修改，如需查看请点击预览数据。");
+    const nextBusinessDateRange = selectedWt
+      ? {
+          ...selectedWt.businessDateRange,
+          ...patch,
+        }
+      : null;
+    const willSwitchToPeriodicUpdate = Boolean(
+      nextBusinessDateRange
+      && nextBusinessDateRange.end === "never"
+      && requirement.dataUpdateEnabled !== true,
+    );
+    setRangeMessage(
+      willSwitchToPeriodicUpdate
+        ? "时间范围已修改，并已自动切换为定期更新；如需查看请点击预览数据。"
+        : "时间范围已修改，如需查看请点击预览数据。",
+    );
     markSelectedScopePreviewDirty();
     updateSelectedWideTable((wideTable) => {
       const merged = {
@@ -2825,6 +2856,12 @@ function ScopeAndGroupSection({
         updatedAt: new Date().toISOString(),
       };
     });
+    if (nextBusinessDateRange?.end === "never" && requirement.dataUpdateEnabled !== true) {
+      updateRequirement({
+        dataUpdateEnabled: true,
+        dataUpdateMode: requirement.dataUpdateMode ?? null,
+      });
+    }
 
     // Step status: invalidate downstream of C (i.e., D)
     onStepStatusesChange(invalidateDownstream(stepStatuses, "C"));
@@ -3293,15 +3330,38 @@ function ScopeAndGroupSection({
                       <EditableField
                         label="结束时间"
                         control={(
-                          <BusinessDateInput
-                            frequency={selectedWt.businessDateRange.frequency}
-                            value={selectedWt.businessDateRange.end === "never"
-                              ? fallbackBusinessDateEnd(selectedWt.businessDateRange.start)
-                              : selectedWt.businessDateRange.end}
-                            onChange={(v) => handleBusinessDateRangeChange({ end: v })}
-                          />
+                          selectedWt.businessDateRange.end === "never" ? (
+                            <input
+                              value="never"
+                              disabled
+                              readOnly
+                              className="w-full rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
+                            />
+                          ) : (
+                            <BusinessDateInput
+                              frequency={selectedWt.businessDateRange.frequency}
+                              value={selectedWt.businessDateRange.end}
+                              onChange={(v) => handleBusinessDateRangeChange({ end: v })}
+                            />
+                          )
                         )}
                       />
+                      <div className="md:col-span-3">
+                        <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={selectedWt.businessDateRange.end === "never"}
+                            onChange={(event) =>
+                              handleBusinessDateRangeChange({
+                                end: event.target.checked
+                                  ? "never"
+                                  : fallbackBusinessDateEnd(selectedWt.businessDateRange.start),
+                              })
+                            }
+                          />
+                          结束时间为 never（持续更新/开放区间）
+                        </label>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -3745,6 +3805,10 @@ function fallbackBusinessDateEnd(start: string): string {
   return start || new Date().toISOString().slice(0, 10);
 }
 
+function isTransientDraftWideTable(requirementId: string, wideTableId: string): boolean {
+  return wideTableId.startsWith(`wt_${requirementId}_`);
+}
+
 /**
  * 频率感知的业务日期选择器。 * - daily / weekly => 普通 date input
  * - monthly / quarterly / yearly => 下拉选择周期末尾日期，显示友好标签 */
@@ -3752,18 +3816,24 @@ function BusinessDateInput({
   frequency,
   value,
   onChange,
+  disabled,
 }: {
   frequency: WideTable["businessDateRange"]["frequency"];
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
   if (frequency === "daily" || frequency === "weekly") {
     return (
       <input
         type="date"
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+        className={cn(
+          "w-full rounded-md border px-3 py-2 text-sm",
+          disabled ? "bg-muted/20 text-muted-foreground" : "bg-background",
+        )}
       />
     );
   }
@@ -3775,16 +3845,23 @@ function BusinessDateInput({
 
   // 默认选择最新日期
   useEffect(() => {
+    if (disabled) {
+      return;
+    }
     if ((!value || !options.includes(value)) && options.length > 0) {
       onChange(options[0]);
     }
-  }, [options, value, onChange]);
+  }, [disabled, options, value, onChange]);
 
   return (
     <select
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+      className={cn(
+        "w-full rounded-md border px-3 py-2 text-sm",
+        disabled ? "bg-muted/20 text-muted-foreground" : "bg-background",
+      )}
     >
       {!value ? (
         <option value="">请选择</option>
@@ -3799,7 +3876,7 @@ function BusinessDateInput({
 }
 
 function formatBusinessDateEnd(end: string | "never"): string {
-  return end === "never" ? "永不" : end;
+  return end === "never" ? "never" : end;
 }
 
 function buildSchemaCandidateMeta(template: WideTable): string {

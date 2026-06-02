@@ -2233,7 +2233,6 @@ export default function RequirementTasksPanel({
                 {renderSelectableTaskInstanceTable(
                   expandedTaskInstanceRows,
                   `task-group:${tg.id}`,
-                  "褰撳墠浠诲姟缁勮繕娌℃湁鍙睍绀虹殑閲囬泦瀹炰緥銆?",
                 )}
                 {false ? (
                   <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集实例。</div>
