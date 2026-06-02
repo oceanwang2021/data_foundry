@@ -107,10 +107,14 @@ public class TaskAppService {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "TaskGroup not found");
     }
     taskPlanAppService.ensureFetchTasksForTaskGroup(tg);
+    TaskGroup refreshedTaskGroup = taskGroupRepository.getById(taskGroupId);
+    List<FetchTask> fetchTasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
     Map<String, Object> out = new HashMap<String, Object>();
     out.put("ok", true);
     out.put("task_group_id", taskGroupId);
-    out.put("task_count", fetchTaskRepository.countByTaskGroup(taskGroupId));
+    out.put("task_count", fetchTasks != null ? fetchTasks.size() : 0);
+    out.put("task_group", refreshedTaskGroup != null ? refreshedTaskGroup : tg);
+    out.put("fetch_tasks", fetchTasks != null ? fetchTasks : Collections.emptyList());
     return out;
   }
 

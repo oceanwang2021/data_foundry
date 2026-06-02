@@ -2333,8 +2333,19 @@ export async function executeTaskGroup(
   );
 }
 
-export async function ensureTaskGroupTasks(taskGroupId: string): Promise<void> {
-  await apiPost(`/api/task-groups/${taskGroupId}/ensure-tasks`);
+export async function ensureTaskGroupTasks(taskGroupId: string): Promise<{
+  taskGroupId: string;
+  taskCount: number;
+  taskGroup?: TaskGroup;
+  fetchTasks: FetchTask[];
+}> {
+  const raw = await apiPost<any>(`/api/task-groups/${taskGroupId}/ensure-tasks`);
+  return {
+    taskGroupId: String(raw.task_group_id ?? raw.taskGroupId ?? taskGroupId),
+    taskCount: Number(raw.task_count ?? raw.taskCount ?? 0),
+    taskGroup: raw.task_group ?? raw.taskGroup ? mapTaskGroup(raw.task_group ?? raw.taskGroup) : undefined,
+    fetchTasks: (raw.fetch_tasks ?? raw.fetchTasks ?? []).map((item: any) => mapFetchTask(item.task ?? item)),
+  };
 }
 
 export async function syncWideTableCollectionStatuses(wideTableId: string): Promise<void> {

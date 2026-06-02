@@ -241,17 +241,6 @@ export function filterCurrentVersionRecords(
   );
 }
 
-/** 判断 TaskGroup 是否为归档状态（旧版本） */
-export function isArchivedTaskGroup(
-  taskGroup: TaskGroup,
-  currentPlanVersion: number,
-): boolean {
-  return (
-    taskGroup.planVersion !== undefined &&
-    taskGroup.planVersion < currentPlanVersion
-  );
-}
-
 /** 构建失效影响摘要：统计将被归档的产物数量 */
 export function buildInvalidationImpactSummary(
   wideTable: WideTable,

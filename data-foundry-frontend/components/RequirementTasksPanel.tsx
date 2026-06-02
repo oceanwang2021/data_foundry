@@ -64,7 +64,7 @@ import {
   resolveCurrentPlanVersion,
   resolveTaskGroupPlanVersion,
 } from "@/lib/task-plan-reconciliation";
-import { isArchivedTaskGroup, isStepBComplete } from "@/lib/step-status";
+import { isStepBComplete } from "@/lib/step-status";
 import {
   LOCAL_FETCH_TASK_PREFIX,
   canShowTaskGroupRunAction,
@@ -552,19 +552,6 @@ export default function RequirementTasksPanel({
     [canGenerateTaskPlan, currentPlanVersion, needsScopeRefresh, selectedWtId, taskGroups],
   );
 
-  const archivedTaskGroups = useMemo(
-    () =>
-      taskGroups
-        .filter(
-          (tg) =>
-            tg.wideTableId === selectedWtId
-            && isArchivedTaskGroup(tg, currentPlanVersion),
-        )
-        .sort((a, b) => b.businessDate.localeCompare(a.businessDate)),
-    [currentPlanVersion, selectedWtId, taskGroups],
-  );
-  const [isArchivedSectionExpanded, setIsArchivedSectionExpanded] = useState(false);
-
   const toggleTaskGroupExpand = (tgId: string) => {
     setExpandedTgId((prev) => (prev === tgId ? null : tgId));
 
@@ -585,8 +572,26 @@ export default function RequirementTasksPanel({
 
     void (async () => {
       try {
-        await ensureTaskGroupTasks(tgId);
-        await onRefreshData?.();
+        const result = await ensureTaskGroupTasks(tgId);
+        if (result.taskGroup) {
+          onTaskGroupsChange(
+            taskGroups.map((taskGroup) => (
+              taskGroup.id === result.taskGroupId
+                ? {
+                    ...taskGroup,
+                    ...result.taskGroup,
+                  }
+                : taskGroup
+            )),
+          );
+        }
+        if (result.fetchTasks.length > 0) {
+          const ensuredTaskIds = new Set(result.fetchTasks.map((task) => task.id));
+          onFetchTasksChange([
+            ...fetchTasks.filter((task) => !ensuredTaskIds.has(task.id)),
+            ...result.fetchTasks,
+          ]);
+        }
       } catch {
         // Keep UI usable even if backend lazy generation isn't ready yet.
       }
@@ -2234,61 +2239,6 @@ export default function RequirementTasksPanel({
                   expandedTaskInstanceRows,
                   `task-group:${tg.id}`,
                 )}
-                {false ? (
-                  <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集实例。</div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-                      <table className="w-full text-xs leading-5">
-                        <thead>
-                          <tr>
-                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集参数</th>
-                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">时间列</th>
-                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集指标组</th>
-                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集实例 ID</th>
-                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">实例状态</th>
-                            <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {expandedTaskInstanceRows.map((row) => {
-                            const isRunning = row.status === "running";
-                            const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
-                            return (
-                              <tr key={row.fetchTaskId}>
-                                <td className="px-3 py-3 align-top text-slate-700">
-                                  <div className="space-y-1">
-                                    {row.parameterLines.map((line) => (
-                                      <div key={`${row.fetchTaskId}-${line}`} className="break-all">
-                                        {line}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </td>
-                                <td className="px-3 py-3 align-top text-slate-700">{row.businessDateLabel}</td>
-                                <td className="px-3 py-3 align-top text-slate-700">
-                                  <div className="space-y-1">
-                                    <div className="font-medium">{row.indicatorGroupName}</div>
-                                    {renderIndicatorSummaryBlock(row.indicatorLabels, row.indicatorGroupName, true)}
-                                  </div>
-                                </td>
-                                <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
-                                  {row.collectionTaskId ?? "-"}
-                                </td>
-                                <td className="px-3 py-3 align-top">
-                                  <StatusBadge status={row.status} />
-                                </td>
-                                <td className="px-3 py-3 align-top">
-                                  {renderTaskInstanceActions(row, isRunning, actionLabel)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
               </div>
             ) : null}
           </div>
@@ -3489,45 +3439,6 @@ export default function RequirementTasksPanel({
           </div>
         )}
       </section>
-      ) : null}
-
-      {selectedWt && activeTaskSubTab === "tasks" && archivedTaskGroups.length > 0 ? (
-        <section className="rounded-xl border bg-card p-6 space-y-4">
-          <button
-            type="button"
-            onClick={() => setIsArchivedSectionExpanded((prev) => !prev)}
-            className="flex w-full items-center justify-between text-left"
-          >
-            <div>
-              <h3 className="font-semibold text-muted-foreground">已归档任务组</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                共 {archivedTaskGroups.length} 个旧版本任务组
-              </p>
-            </div>
-            <span className="text-xs text-muted-foreground shrink-0">
-              {isArchivedSectionExpanded ? "▲ 收起" : "▼ 展开"}
-            </span>
-          </button>
-
-          {isArchivedSectionExpanded ? (
-            <div className="space-y-2">
-              {archivedTaskGroups.map((tg) => (
-                <div key={tg.id} className="rounded-lg border border-dashed border-slate-300 bg-muted/20 px-4 py-3 text-xs space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-muted-foreground">{tg.partitionLabel ?? (tg.businessDateLabel || tg.id)}</span>
-                    <StatusBadge status={tg.status} />
-                    <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
-                      已归档（版本 {tg.planVersion ?? 1}）
-                    </span>
-                  </div>
-                  <div className="text-muted-foreground">
-                    {tg.id} | 总计 {tg.totalTasks} | 已完成 {tg.completedTasks} | 失败 {tg.failedTasks}{tg.cancelledTasks > 0 ? ` | 已取消 ${tg.cancelledTasks}` : ""}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
       ) : null}
 
       {selectedWt && activeTaskSubTab === "tasks" && wtScheduleJobs.length > 0 ? (

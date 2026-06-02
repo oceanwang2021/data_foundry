@@ -13,7 +13,6 @@ import {
 import {
   ensureTaskGroupTasks,
   fetchCollectionTasksOverview,
-  fetchFetchTasks,
 } from "@/lib/api-client";
 import type { FetchTask, Project, Requirement, TaskGroup, WideTable } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -120,28 +119,12 @@ export default function CollectionTasksPage() {
     [collectionTaskRows],
   );
 
-  const refreshFetchTasksForRow = async (row: CollectionTaskListRowView) => {
-    const latest = await fetchFetchTasks(row.projectId, row.requirementId, {
-      includeCollectionRows: false,
-    }).catch(() => [] as FetchTask[]);
-    const scopedWideTableIds = new Set(
-      wideTables
-        .filter((wideTable) => wideTable.requirementId === row.requirementId)
-        .map((wideTable) => wideTable.id),
-    );
-
-    setAllFetchTasks((prev) => [
-      ...prev.filter((fetchTask) => !scopedWideTableIds.has(fetchTask.wideTableId)),
-      ...latest,
-    ]);
-  };
-
   const toggleCollectionTask = (rowKey: string) => {
     setExpandedCollectionTaskKey((prev) => (prev === rowKey ? null : rowKey));
     setExpandedTaskGroupId(null);
   };
 
-  const toggleTaskGroup = async (row: CollectionTaskListRowView, taskGroup: TaskGroup) => {
+  const toggleTaskGroup = async (_row: CollectionTaskListRowView, taskGroup: TaskGroup) => {
     if (expandedTaskGroupId === taskGroup.id) {
       setExpandedTaskGroupId(null);
       return;
@@ -149,8 +132,24 @@ export default function CollectionTasksPage() {
 
     setLoadingTaskGroupId(taskGroup.id);
     try {
-      await ensureTaskGroupTasks(taskGroup.id);
-      await refreshFetchTasksForRow(row);
+      const result = await ensureTaskGroupTasks(taskGroup.id);
+      if (result.taskGroup) {
+        setTaskGroups((prev) => prev.map((item) => (
+          item.id === result.taskGroupId
+            ? {
+                ...item,
+                ...result.taskGroup,
+              }
+            : item
+        )));
+      }
+      if (result.fetchTasks.length > 0) {
+        const ensuredTaskIds = new Set(result.fetchTasks.map((task) => task.id));
+        setAllFetchTasks((prev) => [
+          ...prev.filter((task) => !ensuredTaskIds.has(task.id)),
+          ...result.fetchTasks,
+        ]);
+      }
       setExpandedTaskGroupId(taskGroup.id);
     } finally {
       setLoadingTaskGroupId(null);
