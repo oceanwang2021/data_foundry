@@ -847,6 +847,7 @@ function AcceptanceWideTableSection({
           selectedRowCount={selectedPublishRowIds.length}
           totalRows={visibleRows.length}
           onApprove={() => onApprove(currentTaskGroup.id, selectedPublishRowIds)}
+          onRepublish={() => onApprove(currentTaskGroup.id, visibleRowIds)}
           onReject={() => onReject(currentTaskGroup.id)}
         />
       ) : visibleRows.length > 0 ? (
@@ -856,6 +857,7 @@ function AcceptanceWideTableSection({
           selectedRowCount={selectedPublishRowIds.length}
           totalRows={visibleRows.length}
           onApprove={() => onApproveWideTable(view.wideTable.id, selectedPublishRowIds)}
+          onRepublish={() => onApproveWideTable(view.wideTable.id, visibleRowIds)}
           onReject={() => onRejectWideTable(view.wideTable.id)}
         />
       ) : null}
@@ -929,6 +931,7 @@ function AcceptanceWideTableSection({
                       const curValue = row.record[column.name];
                       const diffType = showDiff && prevValue !== undefined ? getIndicatorDiffType(curValue, prevValue) : null;
                       const prevDisplay = prevValue !== undefined ? formatDisplayValue(prevValue) : "";
+                      const diffPercentLabel = formatDiffPercentLabel(diffType, curValue, prevValue);
                       return (
                         <td key={column.id} className="p-0 align-top">
                           <button type="button" onClick={() => onOpenCellModal(cellTarget)}
@@ -944,8 +947,10 @@ function AcceptanceWideTableSection({
                               : "未关联采集任务，可人工修正"}>
                             <div>{cellValue || "\u00A0"}</div>
                             {diffType ? (
-                              <div className={cn("mt-0.5 text-[10px] truncate", diffTextClass(diffType))} title={`上一轮：${prevDisplay}`}>
-                                上一轮：{prevDisplay}
+                              <div className={cn("mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px]", diffTextClass(diffType))}
+                                title={`上一轮：${prevDisplay}${diffPercentLabel ? `；同比差距：${diffPercentLabel}` : ""}`}>
+                                <span className="truncate">上一轮：{prevDisplay}</span>
+                                {diffPercentLabel ? <DiffPercentBadge label={diffPercentLabel} /> : null}
                               </div>
                             ) : null}
                           </button>
@@ -977,6 +982,7 @@ function TaskGroupReviewBar({
   selectedRowCount,
   totalRows,
   onApprove,
+  onRepublish,
   onReject,
 }: {
   taskGroup: TaskGroup;
@@ -986,6 +992,7 @@ function TaskGroupReviewBar({
   selectedRowCount: number;
   totalRows: number;
   onApprove: () => void;
+  onRepublish: () => void;
   onReject: () => void;
 }) {
   const status = reviewState?.status ?? "pending";
@@ -1040,6 +1047,12 @@ function TaskGroupReviewBar({
               <CheckCircle2 className="h-3.5 w-3.5" />
               {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已通过"}
             </span>
+            <button type="button" onClick={onRepublish} disabled={totalRows === 0}
+              title="重新发布当前页全部行到目标表"
+              className="inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              再次入库
+            </button>
             {taskGroup.triggeredBy === "trial" ? (
               <a href={returnToTasksHref} className="rounded-md border px-3 py-1.5 text-xs text-primary hover:bg-primary/5">
                 返回采集任务
@@ -1068,6 +1081,7 @@ function WideTableReviewBar({
   selectedRowCount,
   totalRows,
   onApprove,
+  onRepublish,
   onReject,
 }: {
   wideTable: WideTable;
@@ -1075,6 +1089,7 @@ function WideTableReviewBar({
   selectedRowCount: number;
   totalRows: number;
   onApprove: () => void;
+  onRepublish: () => void;
   onReject: () => void;
 }) {
   const approvedRowCount = reviewState?.rowIds?.length;
@@ -1131,12 +1146,20 @@ function WideTableReviewBar({
             {reviewState?.reviewedAt ? formatReviewTime(reviewState.reviewedAt) : "已驳回"}
           </span>
         ) : null}
-      <button type="button" onClick={onApprove} disabled={!canApprove}
-        title={selectedRowCount !== totalRows ? "需要全选当前页全部行后才能整体验收通过；未通过的数据请点击驳回" : undefined}
-        className={cn("inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50", approved && "hidden")}>
-        <CheckCircle2 className="h-3.5 w-3.5" />
-        通过
-      </button>
+        {approved ? (
+          <button type="button" onClick={onRepublish} disabled={totalRows === 0}
+            title="重新发布当前页全部行到目标表"
+            className="inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            再次入库
+          </button>
+        ) : null}
+        <button type="button" onClick={onApprove} disabled={!canApprove}
+          title={selectedRowCount !== totalRows ? "需要全选当前页全部行后才能整体验收通过；未通过的数据请点击驳回" : undefined}
+          className={cn("inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50", approved && "hidden")}>
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          通过
+        </button>
         <button type="button" onClick={onReject} disabled={approved}
           className={cn("inline-flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50", approved && "hidden")}>
           <XCircle className="h-3.5 w-3.5" />
@@ -1165,6 +1188,7 @@ function IndicatorActionModal({
   const prevValue = target.row.record._metadata?.previousValues?.[target.column.name];
   const prevValueStr = prevValue !== undefined ? formatDisplayValue(prevValue) : null;
   const diffType = prevValue !== undefined ? getIndicatorDiffType(target.row.record[target.column.name], prevValue) : null;
+  const diffPercentLabel = formatDiffPercentLabel(diffType, target.row.record[target.column.name], prevValue);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -1183,10 +1207,14 @@ function IndicatorActionModal({
 
         <div className="space-y-4 px-6 py-5">
           {/* 值对比 */}
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className={cn("grid gap-3", diffPercentLabel ? "md:grid-cols-3" : "md:grid-cols-2")}>
             <InfoCard label="当前值" value={currentValue} />
             <InfoCard label="上一轮值" value={prevValueStr ?? "无历史数据"}
               valueClassName={diffType ? cn(diffTextClass(diffType), "font-medium") : ""} />
+            {diffPercentLabel ? (
+              <InfoCard label="同比差距" value={diffPercentLabel}
+                valueClassName="inline-flex w-fit rounded border border-amber-300 bg-amber-100/70 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-amber-800" />
+            ) : null}
           </div>
 
           {diffType ? (
@@ -1333,6 +1361,14 @@ function InfoCard({ label, value, valueClassName }: { label: string; value: stri
 }
 
 // ==================== 数据构建 ====================
+
+function DiffPercentBadge({ label }: { label: string }) {
+  return (
+    <span className="shrink-0 rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px font-mono text-[10px] font-semibold leading-4 text-amber-800">
+      {label}
+    </span>
+  );
+}
 
 function buildAcceptanceWideTableViews(params: {
   wideTables: WideTable[]; wideTableRecords: WideTableRecord[]; taskGroups: TaskGroup[]; fetchTasks: FetchTask[]; scheduleJobs: ScheduleJob[];
@@ -1509,6 +1545,31 @@ function isEmptyDisplayValue(value: unknown): boolean {
   return text === "" || text === "-" || text.toUpperCase() === "NULL";
 }
 
+function parseComparableNumber(value: unknown): number | null {
+  if (isEmptyDisplayValue(value)) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/,/g, "");
+  if (normalized === "") return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDiffPercentLabel(
+  type: IndicatorDiffType | null,
+  currentValue: unknown,
+  previousValue: unknown,
+): string | null {
+  if (type !== "changed") return null;
+  const currentNumber = parseComparableNumber(currentValue);
+  const previousNumber = parseComparableNumber(previousValue);
+  if (currentNumber == null || previousNumber == null || previousNumber === 0) return null;
+  const percent = ((currentNumber - previousNumber) / previousNumber) * 100;
+  if (!Number.isFinite(percent)) return null;
+  if (Math.abs(percent) < 0.1) return "<0.1%";
+  return `${percent > 0 ? "+" : ""}${percent.toFixed(1)}%`;
+}
+
 function getIndicatorDiffType(currentValue: unknown, previousValue: unknown): IndicatorDiffType | null {
   const currentEmpty = isEmptyDisplayValue(currentValue);
   const previousEmpty = isEmptyDisplayValue(previousValue);
@@ -1518,9 +1579,9 @@ function getIndicatorDiffType(currentValue: unknown, previousValue: unknown): In
   const curStr = String(currentValue).trim();
   const rawStr = String(previousValue).trim();
   if (curStr === rawStr) return null;
-  const curNum = Number(curStr);
-  const rawNum = Number(rawStr);
-  if (Number.isFinite(curNum) && Number.isFinite(rawNum) && curNum === rawNum) return null;
+  const curNum = parseComparableNumber(currentValue);
+  const rawNum = parseComparableNumber(previousValue);
+  if (curNum != null && rawNum != null && curNum === rawNum) return null;
   return "changed";
 }
 

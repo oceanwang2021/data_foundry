@@ -201,7 +201,7 @@ public class AcceptanceTicketAppService {
     if (publishOutcome.getFailedRows() > 0 || "failed".equals(publishOutcome.getStatus())) {
       done.setStatus("publish_failed");
       done.setPublishErrorMsg(firstNonBlank(publishOutcome.getErrorMsg(), "publish failed"));
-    } else if (isPartialApproval(ticket, rowIds)) {
+    } else if (!"approved".equals(ticket.getStatus()) && isPartialApproval(ticket, rowIds)) {
       done.setStatus("partial_approved");
       done.setPublishErrorMsg("");
       done.setPublishedAt(finishedAt);
