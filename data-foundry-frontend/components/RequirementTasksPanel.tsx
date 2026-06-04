@@ -4,41 +4,25 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type {
-  ColumnDefinition,
+  TaskGroup,
+  FetchTask,
   Requirement,
   WideTable,
   WideTableRecord,
-  TaskGroup,
-  FetchTask,
 } from "@/lib/types";
 import type { ScheduleJob } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import {
-  cancelTask,
   createTrialRun,
-  executeTask,
   executeTaskGroup,
   ensureTaskGroupTasks,
   fetchCollectionTaskStatusDetail,
-  persistWideTablePlan,
-  persistWideTablePreview,
-  syncWideTableCollectionStatuses,
-  updateRequirementWideTable,
-  retryTask,
 } from "@/lib/api-client";
-import { ChevronRight, ListTree, RotateCcw } from "lucide-react";
+import { ListTree, RotateCcw } from "lucide-react";
 import {
   buildFetchTaskCardViews,
   getVisibleNarrowTableContextColumns,
-  type FetchTaskCardView,
 } from "@/lib/fetch-task-views";
-import {
-  buildBusinessDateSlots,
-  formatBusinessDate,
-  formatBusinessDateLabel,
-  isOpenEndedBusinessDateRange,
-  OPEN_ENDED_PREVIEW_PERIODS,
-} from "@/lib/business-date";
 import {
   buildTaskGroupExecutionSummary,
   type TaskGroupExecutionSummary,
@@ -46,37 +30,39 @@ import {
 import { resolveRequirementDataUpdateEnabled } from "@/lib/requirement-data-update";
 import CollectionTaskStatusPopup from "@/components/CollectionTaskStatusPopup";
 import FetchTaskDetailPopup from "@/components/FetchTaskDetailPopup";
-import RequirementDataProcessingPanel from "@/components/RequirementDataProcessingPanel";
-import { StageSummaryCard } from "@/components/StageSummaryCard";
+import useIndicatorGroups from "@/components/requirement-tasks/hooks/useIndicatorGroups";
+import TaskOutputTab from "@/components/requirement-tasks/output/TaskOutputTab";
+import usePromptEditor from "@/components/requirement-tasks/hooks/usePromptEditor";
+import IndicatorGroupModal from "@/components/requirement-tasks/prompts/IndicatorGroupModal";
+import PromptManagementTab from "@/components/requirement-tasks/prompts/PromptManagementTab";
+import RequirementNotSubmittedAlert from "@/components/requirement-tasks/RequirementNotSubmittedAlert";
+import RequirementTaskTabs from "@/components/requirement-tasks/RequirementTaskTabs";
+import useTaskStatusPolling from "@/components/requirement-tasks/hooks/useTaskStatusPolling";
+import TaskInstanceActions from "@/components/requirement-tasks/tasks/TaskInstanceActions";
+import TaskExecutionTab from "@/components/requirement-tasks/tasks/TaskExecutionTab";
+import TaskGroupCards from "@/components/requirement-tasks/tasks/TaskGroupCards";
+import TaskInstanceTable from "@/components/requirement-tasks/tasks/TaskInstanceTable";
+import TaskPlanSection from "@/components/requirement-tasks/tasks/TaskPlanSection";
+import TaskStatusLegend from "@/components/requirement-tasks/tasks/TaskStatusLegend";
+import TrialRunModal from "@/components/requirement-tasks/tasks/TrialRunModal";
+import useTrialRun from "@/components/requirement-tasks/hooks/useTrialRun";
+import WideTableSelector from "@/components/requirement-tasks/WideTableSelector";
 import {
-  getTaskBlockSurfaceClass,
   getTaskStatusBadgeClass,
-  getTaskStatusDotClass,
-  getTaskStatusRailFillColor,
   taskStatusLabel,
 } from "@/lib/task-status-presentation";
 import {
-  annotateCurrentPlanRecords,
   buildTaskPlanFingerprint,
-  countExpectedFetchTasksForBusinessDate,
-  reconcileTaskPlanChange,
   resolveRecordPlanVersion,
   resolveCurrentPlanVersion,
   resolveTaskGroupPlanVersion,
 } from "@/lib/task-plan-reconciliation";
 import { isStepBComplete } from "@/lib/step-status";
 import {
-  LOCAL_FETCH_TASK_PREFIX,
   canShowTaskGroupRunAction,
   isLocalTaskGroupId,
-  isLocalTaskId,
 } from "@/lib/requirement-task-group-actions";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
-import { generateWideTablePreviewRecords } from "@/lib/wide-table-preview";
-import {
-  buildFullSnapshotTaskGroupPages,
-  describeFullSnapshotScheduleRule,
-} from "@/lib/task-group-display";
 import {
   formatIndicatorSummary,
   normalizeCollectionTaskLabel,
@@ -85,15 +71,39 @@ import {
   buildIndicatorGroupPrompt,
 } from "@/lib/indicator-group-prompt";
 import CollectionTaskIndicatorsPopup from "@/components/CollectionTaskIndicatorsPopup";
-
-const MAX_BATCH_EXECUTION_CONCURRENCY = 5;
-
-type BatchExecutionTaskState = {
-  phase: "queued" | "running";
-  scopeKey: string;
-  rowLabel: string;
-  collectionTaskId?: string;
-};
+import useTaskExecutionQueue from "@/components/requirement-tasks/hooks/useTaskExecutionQueue";
+import type {
+  CollectionTaskSectionView,
+  HistoricalTaskGroupView,
+  TaskInstanceRowView,
+  TaskPlanView,
+  TrialParameterRowView,
+} from "@/components/requirement-tasks/types";
+import {
+  applyTaskRecordCompletion,
+  buildDemoExecutionRecords,
+  buildExecutionRecordId,
+  buildTaskGroupRunId,
+  materializeLocalTaskGroupArtifacts,
+} from "@/components/requirement-tasks/utils/requirementTaskLocalExecution";
+import {
+  buildTaskStatusLegend,
+  buildTaskStatusLegendFromCounts,
+  formatRunTimestamp,
+  formatTaskActionError,
+  getTaskGroupStatusLabel,
+  getTriggerDisplayLabel,
+} from "@/components/requirement-tasks/utils/requirementTaskFormatters";
+import {
+  buildDefaultIndicatorGroup,
+  buildDefaultIndicatorGroupId,
+  buildTaskGroupRunSections,
+  buildTaskGroupRunViews,
+  buildTaskInstanceRowViews,
+  buildTaskPlanView,
+  buildTrialParameterRowKey,
+  resolveTaskRecordBusinessDate,
+} from "@/components/requirement-tasks/utils/requirementTaskViews";
 
 type Props = {
   requirement: Requirement;
@@ -114,44 +124,13 @@ type Props = {
   navSource?: "projects" | "requirements" | "tasks" | "acceptance";
 };
 
-const triggerLabel: Record<string, string> = {
-  schedule: "定时调度",
-  backfill: "初始补数",
-  manual: "手动执行",
-  manual_retry: "手动重试",
-  trial: "试运行",
-};
-
 type TaskSubTabKey = "prompts" | "tasks" | "output";
-
-type TrialParameterRowView = {
-  rowKey: string;
-  rowId: number;
-  values: Record<string, string>;
-};
 
 const taskSubTabs: Array<{ key: TaskSubTabKey; label: string; description: string }> = [
   { key: "prompts", label: "采集提示词管理", description: "按指标组配置采集提示词。" },
   { key: "tasks", label: "采集任务", description: "查看任务实例与子任务状态。" },
   { key: "output", label: "数据产出", description: "查看采集结果与产出明细。" },
 ];
-
-const DEFAULT_INDICATOR_GROUP_PREFIX = "ig_default_";
-
-const buildDefaultIndicatorGroupId = (wideTableId: string) =>
-  `${DEFAULT_INDICATOR_GROUP_PREFIX}${wideTableId}`;
-
-const buildDefaultIndicatorGroup = (
-  wideTable: WideTable,
-  indicatorColumns: ColumnDefinition[],
-): WideTable["indicatorGroups"][number] => ({
-  id: buildDefaultIndicatorGroupId(wideTable.id),
-  wideTableId: wideTable.id,
-  name: "统一提示词",
-  indicatorColumns: indicatorColumns.map((column) => column.name),
-  priority: 1,
-  description: "",
-});
 
 export default function RequirementTasksPanel({
   requirement,
@@ -188,27 +167,7 @@ export default function RequirementTasksPanel({
   const [taskStatusLogError, setTaskStatusLogError] = useState("");
   const [isLoadingTaskStatusLog, setIsLoadingTaskStatusLog] = useState(false);
   const [taskActionMessage, setTaskActionMessage] = useState("");
-  const [indicatorGroupMessage, setIndicatorGroupMessage] = useState("");
-  const [promptSaveMessage, setPromptSaveMessage] = useState("");
-  const [isIndicatorGroupModalOpen, setIsIndicatorGroupModalOpen] = useState(false);
-  const [isPersistingIndicatorGroups, setIsPersistingIndicatorGroups] = useState(false);
-  const [isPersistingPrompts, setIsPersistingPrompts] = useState(false);
-  const [promptEditorModes, setPromptEditorModes] = useState<Record<string, "sections" | "markdown">>({});
-  const [promptMarkdownDrafts, setPromptMarkdownDrafts] = useState<Record<string, string>>({});
-  const [trialBusinessDates, setTrialBusinessDates] = useState<string[]>([]);
-  const [selectedTrialParameterRowKeys, setSelectedTrialParameterRowKeys] = useState<string[]>([]);
-  const [trialMaxRows, setTrialMaxRows] = useState(20);
-  const [trialRunMessage, setTrialRunMessage] = useState("");
-  const [isStartingTrialRun, setIsStartingTrialRun] = useState(false);
-  const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
-  const [isTrialTaskListExpanded, setIsTrialTaskListExpanded] = useState(true);
   const [runningTaskGroupIds, setRunningTaskGroupIds] = useState<string[]>([]);
-  const [runningTaskIds, setRunningTaskIds] = useState<string[]>([]);
-  const [batchExecutionStateByTaskId, setBatchExecutionStateByTaskId] = useState<Record<string, BatchExecutionTaskState>>({});
-  const [batchExecutionTaskOrderByScope, setBatchExecutionTaskOrderByScope] = useState<Record<string, string[]>>({});
-  const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
-  const [bulkExecutingScopeKeys, setBulkExecutingScopeKeys] = useState<string[]>([]);
-  const [selectedTaskIdsByScope, setSelectedTaskIdsByScope] = useState<Record<string, string[]>>({});
   const [activeTaskSubTab, setActiveTaskSubTab] = useState<TaskSubTabKey>(() => {
     if (requestedSubTab === "prompts" || requestedSubTab === "tasks" || requestedSubTab === "output") {
       return requestedSubTab;
@@ -244,10 +203,6 @@ export default function RequirementTasksPanel({
       setActiveTaskSubTab("tasks");
     }
   }, [requestedTaskGroupId, requestedTaskId]);
-
-  useEffect(() => {
-    setIsTrialTaskListExpanded(true);
-  }, [selectedWtId]);
 
   useEffect(() => {
     if (requestedSubTab === "prompts" || requestedSubTab === "tasks" || requestedSubTab === "output") {
@@ -350,6 +305,29 @@ export default function RequirementTasksPanel({
 
     return Array.from(dedupedRows.values());
   }, [selectedWt?.parameterRows, trialParameterColumns]);
+  const {
+    trialBusinessDates,
+    selectedTrialParameterRowKeys,
+    setSelectedTrialParameterRowKeys,
+    trialMaxRows,
+    setTrialMaxRows,
+    trialRunMessage,
+    setTrialRunMessage,
+    isStartingTrialRun,
+    setIsStartingTrialRun,
+    isTrialModalOpen,
+    openTrialModal,
+    closeTrialModal,
+    isTrialTaskListExpanded,
+    setIsTrialTaskListExpanded,
+    handleToggleTrialBusinessDate,
+    handleToggleTrialParameterRow,
+  } = useTrialRun({
+    selectedWt,
+    usesBusinessDateAxis,
+    trialAvailableBusinessDates,
+    trialParameterRows,
+  });
   const trialDimensionColumns = trialParameterColumns;
   const trialAvailableDimensionValues: Record<string, string[]> = {};
   const trialDimensionValues: Record<string, string[]> = {};
@@ -536,6 +514,56 @@ export default function RequirementTasksPanel({
     }
     onUpdateWideTable(selectedWt.id, updater);
   };
+  const {
+    promptSaveMessage,
+    isPersistingPrompts,
+    promptEditorModes,
+    promptMarkdownDrafts,
+    handleIndicatorGroupPromptSectionChange,
+    handlePersistPromptTemplates,
+    handleMarkdownModeSelect,
+    handleMarkdownDraftChange,
+    buildWideTableWithPromptDrafts,
+  } = usePromptEditor({
+    requirement,
+    selectedWt,
+    effectiveWideTable,
+    promptEditorGroups,
+    isDefinitionSubmitted,
+    updateSelectedWideTable,
+    onRefreshData,
+  });
+  const {
+    indicatorGroupMessage,
+    isIndicatorGroupModalOpen,
+    isPersistingIndicatorGroups,
+    openIndicatorGroupModal,
+    closeIndicatorGroupModal,
+    handleAddIndicatorGroup,
+    handleDeleteIndicatorGroup,
+    handleIndicatorGroupChange,
+    handleAssignIndicatorColumnToGroup,
+    handleClearIndicatorColumnGroup,
+    handlePersistIndicatorGroups,
+  } = useIndicatorGroups({
+    requirement,
+    selectedWt,
+    hasIndicatorColumns,
+    isDefinitionSubmitted,
+    isIndicatorGroupingComplete,
+    usesBusinessDateAxis,
+    currentWideTableRecords,
+    wideTableRecords,
+    taskGroups,
+    fetchTasks,
+    updateSelectedWideTable,
+    onReplaceWideTableRecords,
+    onTaskGroupsChange,
+    onFetchTasksChange,
+    onRequirementChange,
+    onRefreshData,
+    buildWideTableWithPromptDrafts,
+  });
 
   const wtTaskGroups = useMemo(
     () => (
@@ -716,6 +744,34 @@ export default function RequirementTasksPanel({
     ),
     [taskPlan],
   );
+  const collectionTaskSectionViews = useMemo<CollectionTaskSectionView[]>(
+    () => collectionTaskGroupSections.map((section) => {
+      const indicatorLabels = collectionTaskIndicatorLabelsMap.get(section.id)
+        ?? collectionTaskIndicatorLabelsMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
+        ?? (taskPlan?.collectionTasks.length === 1 ? taskPlan.collectionTasks[0]?.indicatorLabels : undefined)
+        ?? [];
+      const displayGroupLabel = collectionTaskNameMap.get(section.id)
+        ?? collectionTaskNameMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
+        ?? defaultCollectionTaskName
+        ?? normalizeCollectionTaskLabel(section.taskGroups[0]?.indicatorGroupName);
+
+      return {
+        id: section.id,
+        title: `采集任务：${displayGroupLabel}`,
+        indicatorSummary: formatIndicatorSummary(indicatorLabels),
+        indicatorLabels,
+        displayGroupLabel,
+        taskGroups: section.taskGroups,
+      };
+    }),
+    [
+      collectionTaskGroupSections,
+      collectionTaskIndicatorLabelsMap,
+      collectionTaskNameMap,
+      defaultCollectionTaskName,
+      taskPlan,
+    ],
+  );
   const expandedTaskInstanceRows = useMemo(
     () => buildTaskInstanceRowViews({
       wideTable: selectedWt ?? effectiveWideTable ?? undefined,
@@ -746,636 +802,12 @@ export default function RequirementTasksPanel({
     ),
     [fetchTasks, selectedWt],
   );
-  useEffect(() => {
-    setIndicatorGroupMessage("");
-    setIsIndicatorGroupModalOpen(false);
-    setPromptSaveMessage("");
-    setPromptEditorModes({});
-    setPromptMarkdownDrafts({});
-    setTrialRunMessage("");
-    setSelectedTrialParameterRowKeys([]);
-  }, [selectedWtId]);
-
-  useEffect(() => {
-    if (!usesBusinessDateAxis) {
-      setTrialBusinessDates([]);
-      return;
-    }
-    setTrialBusinessDates((current) => {
-      const retained = current.filter((item) => trialAvailableBusinessDates.includes(item));
-      if (retained.length > 0) {
-        return retained;
-      }
-      return trialAvailableBusinessDates[0] ? [trialAvailableBusinessDates[0]] : [];
-    });
-  }, [trialAvailableBusinessDates, usesBusinessDateAxis]);
-
-  useEffect(() => {
-    const availableRowKeys = new Set(trialParameterRows.map((row) => row.rowKey));
-    setSelectedTrialParameterRowKeys((current) => current.filter((rowKey) => availableRowKeys.has(rowKey)));
-  }, [trialParameterRows]);
-
-  useEffect(() => {
-    if (!selectedWt) {
-      return;
-    }
-
-    const baseWideTable = effectiveWideTable ?? selectedWt;
-    setPromptEditorModes((current) => {
-      const next = { ...current };
-      for (const group of promptEditorGroups) {
-        next[group.id] = next[group.id] ?? "markdown";
-      }
-      return next;
-    });
-
-    setPromptMarkdownDrafts((current) => {
-      const next = { ...current };
-      for (const group of promptEditorGroups) {
-        next[group.id] = next[group.id] ?? (group.promptTemplate ?? buildIndicatorGroupPrompt(requirement, baseWideTable, group).markdown);
-      }
-      return next;
-    });
-  }, [effectiveWideTable, promptEditorGroups, requirement, selectedWt]);
-
-  useEffect(() => {
-    if (!selectedWt || activeTaskSubTab !== "tasks" || !hasRunningCollectionInstances || !onRefreshData) {
-      return;
-    }
-
-    let cancelled = false;
-    let inFlight = false;
-    const sync = async () => {
-      if (cancelled || inFlight) {
-        return;
-      }
-      inFlight = true;
-      try {
-        await syncWideTableCollectionStatuses(selectedWt.id);
-        if (!cancelled) {
-          await onRefreshData();
-        }
-      } catch {
-        // Keep the page interactive even if downstream status sync is temporarily unavailable.
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    void sync();
-    const timer = window.setInterval(() => {
-      void sync();
-    }, 5000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [activeTaskSubTab, hasRunningCollectionInstances, onRefreshData, selectedWt]);
-
-  useEffect(() => {
-    if (Object.keys(batchExecutionStateByTaskId).length === 0) {
-      if (Object.keys(batchExecutionTaskOrderByScope).length > 0) {
-        setBatchExecutionTaskOrderByScope({});
-      }
-      if (bulkExecutingScopeKeys.length > 0) {
-        setBulkExecutingScopeKeys([]);
-      }
-      return;
-    }
-
-    const activeTaskIds = new Set(Object.keys(batchExecutionStateByTaskId));
-    const nextTaskOrderByScope: Record<string, string[]> = {};
-    let orderChanged = false;
-    for (const [scopeKey, taskIds] of Object.entries(batchExecutionTaskOrderByScope)) {
-      const retainedTaskIds = taskIds.filter((taskId) => activeTaskIds.has(taskId));
-      if (retainedTaskIds.length > 0) {
-        nextTaskOrderByScope[scopeKey] = retainedTaskIds;
-      }
-      if (retainedTaskIds.length !== taskIds.length) {
-        orderChanged = true;
-      }
-    }
-    if (
-      orderChanged
-      || Object.keys(nextTaskOrderByScope).length !== Object.keys(batchExecutionTaskOrderByScope).length
-    ) {
-      setBatchExecutionTaskOrderByScope(nextTaskOrderByScope);
-    }
-
-    const nextScopeKeys = Object.keys(nextTaskOrderByScope);
-    const scopeKeysChanged = nextScopeKeys.length !== bulkExecutingScopeKeys.length
-      || nextScopeKeys.some((scopeKey) => !bulkExecutingScopeKeys.includes(scopeKey));
-    if (scopeKeysChanged) {
-      setBulkExecutingScopeKeys(nextScopeKeys);
-    }
-  }, [batchExecutionStateByTaskId, batchExecutionTaskOrderByScope, bulkExecutingScopeKeys]);
-
-  useEffect(() => {
-    if (Object.keys(batchExecutionStateByTaskId).length === 0 || fetchTasks.length === 0) {
-      return;
-    }
-
-    const fetchTaskById = new Map(fetchTasks.map((task) => [task.id, task] as const));
-    const nextBatchExecutionStateByTaskId: Record<string, BatchExecutionTaskState> = {};
-    const releasedTaskIds: string[] = [];
-    let changed = false;
-
-    for (const [taskId, state] of Object.entries(batchExecutionStateByTaskId)) {
-      if (state.phase !== "running") {
-        nextBatchExecutionStateByTaskId[taskId] = state;
-        continue;
-      }
-
-      const actualTask = fetchTaskById.get(taskId);
-      const stillOccupiesSlot = Boolean(
-        actualTask
-        && (actualTask.status === "running" || actualTask.status === "pending"),
-      );
-
-      if (!stillOccupiesSlot) {
-        releasedTaskIds.push(taskId);
-        changed = true;
-        continue;
-      }
-
-      if (!state.collectionTaskId && actualTask?.collectionTaskId) {
-        nextBatchExecutionStateByTaskId[taskId] = {
-          ...state,
-          collectionTaskId: actualTask.collectionTaskId,
-        };
-        changed = true;
-        continue;
-      }
-
-      nextBatchExecutionStateByTaskId[taskId] = state;
-    }
-
-    if (changed) {
-      setBatchExecutionStateByTaskId(nextBatchExecutionStateByTaskId);
-    }
-    if (releasedTaskIds.length > 0) {
-      setRunningTaskIds((prev) => prev.filter((taskId) => !releasedTaskIds.includes(taskId)));
-    }
-  }, [batchExecutionStateByTaskId, fetchTasks]);
-
-  useEffect(() => {
-    const runningCount = Object.values(batchExecutionStateByTaskId)
-      .filter((state) => state.phase === "running").length;
-    const availableSlots = Math.max(0, MAX_BATCH_EXECUTION_CONCURRENCY - runningCount);
-    if (availableSlots === 0) {
-      return;
-    }
-
-    const dispatchCandidates = Object.entries(batchExecutionTaskOrderByScope)
-      .flatMap(([, orderedTaskIds]) => orderedTaskIds
-        .map((taskId) => [taskId, batchExecutionStateByTaskId[taskId]] as const)
-        .filter((entry): entry is [string, BatchExecutionTaskState] => Boolean(entry[1]))
-        .filter(([, state]) => state.phase === "queued")
-        .map(([taskId, state]) => ({
-          taskId,
-          rowLabel: state.rowLabel,
-        })))
-      .slice(0, availableSlots);
-
-    if (dispatchCandidates.length === 0) {
-      return;
-    }
-
-    setBatchExecutionStateByTaskId((prev) => {
-      const next = { ...prev };
-      for (const { taskId } of dispatchCandidates) {
-        const current = next[taskId];
-        if (!current) {
-          continue;
-        }
-        next[taskId] = {
-          ...current,
-          phase: "running",
-          collectionTaskId: undefined,
-        };
-      }
-      return next;
-    });
-
-    for (const { taskId, rowLabel } of dispatchCandidates) {
-      void (async () => {
-        const result = await dispatchSingleTaskExecution(taskId, rowLabel, {
-          refreshAfterExecution: false,
-          silent: true,
-          optimistic: false,
-          preserveRunningState: true,
-        });
-
-        if (result.ok) {
-          setBatchExecutionStateByTaskId((prev) => {
-            const current = prev[taskId];
-            if (!current) {
-              return prev;
-            }
-            return {
-              ...prev,
-              [taskId]: {
-                ...current,
-                phase: "running",
-                collectionTaskId: result.collectionTaskId,
-              },
-            };
-          });
-          return;
-        }
-
-        setBatchExecutionStateByTaskId((prev) => {
-          if (!prev[taskId]) {
-            return prev;
-          }
-          const next = { ...prev };
-          delete next[taskId];
-          return next;
-        });
-        setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
-        setTaskActionMessage(`批量执行中有实例发起失败：${rowLabel}，错误：${result.error}`);
-      })();
-    }
-  }, [batchExecutionStateByTaskId, batchExecutionTaskOrderByScope]);
-
-  const handleAddIndicatorGroup = () => {
-    if (!selectedWt) {
-      return;
-    }
-
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      indicatorGroups: (() => {
-        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
-        const existingUserGroups = wideTable.indicatorGroups.filter(
-          (group) => group.id !== defaultGroupId,
-        );
-        const nextIndex = existingUserGroups.length + 1;
-        return [
-          ...existingUserGroups,
-          {
-            id: `ig_${wideTable.id}_${Date.now()}`,
-            wideTableId: wideTable.id,
-            name: `新指标组${nextIndex}`,
-            indicatorColumns: [],
-            priority: nextIndex,
-            description: "",
-          },
-        ];
-      })(),
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const handleDeleteIndicatorGroup = (groupId: string) => {
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      indicatorGroups: (() => {
-        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
-        return wideTable.indicatorGroups
-          .filter((group) => group.id !== defaultGroupId && group.id !== groupId)
-          .map((group, index) => ({
-            ...group,
-            priority: index + 1,
-          }));
-      })(),
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const handleIndicatorGroupChange = (
-    groupId: string,
-    patch: Partial<WideTable["indicatorGroups"][number]>,
-  ) => {
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      indicatorGroups: wideTable.indicatorGroups.map((group) => (
-        group.id === groupId ? { ...group, ...patch } : group
-      )),
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const handleIndicatorGroupPromptSectionChange = (
-    groupId: string,
-    key: "coreQueryRequirement" | "businessKnowledge" | "metricList" | "dimensionColumns" | "outputConstraints",
-    value: string,
-  ) => {
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      indicatorGroups: (() => {
-        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
-        const hasTarget = wideTable.indicatorGroups.some((group) => group.id === groupId);
-        const indicatorColumnsForDefault = wideTable.schema.columns.filter(
-          (column) => column.category === "indicator",
-        );
-        const hydratedGroups = (
-          !hasTarget && groupId === defaultGroupId
-            ? [...wideTable.indicatorGroups, buildDefaultIndicatorGroup(wideTable, indicatorColumnsForDefault)]
-            : wideTable.indicatorGroups
-        );
-
-        return hydratedGroups.map((group) => (
-          group.id === groupId
-            ? {
-                ...group,
-                promptConfig: {
-                  ...(group.promptConfig ?? {}),
-                  [key]: value,
-                  lastEditedAt: new Date().toISOString(),
-                },
-              }
-            : group
-        ));
-      })(),
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const buildWideTableWithPromptDrafts = (
-    wideTable: WideTable,
-    editedAt: string,
-  ): WideTable => {
-    const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
-    const schemaIndicatorColumns = wideTable.schema.columns.filter(
-      (column) => column.category === "indicator",
-    );
-    const storedDefaultGroup = wideTable.indicatorGroups.find(
-      (group) => group.id === defaultGroupId,
-    );
-    const userGroups = wideTable.indicatorGroups.filter(
-      (group) => group.id !== defaultGroupId,
-    );
-    const baseGroups = userGroups.length > 0
-      ? userGroups
-      : schemaIndicatorColumns.length > 0
-        ? [storedDefaultGroup ?? buildDefaultIndicatorGroup(wideTable, schemaIndicatorColumns)]
-        : [];
-
-    const indicatorGroups = baseGroups.map((group) => {
-      const editMode = promptEditorModes[group.id] ?? "markdown";
-      const markdownDraft = promptMarkdownDrafts[group.id];
-
-      if (editMode === "markdown") {
-        const nextTemplate = markdownDraft !== undefined
-          ? markdownDraft
-          : group.promptTemplate?.trim()
-            ? group.promptTemplate
-            : buildIndicatorGroupPrompt(requirement, wideTable, group).markdown;
-
-        return {
-          ...group,
-          promptTemplate: nextTemplate,
-        };
-      }
-
-      // Legacy "sections" editor: keep deriving a full markdown template from promptConfig.
-      return {
-        ...group,
-        promptTemplate: buildIndicatorGroupPrompt(requirement, wideTable, group).markdown,
-      };
-    });
-
-    return {
-      ...wideTable,
-      indicatorGroups,
-      updatedAt: editedAt,
-    };
-  };
-
-  const handlePersistPromptTemplates = async () => {
-    if (!selectedWt) {
-      return;
-    }
-
-    if (!isDefinitionSubmitted) {
-      setPromptSaveMessage("请先在【需求】Tab 提交需求后再配置采集提示词。");
-      return;
-    }
-
-    setIsPersistingPrompts(true);
-    try {
-      const now = new Date().toISOString();
-      const nextWideTable = buildWideTableWithPromptDrafts(selectedWt, now);
-      await updateRequirementWideTable(requirement.id, nextWideTable);
-      updateSelectedWideTable(() => nextWideTable);
-      setPromptSaveMessage("已保存采集提示词配置。");
-      await onRefreshData?.();
-    } catch (error) {
-      setPromptSaveMessage(`保存失败：${formatTaskActionError(error)}`);
-    } finally {
-      setIsPersistingPrompts(false);
-    }
-  };
-
-  const handleAssignIndicatorColumnToGroup = (columnName: string, groupId: string) => {
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      indicatorGroups: (() => {
-        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
-        return wideTable.indicatorGroups
-          .filter((group) => group.id !== defaultGroupId)
-          .map((group) => {
-            const nextColumns = group.indicatorColumns.filter((column) => column !== columnName);
-            if (group.id === groupId) {
-              return {
-                ...group,
-                indicatorColumns: [...nextColumns, columnName],
-              };
-            }
-            return {
-              ...group,
-              indicatorColumns: nextColumns,
-            };
-          });
-      })(),
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const handleClearIndicatorColumnGroup = (columnName: string) => {
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      indicatorGroups: (() => {
-        const defaultGroupId = buildDefaultIndicatorGroupId(wideTable.id);
-        return wideTable.indicatorGroups
-          .filter((group) => group.id !== defaultGroupId)
-          .map((group) => ({
-            ...group,
-            indicatorColumns: group.indicatorColumns.filter((column) => column !== columnName),
-          }));
-      })(),
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const ensurePreviewRows = async (wideTable: WideTable, now: string) => {
-    if (currentWideTableRecords.length > 0) {
-      return { wideTable, records: currentWideTableRecords };
-    }
-
-    const { records, totalCount } = generateWideTablePreviewRecords(
-      wideTable,
-      currentWideTableRecords,
-      wideTableRecords,
-    );
-    if (totalCount === 0) {
-      const hasConfiguredTimeRange = Boolean(
-        wideTable.businessDateRange.start?.trim()
-        && String(wideTable.businessDateRange.end ?? "").trim(),
-      );
-      const hasConfiguredParameterRows = Boolean(wideTable.parameterRows?.length);
-      const previewMissingReason = !hasConfiguredTimeRange
-        ? "当前时间范围为空，无法生成预览行。请先回到【需求】完善数据范围。"
-        : !hasConfiguredParameterRows
-          ? "当前采集参数表为空，无法生成预览行。请先回到【需求】完善数据范围。"
-          : "当前数据范围配置不足，无法生成预览行。请先回到【需求】完善数据范围。";
-      throw new Error(previewMissingReason);
-    }
-    if (totalCount === 0) {
-      throw new Error(
-        usesBusinessDateAxis
-          ? "当前业务日期范围或维度取值不足，无法生成预览行。请先回到【需求】完善数据范围。"
-          : "当前维度取值不足，无法生成快照预览行。请先回到【需求】完善数据范围。",
-      );
-    }
-
-    const reconciliation = reconcileTaskPlanChange({
-      requirement,
-      wideTable,
-      previousRecords: currentWideTableRecords,
-      nextRecords: records,
-      taskGroups,
-      fetchTasks,
-    });
-    const nextPlanVersion = reconciliation.nextPlanVersion || Math.max(
-      1,
-      resolveCurrentPlanVersion(wideTable, currentWideTableRecords, taskGroups),
-    );
-    const nextPlanFingerprint = reconciliation.nextPlanFingerprint || buildTaskPlanFingerprint(wideTable, records);
-    const recordsToPersist = records.map((record) => ({
-      ...record,
-      _metadata: {
-        ...record._metadata,
-        planVersion: nextPlanVersion,
-        snapshotKind: "baseline" as const,
-      },
-    }));
-    const persistedWideTable: WideTable = {
-      ...wideTable,
-      currentPlanVersion: nextPlanVersion,
-      currentPlanFingerprint: nextPlanFingerprint,
-      recordCount: totalCount,
-      status: wideTable.status === "active" ? "active" : "initialized",
-      updatedAt: now,
-    };
-
-    await persistWideTablePreview(requirement.id, persistedWideTable, recordsToPersist);
-    updateSelectedWideTable(() => persistedWideTable);
-    onReplaceWideTableRecords?.(wideTable.id, recordsToPersist);
-    return { wideTable: persistedWideTable, records: recordsToPersist };
-  };
-
-  const handlePersistIndicatorGroups = async () => {
-    if (!selectedWt) {
-      return;
-    }
-
-    if (!isDefinitionSubmitted) {
-      setIndicatorGroupMessage("请先在【需求】Tab 提交需求后再配置指标分组并生成任务组。");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const nextWideTable = buildWideTableWithPromptDrafts(selectedWt, now);
-
-    if (!hasIndicatorColumns) {
-      setIndicatorGroupMessage("当前宽表没有指标列，无需配置指标分组。");
-      return;
-    }
-
-    setIsPersistingIndicatorGroups(true);
-    try {
-      // Persist indicator_groups_json (incl. prompt_template) via the official wide-table update path.
-      await updateRequirementWideTable(requirement.id, nextWideTable);
-
-      if (!isIndicatorGroupingComplete) {
-        updateSelectedWideTable(() => nextWideTable);
-        setIndicatorGroupMessage("已保存指标分组草稿。请把所有指标分配到分组后，再保存并生成任务组。");
-        return;
-      }
-
-      const ensuredPreview = await ensurePreviewRows(nextWideTable, now);
-      const previewWideTable = ensuredPreview.wideTable;
-      const previewRecords = ensuredPreview.records;
-
-      const reconciliation = reconcileTaskPlanChange({
-        requirement,
-        wideTable: previewWideTable,
-        previousRecords: previewRecords,
-        nextRecords: previewRecords,
-        taskGroups,
-        fetchTasks,
-      });
-      const nextPlanVersion = reconciliation.nextPlanVersion || Math.max(
-        1,
-        resolveCurrentPlanVersion(previewWideTable, previewRecords, taskGroups),
-      );
-      const nextPlanFingerprint = reconciliation.nextPlanFingerprint || buildTaskPlanFingerprint(
-        previewWideTable,
-        previewRecords,
-      );
-      const annotatedRecords = annotateCurrentPlanRecords(previewRecords, nextPlanVersion);
-      const persistedWideTable: WideTable = {
-        ...previewWideTable,
-        currentPlanVersion: nextPlanVersion,
-        currentPlanFingerprint: nextPlanFingerprint,
-        recordCount: previewWideTable.recordCount > 0 ? previewWideTable.recordCount : annotatedRecords.length,
-        status: previewWideTable.status === "active" ? "active" : "initialized",
-        updatedAt: now,
-      };
-
-      if (reconciliation.structuralChange) {
-        await persistWideTablePlan(
-          requirement.id,
-          persistedWideTable,
-          annotatedRecords,
-          reconciliation.taskGroups.filter((taskGroup) => taskGroup.wideTableId === selectedWt.id),
-        );
-        onTaskGroupsChange(reconciliation.taskGroups);
-        onFetchTasksChange(reconciliation.fetchTasks);
-        onReplaceWideTableRecords?.(selectedWt.id, annotatedRecords);
-        setIndicatorGroupMessage(
-          usesBusinessDateAxis
-            ? `已保存指标分组，并生成 ${reconciliation.generatedTaskGroupCount} 个任务实例（子任务将在打开/执行任务实例时按需生成）。`
-            : `已保存指标分组，并生成当前快照的 ${reconciliation.generatedTaskGroupCount} 个任务实例（子任务将在打开/执行任务实例时按需生成）。`,
-        );
-      } else {
-        await persistWideTablePreview(
-          requirement.id,
-          persistedWideTable,
-          annotatedRecords,
-        );
-        setIndicatorGroupMessage("已保存指标分组配置，当前任务计划无需重建。");
-      }
-
-      updateSelectedWideTable(() => persistedWideTable);
-      if (reconciliation.structuralChange && requirement.status !== "running") {
-        onRequirementChange?.({
-          ...requirement,
-          status: "running",
-          schemaLocked: true,
-          updatedAt: now,
-        });
-      }
-      await onRefreshData?.();
-    } catch (error) {
-      setIndicatorGroupMessage(`保存失败：${formatTaskActionError(error)}`);
-    } finally {
-      setIsPersistingIndicatorGroups(false);
-    }
-  };
+  useTaskStatusPolling({
+    selectedWt,
+    activeTaskSubTab,
+    hasRunningCollectionInstances,
+    onRefreshData,
+  });
 
   const refreshAfterExecution = async () => {
     if (!onRefreshData) {
@@ -1394,21 +826,29 @@ export default function RequirementTasksPanel({
     }
   };
 
-  const handleToggleTrialBusinessDate = (businessDate: string) => {
-    setTrialBusinessDates((current) => (
-      current.includes(businessDate)
-        ? current.filter((item) => item !== businessDate)
-        : [...current, businessDate]
-    ));
-  };
-
-  const handleToggleTrialParameterRow = (rowKey: string) => {
-    setSelectedTrialParameterRowKeys((current) => (
-      current.includes(rowKey)
-        ? current.filter((item) => item !== rowKey)
-        : [...current, rowKey]
-    ));
-  };
+  const {
+    runningTaskIds,
+    cancellingTaskIds,
+    getTaskInstanceDisplayStatus,
+    getTaskInstanceDisplayCollectionTaskId,
+    canSelectTaskInstance,
+    getScopedSelectedTaskIds,
+    handleToggleTaskSelection,
+    handleToggleAllTaskSelection,
+    clearScopedTaskSelection,
+    isScopeBulkExecuting,
+    handleBatchExecuteTasks,
+    handleRequestTaskRerun,
+    handleCancelTask,
+  } = useTaskExecutionQueue({
+    fetchTasks,
+    taskGroups,
+    onFetchTasksChange,
+    onTaskGroupsChange,
+    refreshAfterExecution,
+    setTaskActionMessage,
+    applyLocalTaskExecution,
+  });
 
   const handleToggleTrialDimensionValue = (_columnName: string, _value: string) => {};
 
@@ -1529,38 +969,15 @@ export default function RequirementTasksPanel({
     }
   };
 
-  const getTaskInstanceBatchExecutionState = (taskId: string): BatchExecutionTaskState | undefined =>
-    batchExecutionStateByTaskId[taskId];
-
-  const getTaskInstanceDisplayStatus = (row: Pick<TaskInstanceRowView, "fetchTaskId" | "status">): string => {
-    const batchExecutionState = getTaskInstanceBatchExecutionState(row.fetchTaskId);
-    if (batchExecutionState?.phase === "queued") {
-      return "queued";
-    }
-    if (batchExecutionState?.phase === "running" || runningTaskIds.includes(row.fetchTaskId)) {
-      return "running";
-    }
-    return row.status;
-  };
-
-  const getTaskInstanceDisplayCollectionTaskId = (
-    row: Pick<TaskInstanceRowView, "fetchTaskId" | "collectionTaskId">,
-  ): string | undefined => {
-    const batchExecutionState = getTaskInstanceBatchExecutionState(row.fetchTaskId);
-    if (batchExecutionState?.phase === "queued") {
-      return undefined;
-    }
-    if (batchExecutionState?.phase === "running") {
-      return batchExecutionState.collectionTaskId;
-    }
-    return row.collectionTaskId;
-  };
-
   const renderTaskInstanceCollectionTaskId = (
     row: Pick<TaskInstanceRowView, "fetchTaskId" | "collectionTaskId">,
   ) => {
-    const batchExecutionState = getTaskInstanceBatchExecutionState(row.fetchTaskId);
-    if (batchExecutionState?.phase === "queued") {
+    const displayStatus = getTaskInstanceDisplayStatus({
+      fetchTaskId: row.fetchTaskId,
+      status: "pending",
+    });
+    const displayCollectionTaskId = getTaskInstanceDisplayCollectionTaskId(row);
+    if (displayStatus === "queued") {
       return (
         <div className="space-y-1">
           <div className="font-sans text-slate-500">本次：排队中</div>
@@ -1568,308 +985,19 @@ export default function RequirementTasksPanel({
         </div>
       );
     }
-    if (batchExecutionState?.phase === "running") {
+    if (displayStatus === "running" && displayCollectionTaskId) {
       return (
         <div className="space-y-1">
           <div>
-            本次：{batchExecutionState.collectionTaskId ?? "生成中"}
+            本次：{displayCollectionTaskId}
           </div>
-          {row.collectionTaskId && row.collectionTaskId !== batchExecutionState.collectionTaskId ? (
+          {row.collectionTaskId && row.collectionTaskId !== displayCollectionTaskId ? (
             <div className="text-slate-500">上次：{row.collectionTaskId}</div>
           ) : null}
         </div>
       );
     }
-    return row.collectionTaskId ?? "-";
-  };
-
-  const canSelectTaskInstance = (row: Pick<TaskInstanceRowView, "fetchTaskId" | "status">): boolean => {
-    const displayStatus = getTaskInstanceDisplayStatus(row);
-    return displayStatus !== "running" && displayStatus !== "queued";
-  };
-
-  const getScopedSelectedTaskIds = (scopeKey: string, rows: TaskInstanceRowView[]): string[] => {
-    const rowIdSet = new Set(rows.map((row) => row.fetchTaskId));
-    return (selectedTaskIdsByScope[scopeKey] ?? []).filter((taskId) => rowIdSet.has(taskId));
-  };
-
-  const handleToggleTaskSelection = (scopeKey: string, taskId: string) => {
-    setSelectedTaskIdsByScope((prev) => {
-      const current = prev[scopeKey] ?? [];
-      const next = current.includes(taskId)
-        ? current.filter((id) => id !== taskId)
-        : [...current, taskId];
-      return { ...prev, [scopeKey]: next };
-    });
-  };
-
-  const handleToggleAllTaskSelection = (scopeKey: string, rows: TaskInstanceRowView[]) => {
-    const selectableTaskIds = rows.filter(canSelectTaskInstance).map((row) => row.fetchTaskId);
-    setSelectedTaskIdsByScope((prev) => {
-      const current = (prev[scopeKey] ?? []).filter((taskId) => selectableTaskIds.includes(taskId));
-      const next = current.length === selectableTaskIds.length ? [] : selectableTaskIds;
-      return { ...prev, [scopeKey]: next };
-    });
-  };
-
-  const clearScopedTaskSelection = (scopeKey: string) => {
-    setSelectedTaskIdsByScope((prev) => ({ ...prev, [scopeKey]: [] }));
-  };
-
-  const dispatchSingleTaskExecution = async (
-    taskId: string,
-    rowLabel: string,
-    options?: {
-      refreshAfterExecution?: boolean;
-      silent?: boolean;
-      optimistic?: boolean;
-      preserveRunningState?: boolean;
-    },
-  ): Promise<{ ok: true; collectionTaskId?: string; status?: string } | { ok: false; error: string }> => {
-    const {
-      refreshAfterExecution: shouldRefresh = true,
-      silent = false,
-      optimistic = true,
-      preserveRunningState = false,
-    } = options ?? {};
-    const now = new Date().toISOString();
-    const targetTask = fetchTasks.find((task) => task.id === taskId);
-    if (!targetTask) {
-      return { ok: false, error: "Task not found" };
-    }
-    let keepRunningState = false;
-
-    if (isLocalTaskId(taskId)) {
-      applyLocalTaskExecution(taskId, rowLabel);
-      return { ok: true };
-    }
-
-    let optimisticFetchTasks: FetchTask[] | null = null;
-    if (optimistic) {
-      const nextAttempt = targetTask.executionRecords.length + 1;
-      optimisticFetchTasks = fetchTasks.map((task) => (
-        task.id === taskId
-          ? {
-              ...task,
-              status: "running" as const,
-              updatedAt: now,
-              executionRecords: [
-                ...task.executionRecords,
-                {
-                  id: buildExecutionRecordId(task.id, nextAttempt, "retry"),
-                  fetchTaskId: task.id,
-                  attempt: nextAttempt,
-                  status: "running" as const,
-                  triggeredBy: "manual_retry" as const,
-                  startedAt: now,
-                },
-              ],
-            }
-          : task
-      ));
-      onFetchTasksChange(optimisticFetchTasks);
-      const optimisticTaskGroups: TaskGroup[] = taskGroups.map((taskGroup) => (
-        taskGroup.id === targetTask.taskGroupId
-          ? {
-              ...taskGroup,
-              status: "running" as const,
-              pendingTasks: Math.max(taskGroup.pendingTasks - 1, 0),
-              runningTasks: taskGroup.runningTasks + 1,
-              completedTasks: targetTask.status === "completed"
-                ? Math.max(taskGroup.completedTasks - 1, 0)
-                : taskGroup.completedTasks,
-              failedTasks: targetTask.status === "failed"
-                ? Math.max(taskGroup.failedTasks - 1, 0)
-                : taskGroup.failedTasks,
-              updatedAt: now,
-            }
-          : taskGroup
-      ));
-      onTaskGroupsChange(optimisticTaskGroups);
-    }
-
-    setRunningTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
-    if (!silent) {
-      setTaskActionMessage(`已发起任务 ${taskId}（${rowLabel}）的单任务执行，正在同步最新结果。`);
-    }
-    try {
-      const dispatchResult = targetTask.status === "failed"
-        ? await retryTask(taskId)
-        : await executeTask(taskId);
-      if (dispatchResult.collectionTaskId || dispatchResult.status) {
-        const sourceFetchTasks = optimisticFetchTasks ?? fetchTasks;
-        onFetchTasksChange(
-          sourceFetchTasks.map((task) => (
-            task.id === taskId
-              ? {
-                  ...task,
-                  collectionTaskId: dispatchResult.collectionTaskId ?? task.collectionTaskId,
-                  status: dispatchResult.status ?? task.status,
-                  updatedAt: new Date().toISOString(),
-                }
-              : task
-          )),
-        );
-      }
-      if (shouldRefresh) {
-        await refreshAfterExecution();
-      } else if (preserveRunningState) {
-        keepRunningState = true;
-      }
-      return {
-        ok: true,
-        collectionTaskId: dispatchResult.collectionTaskId,
-        status: dispatchResult.status,
-      };
-    } catch (error) {
-      const errorMessage = formatTaskActionError(error);
-      if (!silent) {
-        setTaskActionMessage(`执行失败：${errorMessage}`);
-      }
-      return { ok: false, error: errorMessage };
-    } finally {
-      if (!keepRunningState) {
-        setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
-      }
-    }
-  };
-
-  const handleBatchExecuteTasks = async (scopeKey: string, rows: TaskInstanceRowView[]) => {
-    const selectedTaskIds = getScopedSelectedTaskIds(scopeKey, rows)
-      .filter((taskId) => {
-        const row = rows.find((item) => item.fetchTaskId === taskId);
-        return row ? canSelectTaskInstance(row) : false;
-      });
-
-    if (selectedTaskIds.length === 0) {
-      setTaskActionMessage("请先选择至少一个可执行的采集实例。");
-      return;
-    }
-
-    const rowMap = new Map(rows.map((row) => [row.fetchTaskId, row] as const));
-    setBulkExecutingScopeKeys((prev) => (prev.includes(scopeKey) ? prev : [...prev, scopeKey]));
-    setBatchExecutionStateByTaskId((prev) => ({
-      ...prev,
-      ...Object.fromEntries(selectedTaskIds.map((taskId) => [taskId, {
-        phase: "queued" as const,
-        scopeKey,
-        rowLabel: rowMap.get(taskId)?.rowLabel ?? taskId,
-      }])),
-    }));
-    setBatchExecutionTaskOrderByScope((prev) => ({
-      ...prev,
-      [scopeKey]: [
-        ...(prev[scopeKey] ?? []),
-        ...selectedTaskIds.filter((taskId) => !(prev[scopeKey] ?? []).includes(taskId)),
-      ],
-    }));
-    clearScopedTaskSelection(scopeKey);
-    setTaskActionMessage(`已加入 ${selectedTaskIds.length} 个采集实例队列，最多同时执行 ${MAX_BATCH_EXECUTION_CONCURRENCY} 个，其余实例保持排队中。`);
-  };
-
-  const handleRequestTaskRerun = async (taskId: string, rowLabel: string) => {
-    await dispatchSingleTaskExecution(taskId, rowLabel);
-  };
-
-  const removeQueuedTaskFromBatchQueue = (taskId: string): boolean => {
-    const queuedState = batchExecutionStateByTaskId[taskId];
-    if (!queuedState || queuedState.phase !== "queued") {
-      return false;
-    }
-
-    const scopeKey = queuedState.scopeKey;
-    setBatchExecutionStateByTaskId((prev) => {
-      const current = prev[taskId];
-      if (!current || current.phase !== "queued") {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next[taskId];
-      return next;
-    });
-    setBatchExecutionTaskOrderByScope((prev) => {
-      const scopedTaskIds = prev[scopeKey] ?? [];
-      if (!scopedTaskIds.includes(taskId)) {
-        return prev;
-      }
-      const nextScopedTaskIds = scopedTaskIds.filter((id) => id !== taskId);
-      const next = { ...prev };
-      if (nextScopedTaskIds.length > 0) {
-        next[scopeKey] = nextScopedTaskIds;
-      } else {
-        delete next[scopeKey];
-      }
-      return next;
-    });
-    return true;
-  };
-
-  const handleCancelTask = async (taskId: string, rowLabel: string, collectionTaskIdOverride?: string) => {
-    const targetTask = fetchTasks.find((task) => task.id === taskId);
-    const displayStatus = targetTask
-      ? getTaskInstanceDisplayStatus({ fetchTaskId: taskId, status: targetTask.status })
-      : batchExecutionStateByTaskId[taskId]?.phase === "queued"
-        ? "queued"
-        : undefined;
-    const effectiveCollectionTaskId = collectionTaskIdOverride ?? targetTask?.collectionTaskId;
-    if (displayStatus === "queued") {
-      if (removeQueuedTaskFromBatchQueue(taskId)) {
-        setTaskActionMessage(`已将采集任务 ${taskId}（${rowLabel}）从排队队列中移除。`);
-      }
-      return;
-    }
-    if (
-      !targetTask
-      || displayStatus !== "running"
-      || !effectiveCollectionTaskId
-    ) {
-      return;
-    }
-
-    setCancellingTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
-    setTaskActionMessage(`正在取消采集任务 ${taskId}（${rowLabel}）...`);
-    try {
-      await cancelTask(effectiveCollectionTaskId);
-      onFetchTasksChange(fetchTasks.map((task) => (
-        task.id === taskId
-          ? {
-              ...task,
-              status: "cancelled" as const,
-              collectionTaskId: effectiveCollectionTaskId,
-              updatedAt: new Date().toISOString(),
-            }
-          : task
-      )));
-      setBatchExecutionStateByTaskId((prev) => {
-        if (!prev[taskId]) {
-          return prev;
-        }
-        const next = { ...prev };
-        delete next[taskId];
-        return next;
-      });
-      setBatchExecutionTaskOrderByScope((prev) => {
-        let changed = false;
-        const next: Record<string, string[]> = {};
-        for (const [scopeKey, taskIds] of Object.entries(prev)) {
-          const retainedTaskIds = taskIds.filter((id) => id !== taskId);
-          if (retainedTaskIds.length !== taskIds.length) {
-            changed = true;
-          }
-          if (retainedTaskIds.length > 0) {
-            next[scopeKey] = retainedTaskIds;
-          }
-        }
-        return changed ? next : prev;
-      });
-      setRunningTaskIds((prev) => prev.filter((id) => id !== taskId));
-      await refreshAfterExecution();
-      setTaskActionMessage(`已取消采集任务 ${taskId}（${rowLabel}）。`);
-    } catch (error) {
-      setTaskActionMessage(`取消失败：${formatTaskActionError(error)}`);
-    } finally {
-      setCancellingTaskIds((prev) => prev.filter((id) => id !== taskId));
-    }
+    return displayCollectionTaskId ?? row.collectionTaskId ?? "-";
   };
 
   const closeTaskStatusLog = () => {
@@ -1921,138 +1049,6 @@ export default function RequirementTasksPanel({
     );
   };
 
-  const renderTaskInstanceActions = (
-    row: TaskInstanceRowView,
-    isRunning: boolean,
-    actionLabel: string,
-  ) => (
-    <div className="flex flex-col items-start gap-2">
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-          disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning}
-          className={cn(
-            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-            "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
-          )}
-        >
-          {runningTaskIds.includes(row.fetchTaskId) || isRunning ? "采集中..." : actionLabel}
-        </button>
-        {isRunning && row.collectionTaskId ? (
-          <button
-            type="button"
-            onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel)}
-            disabled={cancellingTaskIds.includes(row.fetchTaskId)}
-            className={cn(
-              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
-            )}
-          >
-            {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
-          </button>
-        ) : null}
-      </div>
-      {isRunning && row.collectionTaskId ? (
-        <button
-          type="button"
-          onClick={() => void handleOpenTaskStatusLog(row.collectionTaskId!, row.rowLabel)}
-          className={cn(
-            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-            "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-          )}
-        >
-          查看日志
-        </button>
-      ) : null}
-    </div>
-  );
-
-  const renderTaskInstanceTable = (
-    rows: TaskInstanceRowView[],
-    legendItems: Array<{
-      status: string;
-      label: string;
-      count: number;
-      badgeClassName: string;
-      dotClassName: string;
-    }>,
-  ) => {
-    if (rows.length === 0) {
-      return (
-        <div className="text-xs text-muted-foreground">当前还没有可展示的采集实例。</div>
-      );
-    }
-
-    return (
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-          {legendItems.map((item) => (
-            <span
-              key={item.status}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                item.badgeClassName,
-              )}
-            >
-              <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
-              {item.label} {item.count}
-            </span>
-          ))}
-        </div>
-        <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-          <table className="w-full text-xs leading-5">
-            <thead>
-              <tr>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集参数</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">时间列</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集指标组</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集实例 ID</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">实例状态</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {rows.map((row) => {
-                const isRunning = row.status === "running";
-                const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
-                return (
-                  <tr key={row.fetchTaskId}>
-                    <td className="px-3 py-3 align-top text-slate-700">
-                      <div className="space-y-1">
-                        {row.parameterLines.map((line) => (
-                          <div key={`${row.fetchTaskId}-${line}`} className="break-all">
-                            {line}
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 align-top text-slate-700">{row.businessDateLabel}</td>
-                    <td className="px-3 py-3 align-top text-slate-700">
-                      <div className="space-y-1">
-                        <div className="font-medium">{row.indicatorGroupName}</div>
-                        {renderIndicatorSummaryBlock(row.indicatorLabels, row.indicatorGroupName, true)}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
-                      {renderTaskInstanceCollectionTaskId(row)}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <StatusBadge status={row.status} />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      {renderTaskInstanceActions(row, isRunning, actionLabel)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
   const renderSelectableTaskInstanceActions = (row: TaskInstanceRowView) => {
     const displayStatus = getTaskInstanceDisplayStatus(row);
     const displayCollectionTaskId = getTaskInstanceDisplayCollectionTaskId(row);
@@ -2061,46 +1057,18 @@ export default function RequirementTasksPanel({
     const actionLabel = row.status === "failed" || row.status === "completed" || row.status === "cancelled" ? "重采" : "采集";
 
     return (
-      <div className="flex flex-col items-start gap-2">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
-            disabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning || isQueued}
-            className={cn(
-              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-              "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
-            )}
-          >
-            {isQueued ? "排队中..." : isRunning ? "采集中..." : actionLabel}
-          </button>
-          {isQueued || (isRunning && displayCollectionTaskId) ? (
-            <button
-              type="button"
-              onClick={() => void handleCancelTask(row.fetchTaskId, row.rowLabel, displayCollectionTaskId)}
-              disabled={cancellingTaskIds.includes(row.fetchTaskId)}
-              className={cn(
-                "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-                "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
-              )}
-            >
-              {cancellingTaskIds.includes(row.fetchTaskId) ? "取消中..." : "取消"}
-            </button>
-          ) : null}
-        </div>
-        {isRunning && displayCollectionTaskId ? (
-          <button
-            type="button"
-            onClick={() => void handleOpenTaskStatusLog(displayCollectionTaskId, row.rowLabel)}
-            className={cn(
-              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs",
-              "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-            )}
-          >
-            查看日志
-          </button>
-        ) : null}
-      </div>
+      <TaskInstanceActions
+        executeLabel={actionLabel}
+        isRunning={isRunning}
+        isQueued={isQueued}
+        isCancelling={cancellingTaskIds.includes(row.fetchTaskId)}
+        executeDisabled={runningTaskIds.includes(row.fetchTaskId) || cancellingTaskIds.includes(row.fetchTaskId) || isRunning || isQueued}
+        showCancel={isQueued || (isRunning && !!displayCollectionTaskId)}
+        showViewLog={isRunning && !!displayCollectionTaskId}
+        onExecute={() => void handleRequestTaskRerun(row.fetchTaskId, row.rowLabel)}
+        onCancel={() => void handleCancelTask(row.fetchTaskId, row.rowLabel, displayCollectionTaskId)}
+        onViewLog={() => void handleOpenTaskStatusLog(displayCollectionTaskId!, row.rowLabel)}
+      />
     );
   };
 
@@ -2116,467 +1084,122 @@ export default function RequirementTasksPanel({
     const selectedTaskIds = getScopedSelectedTaskIds(scopeKey, rows);
     const selectableRows = rows.filter(canSelectTaskInstance);
     const allSelected = selectableRows.length > 0 && selectedTaskIds.length === selectableRows.length;
-    const isBulkExecuting = bulkExecutingScopeKeys.includes(scopeKey);
+    const isBulkExecuting = isScopeBulkExecuting(scopeKey);
     const legendItems = buildTaskStatusLegend(
       rows.map((row) => ({ status: getTaskInstanceDisplayStatus(row) })),
     );
 
     return (
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-muted-foreground/30 bg-muted/10 px-3 py-2 text-xs">
-          <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                disabled={selectableRows.length === 0 || isBulkExecuting}
-                onChange={() => handleToggleAllTaskSelection(scopeKey, rows)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-              />
-              <span>全选当前时间范围可执行实例</span>
-            </label>
-            <span>{`已选 ${selectedTaskIds.length} 项`}</span>
-            <span>{`可批量执行 ${selectableRows.length} 项`}</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleBatchExecuteTasks(scopeKey, rows)}
-              disabled={selectedTaskIds.length === 0 || isBulkExecuting}
-              className={cn(
-                "inline-flex items-center rounded-md px-3 py-1.5 text-xs font-medium",
-                selectedTaskIds.length === 0 || isBulkExecuting
-                  ? "cursor-not-allowed bg-muted text-muted-foreground"
-                  : "bg-primary text-primary-foreground hover:opacity-90",
-              )}
-            >
-              {isBulkExecuting ? "批量采集中..." : "批量采集"}
-            </button>
-            <button
-              type="button"
-              onClick={() => clearScopedTaskSelection(scopeKey)}
-              disabled={selectedTaskIds.length === 0}
-              className={cn(
-                "inline-flex items-center rounded-md border px-3 py-1.5 text-xs",
-                selectedTaskIds.length === 0
-                  ? "cursor-not-allowed border-muted text-muted-foreground opacity-60"
-                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-              )}
-            >
-              清空选择
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-          {legendItems.map((item) => (
-            <span
-              key={item.status}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                item.badgeClassName,
-              )}
-            >
-              <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
-              {item.label} {item.count}
-            </span>
-          ))}
-        </div>
-        <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-          <table className="w-full text-xs leading-5">
-            <thead>
-              <tr>
-                <th className="w-10 border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">
-                  <input
-                    type="checkbox"
-                    aria-label="全选当前时间范围采集实例"
-                    checked={allSelected}
-                    disabled={selectableRows.length === 0 || isBulkExecuting}
-                    onChange={() => handleToggleAllTaskSelection(scopeKey, rows)}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                  />
-                </th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集参数</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">时间列</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集指标组</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">采集实例 ID</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">实例状态</th>
-                <th className="border-b border-muted/60 bg-muted/30 px-3 py-2 text-left font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {rows.map((row) => {
-                const displayStatus = getTaskInstanceDisplayStatus(row);
-                const isSelected = selectedTaskIds.includes(row.fetchTaskId);
-                const isSelectable = canSelectTaskInstance(row);
-                return (
-                  <tr key={row.fetchTaskId}>
-                    <td className="px-3 py-3 align-top">
-                      <input
-                        type="checkbox"
-                        aria-label={`选择采集实例 ${row.rowLabel}`}
-                        checked={isSelected}
-                        disabled={!isSelectable || isBulkExecuting}
-                        onChange={() => handleToggleTaskSelection(scopeKey, row.fetchTaskId)}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                      />
-                    </td>
-                    <td className="px-3 py-3 align-top text-slate-700">
-                      <div className="space-y-1">
-                        {row.parameterLines.map((line) => (
-                          <div key={`${row.fetchTaskId}-${line}`} className="break-all">
-                            {line}
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 align-top text-slate-700">{row.businessDateLabel}</td>
-                    <td className="px-3 py-3 align-top text-slate-700">
-                      <div className="space-y-1">
-                        <div className="font-medium">{row.indicatorGroupName}</div>
-                        {renderIndicatorSummaryBlock(row.indicatorLabels, row.indicatorGroupName, true)}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 align-top font-mono text-slate-700 break-all">
-                      {renderTaskInstanceCollectionTaskId(row)}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <StatusBadge status={displayStatus} />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      {renderSelectableTaskInstanceActions(row)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <TaskInstanceTable
+        rows={rows}
+        legendItems={legendItems}
+        emptyMessage={emptyMessage}
+        selection={{
+          selectedTaskIds,
+          selectableTaskIds: selectableRows.map((row) => row.fetchTaskId),
+          allSelected,
+          isBulkExecuting,
+          onToggleAll: () => handleToggleAllTaskSelection(scopeKey, rows),
+          onToggleOne: (taskId) => handleToggleTaskSelection(scopeKey, taskId),
+          onBatchExecute: () => void handleBatchExecuteTasks(scopeKey, rows),
+          onClearSelection: () => clearScopedTaskSelection(scopeKey),
+        }}
+        getDisplayStatus={getTaskInstanceDisplayStatus}
+        renderIndicatorSummary={renderIndicatorSummaryBlock}
+        renderCollectionTaskId={renderTaskInstanceCollectionTaskId}
+        renderActions={renderSelectableTaskInstanceActions}
+        renderStatusBadge={(status) => <StatusBadge status={status} />}
+      />
     );
   };
 
   const renderTaskGroupCards = (taskGroupViews: HistoricalTaskGroupView[]) => (
-    <div className="rounded-xl border bg-background divide-y overflow-hidden">
-      {taskGroupViews.map((tg) => {
-        const isExpanded = expandedTgId === tg.id;
-        const taskGroupStatusLegend = buildTaskStatusLegendFromCounts({
-          completed: tg.completedTasks,
-          running: tg.runningTasks,
-          failed: tg.failedTasks,
-          cancelled: tg.cancelledTasks,
-          pending: tg.pendingTasks,
-          invalidated: tg.invalidatedTasks,
-        });
-        return (
-          <div
-            key={tg.id}
-            className={cn(
-              "transition-colors",
-              isExpanded ? "bg-muted/10" : "hover:bg-muted/20",
-            )}
-          >
-            <div className="flex items-center gap-3 px-4 py-3">
-              <button
-                type="button"
-                onClick={() => toggleTaskGroupExpand(tg.id)}
-                className="flex min-w-0 flex-1 items-center gap-3 text-left"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">{tg.displayLabel}</span>
-                    <StatusBadge
-                      status={tg.displayStatus}
-                      label={getTaskGroupStatusLabel(tg)}
-                    />
-                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border bg-background")}>
-                      {getTriggerDisplayLabel(tg.triggeredBy)}
-                    </span>
-                    {taskGroupStatusLegend.map((item) => (
-                      <span
-                        key={`${tg.id}-${item.status}`}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px]",
-                          item.badgeClassName,
-                        )}
-                      >
-                        <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
-                        {item.label} {item.count}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {tg.isReal
-                      ? `${tg.id} | total ${tg.totalTasks} | running ${tg.runningTasks} | completed ${tg.completedTasks} | failed ${tg.failedTasks}${tg.cancelledTasks > 0 ? ` | cancelled ${tg.cancelledTasks}` : ""}${tg.pendingTasks > 0 ? ` | pending ${tg.pendingTasks}` : ""}`
-                      : isScheduledFutureTaskGroupView(tg)
-                        ? `planned task group | total ${tg.totalTasks} | will be created and executed automatically when due`
-                        : `planned task group | total ${tg.totalTasks} | no runtime records yet`}
-                  </div>
-                </div>
-                <div className="w-24 shrink-0">
-                  <div className="h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={cn(
-                        "h-full rounded-full",
-                        "",
-                      )}
-                      style={{
-                        width: `${tg.progressPercent}%`,
-                        backgroundColor: getTaskStatusRailFillColor(tg.displayStatus),
-                      }}
-                    />
-                  </div>
-                  <div className="text-[10px] text-muted-foreground text-right mt-0.5">
-                    {tg.progressPercent}%
-                  </div>
-                </div>
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {isExpanded ? "收起" : "展开"}
-                </span>
-              </button>
-            </div>
-
-            {isExpanded ? (
-              <div className="border-t bg-background px-4 py-3">
-                {renderSelectableTaskInstanceTable(
-                  expandedTaskInstanceRows,
-                  `task-group:${tg.id}`,
-                )}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
+    <TaskGroupCards
+      taskGroupViews={taskGroupViews}
+      expandedTgId={expandedTgId}
+      onToggleTaskGroupExpand={toggleTaskGroupExpand}
+      renderTaskGroupStatusBadge={(taskGroup) => (
+        <StatusBadge
+          status={taskGroup.displayStatus}
+          label={getTaskGroupStatusLabel(taskGroup)}
+        />
+      )}
+      renderExpandedContent={(taskGroup) => (
+        renderSelectableTaskInstanceTable(
+          expandedTaskInstanceRows,
+          `task-group:${taskGroup.id}`,
+        )
+      )}
+    />
   );
 
   return (
     <div className="space-y-6">
       {!isDefinitionSubmitted ? (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-2">
-          <div className="font-semibold">需求尚未提交</div>
-          <div>
-            提交需求后才能进入任务环节并生成任务组。请先回到需求页面完成录入并点击“提交”。
-          </div>
-          <div>
-            <Link
-              href={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navQuery}view=requirement&tab=requirement`}
-              className="text-amber-900 underline underline-offset-4 hover:opacity-80"
-            >
-              去提交需求
-            </Link>
-          </div>
-        </section>
+        <RequirementNotSubmittedAlert
+          href={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navQuery}view=requirement&tab=requirement`}
+        />
       ) : null}
 
       {/* 宽表选择 */}
       {wideTables.length > 1 ? (
-        <section className="rounded-xl border bg-card p-3">
-          <div className="flex gap-2 overflow-x-auto">
-            {wideTables.map((wt) => (
-              <button
-                key={wt.id}
-                type="button"
-                onClick={() => { setSelectedWtId(wt.id); setExpandedTgId(null); }}
-                className={cn(
-                  "shrink-0 rounded-md border px-3 py-1.5 text-xs",
-                  selectedWtId === wt.id
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "bg-background text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {wt.name}
-              </button>
-            ))}
-          </div>
-        </section>
+        <WideTableSelector
+          selectedWtId={selectedWtId}
+          wideTables={wideTables}
+          onSelect={(wideTableId) => {
+            setSelectedWtId(wideTableId);
+            setExpandedTgId(null);
+          }}
+        />
       ) : null}
 
       {selectedWt ? (
-        <nav
-          aria-label="任务页面导航"
-          className={cn(
-            "relative z-20 grid overflow-hidden rounded-xl border border-border/80 bg-background/98 shadow-md backdrop-blur-md supports-[backdrop-filter]:bg-background/92",
-            "grid-cols-3",
-          )}
-        >
-          {taskSubTabs.map((tab, index) => (
-            <StageSummaryCard
-              key={tab.key}
-              href={`#task-${tab.key}`}
-              index={index + 1}
-              title={tab.label}
-              description={tab.description}
-              isActive={activeTaskSubTab === tab.key}
-              onNavigate={(event) => {
-                event.preventDefault();
-                setActiveTaskSubTab(tab.key);
-              }}
-            />
-          ))}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-border/80">
-            <div
-              className="h-full bg-primary transition-transform duration-200 ease-out"
-              style={{
-                width: `${100 / taskSubTabs.length}%`,
-                transform: `translateX(${activeTaskSubTabIndex * 100}%)`,
-              }}
-            />
-          </div>
-        </nav>
+        <RequirementTaskTabs
+          activeTaskSubTab={activeTaskSubTab}
+          activeTaskSubTabIndex={activeTaskSubTabIndex}
+          taskSubTabs={taskSubTabs}
+          onSelect={(tabKey) => setActiveTaskSubTab(tabKey)}
+        />
       ) : null}
 
       {selectedWt && activeTaskSubTab === "prompts" ? (
-        <section className="rounded-xl border bg-card p-6 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="font-semibold">待采集指标</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                默认不对指标进行分组，所有指标共享一份采集提示词；如有需要，可通过【指标分组】拆分成多个指标组，每个指标组的提示词独立配置。
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsIndicatorGroupModalOpen(true)}
-                disabled={!hasIndicatorColumns || !isDefinitionSubmitted}
-                className={cn(
-                  "rounded-md border px-3 py-1.5 text-xs",
-                  !hasIndicatorColumns || !isDefinitionSubmitted
-                    ? "cursor-not-allowed text-muted-foreground opacity-50"
-                    : "text-primary hover:bg-primary/5",
-                )}
-              >
-                指标分组
-              </button>
-              <button
-                type="button"
-                onClick={() => void handlePersistIndicatorGroups()}
-                disabled={!canGenerateTaskPlan || needsScopeRefresh || isPersistingIndicatorGroups}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium",
-                  !canGenerateTaskPlan || needsScopeRefresh || isPersistingIndicatorGroups
-                    ? "cursor-not-allowed bg-muted text-muted-foreground"
-                    : "bg-primary text-primary-foreground hover:opacity-90",
-                )}
-              >
-                {isPersistingIndicatorGroups
-                  ? "生成中..."
-                  : hasCurrentVersionTaskGroups ? "重建任务组" : "生成任务组"}
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-lg border bg-background p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <div>
-                共 {indicatorColumns.length} 个指标
-                {hasUserDefinedGrouping ? ` · 已分组 ${userDefinedIndicatorGroups.length} 组` : " · 未分组"}
-              </div>
-              <div className="truncate">{selectedWt.name}</div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {indicatorColumns.length === 0 ? (
-                <span className="text-xs text-muted-foreground">当前宽表没有指标列。</span>
-              ) : (
-                indicatorColumns.map((column) => (
-                  <span
-                    key={column.id}
-                    className="rounded-full border bg-muted/10 px-2 py-1 text-[11px]"
-                    title={column.description || ""}
-                  >
-                    {column.chineseName ?? column.name}{column.unit ? `（${column.unit}）` : ""}
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
-
-          {indicatorGroupMessage ? (
-            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-              {indicatorGroupMessage}
-            </div>
-          ) : null}
-
-          {!hasIndicatorColumns ? (
-            <div className="text-sm text-muted-foreground">当前宽表没有指标列，暂不需要指标分组。</div>
-          ) : hasUserDefinedGrouping ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border">
-                <div className="border-b bg-muted/20 px-4 py-3">
-                  <h4 className="text-sm font-semibold">分组概览</h4>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    仅当你对指标进行分组后才会展示分组结果。不同颜色对应不同分组，与弹窗内保持一致。
-                  </p>
-                </div>
-                <div className="space-y-3 px-4 py-4">
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    {userDefinedIndicatorGroups
-                      .slice()
-                      .sort((a, b) => a.priority - b.priority)
-                      .map((group) => (
-                        <div
-                          key={group.id}
-                          className={cn("rounded-lg border px-4 py-3", groupToneClass(group.id, userDefinedIndicatorGroups))}
-                        >
-                          <div className="text-sm font-medium">{group.name}</div>
-                          <div className="mt-1 text-[11px] opacity-80">
-                            {group.description || `已关联 ${group.indicatorColumns.length} 个指标`}
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {group.indicatorColumns.length > 0 ? (
-                              group.indicatorColumns.map((columnName) => (
-                                <span
-                                  key={columnName}
-                                  className={cn("rounded-full border px-2 py-1 text-[11px]", groupToneClass(group.id, userDefinedIndicatorGroups))}
-                                >
-                                  {findIndicatorColumnLabel(indicatorColumns, columnName)}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-[11px] opacity-80">该分组还没有分配指标。</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-
-                  {indicatorColumns.some((column) => !columnGroupMap.has(column.name)) ? (
-                    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                      未分组指标：
-                      <span className="ml-1">
-                        {indicatorColumns
-                          .filter((column) => !columnGroupMap.has(column.name))
-                          .map((column) => column.chineseName ?? column.name)
-                          .join("、")}
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              {taskPlanBlockerMessage ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {taskPlanBlockerMessage}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-dashed bg-background px-4 py-6 text-sm text-muted-foreground">
-                当前未对指标进行分组，系统将使用统一提示词采集全部指标。如需按不同指标组配置提示词，请点击右上角【指标分组】。
-              </div>
-              {taskPlanBlockerMessage ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {taskPlanBlockerMessage}
-                </div>
-              ) : null}
-            </div>
+        <PromptManagementTab
+          requirement={requirement}
+          selectedWt={selectedWt}
+          effectiveWideTable={effectiveWideTable}
+          isDefinitionSubmitted={isDefinitionSubmitted}
+          hasIndicatorColumns={hasIndicatorColumns}
+          indicatorColumns={indicatorColumns}
+          hasUserDefinedGrouping={hasUserDefinedGrouping}
+          userDefinedIndicatorGroups={userDefinedIndicatorGroups}
+          columnGroupMap={columnGroupMap}
+          indicatorGroupMessage={indicatorGroupMessage}
+          canGenerateTaskPlan={canGenerateTaskPlan}
+          needsScopeRefresh={needsScopeRefresh}
+          isPersistingIndicatorGroups={isPersistingIndicatorGroups}
+          hasCurrentVersionTaskGroups={hasCurrentVersionTaskGroups}
+          taskPlanBlockerMessage={taskPlanBlockerMessage}
+          promptSaveMessage={promptSaveMessage}
+          isPersistingPrompts={isPersistingPrompts}
+          promptEditorGroups={promptEditorGroups}
+          indicatorGroupPromptMap={indicatorGroupPromptMap}
+          promptEditorModes={promptEditorModes}
+          promptMarkdownDrafts={promptMarkdownDrafts}
+          isPromptEditable={isPromptEditable}
+          onOpenIndicatorGroupModal={openIndicatorGroupModal}
+          onPersistIndicatorGroups={() => void handlePersistIndicatorGroups()}
+          onPersistPromptTemplates={() => void handlePersistPromptTemplates()}
+          onOpenTrialModal={openTrialModal}
+          onMarkdownModeSelect={handleMarkdownModeSelect}
+          onMarkdownDraftChange={handleMarkdownDraftChange}
+          onIndicatorGroupPromptSectionChange={(groupId, key, value) => (
+            handleIndicatorGroupPromptSectionChange(groupId, key, value)
           )}
-        </section>
+        />
       ) : null}
 
       {selectedWt && activeTaskSubTab === "output" ? (
-        <RequirementDataProcessingPanel
+        <TaskOutputTab
           requirement={requirement}
           wideTables={wideTables}
           wideTableRecords={wideTableRecords}
@@ -2589,994 +1212,99 @@ export default function RequirementTasksPanel({
       ) : null}
 
       {activeTaskSubTab === "prompts" && selectedWt && hasIndicatorColumns && isIndicatorGroupModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-6xl rounded-xl border bg-card shadow-xl">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
-              <div>
-                <h4 className="text-sm font-semibold">分组管理</h4>
-                <p className="mt-1 text-xs text-muted-foreground">
-                    在这里统一维护分组名称、执行说明与指标归属。采集提示词请在下方【采集提示词管理】模块中配置。
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleAddIndicatorGroup}
-                  disabled={!selectedWt || !hasIndicatorColumns || !isDefinitionSubmitted || isPersistingIndicatorGroups}
-                  className={cn(
-                    "rounded-md border px-3 py-1.5 text-xs",
-                    !selectedWt || !hasIndicatorColumns || !isDefinitionSubmitted || isPersistingIndicatorGroups
-                      ? "cursor-not-allowed text-muted-foreground opacity-50"
-                      : "text-primary hover:bg-primary/5",
-                  )}
-                >
-                  新增分组
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handlePersistIndicatorGroups()}
-                  disabled={!selectedWt || !isDefinitionSubmitted || isPersistingIndicatorGroups}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-xs font-medium",
-                    !selectedWt || !isDefinitionSubmitted || isPersistingIndicatorGroups
-                      ? "cursor-not-allowed bg-muted text-muted-foreground"
-                      : "bg-primary text-primary-foreground hover:opacity-90",
-                  )}
-                >
-                  {isPersistingIndicatorGroups
-                    ? "保存中..."
-                    : isIndicatorGroupingComplete
-                      ? hasCurrentVersionTaskGroups ? "保存分组并重建任务组" : "保存分组并生成任务组"
-                      : "保存分组"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsIndicatorGroupModalOpen(false)}
-                  className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-
-            <div className="max-h-[80vh] space-y-4 overflow-y-auto px-5 py-4">
-                <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
-                  {isDefinitionSubmitted
-                    ? "提示词支持分段编辑和整体 Markdown 编辑。默认内容来自需求定义，可在当前页面直接修改并保存。"
-                    : "请先在【需求】Tab 提交需求后，再配置采集提示词。"}
-                </div>
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full text-xs">
-                  <thead className="border-b bg-muted/30">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">指标列</th>
-                      <th className="px-3 py-2 text-left font-medium">说明</th>
-                      <th className="px-3 py-2 text-left font-medium">当前分组</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {indicatorColumns.map((column) => (
-                      <tr key={column.id}>
-                        <td className="px-3 py-2">
-                          <div className="font-medium">{column.chineseName ?? column.name}</div>
-                          <div className="text-[11px] text-muted-foreground">{column.name}{column.unit ? ` · ${column.unit}` : ""}</div>
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">{column.description || "-"}</td>
-                        <td className="px-3 py-2">
-                          <select
-                            value={columnGroupMap.get(column.name)?.id ?? ""}
-                            onChange={(event) => {
-                              if (event.target.value) {
-                                handleAssignIndicatorColumnToGroup(column.name, event.target.value);
-                                return;
-                              }
-                              handleClearIndicatorColumnGroup(column.name);
-                            }}
-                            className={cn(
-                              "w-full rounded-md border px-3 py-2 text-xs",
-                              groupSelectClass(columnGroupMap.get(column.name)?.id, userDefinedIndicatorGroups),
-                            )}
-                          >
-                            <option value="">未分组</option>
-                            {userDefinedIndicatorGroups.map((group) => (
-                              <option key={group.id} value={group.id}>
-                                {group.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {userDefinedIndicatorGroups.length === 0 ? (
-                <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-sm text-muted-foreground">
-                  还没有指标分组。请先新增分组，并把所有指标列分配进去。
-                </div>
-              ) : (
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {userDefinedIndicatorGroups.map((group) => {
-                    return (
-                      <div key={group.id} className={cn("rounded-lg border bg-background p-4 space-y-3", groupToneClass(group.id, userDefinedIndicatorGroups))}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 space-y-2">
-                            <input
-                              value={group.name}
-                              onChange={(event) => handleIndicatorGroupChange(group.id, { name: event.target.value })}
-                              className={cn("w-full rounded-md border bg-background px-3 py-2 text-sm", groupToneClass(group.id, userDefinedIndicatorGroups))}
-                              placeholder="指标组名称"
-                            />
-                            <textarea
-                              value={group.description}
-                              onChange={(event) => handleIndicatorGroupChange(group.id, { description: event.target.value })}
-                              rows={2}
-                              className="w-full rounded-md border bg-background px-3 py-2 text-xs"
-                              placeholder="补充该分组的执行说明"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteIndicatorGroup(group.id)}
-                            className="rounded-md border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50"
-                          >
-                            删除
-                          </button>
-                        </div>
-                        <div className="text-[11px] text-muted-foreground">
-                          已关联 {group.indicatorColumns.length} 个指标
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {group.indicatorColumns.length > 0 ? (
-                            group.indicatorColumns.map((columnName) => (
-                              <span
-                                key={columnName}
-                                className={cn("rounded-full border px-2 py-1 text-[11px]", groupToneClass(group.id, userDefinedIndicatorGroups))}
-                              >
-                                {findIndicatorColumnLabel(indicatorColumns, columnName)}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground">该分组还没有分配指标。</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <IndicatorGroupModal
+          selectedWt={selectedWt}
+          hasIndicatorColumns={hasIndicatorColumns}
+          isDefinitionSubmitted={isDefinitionSubmitted}
+          isPersistingIndicatorGroups={isPersistingIndicatorGroups}
+          indicatorColumns={indicatorColumns}
+          columnGroupMap={columnGroupMap}
+          userDefinedIndicatorGroups={userDefinedIndicatorGroups}
+          isIndicatorGroupingComplete={isIndicatorGroupingComplete}
+          hasCurrentVersionTaskGroups={hasCurrentVersionTaskGroups}
+          onAddIndicatorGroup={handleAddIndicatorGroup}
+          onPersistIndicatorGroups={() => void handlePersistIndicatorGroups()}
+          onClose={closeIndicatorGroupModal}
+          onAssignIndicatorColumnToGroup={handleAssignIndicatorColumnToGroup}
+          onClearIndicatorColumnGroup={handleClearIndicatorColumnGroup}
+          onIndicatorGroupChange={handleIndicatorGroupChange}
+          onDeleteIndicatorGroup={handleDeleteIndicatorGroup}
+        />
       ) : null}
 
-      {selectedWt && isTrialModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
-          <div className="w-full max-w-4xl rounded-xl border bg-card shadow-xl">
-            <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
-              <div className="space-y-1">
-                <h3 className="text-base font-semibold">试运行</h3>
-                <p className="text-xs text-muted-foreground">
-                  勾选少量日期与维度值后，对所有指标发起小范围采集。提示词沿用“采集提示词管理”中已保存的配置。
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTrialModalOpen(false)}
-                className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                关闭
-              </button>
-            </div>
-
-            <div className="space-y-4 px-5 py-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div />
-                <button
-                  type="button"
-                  onClick={() => void handleStartTrialRun()}
-                  disabled={!canStartTrialRun || isStartingTrialRun}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-xs font-medium",
-                    !canStartTrialRun || isStartingTrialRun
-                      ? "cursor-not-allowed bg-muted text-muted-foreground"
-                      : "bg-primary text-primary-foreground hover:opacity-90",
-                  )}
-                >
-                  {isStartingTrialRun ? "试运行中..." : "开始试运行"}
-                </button>
-              </div>
-
-              {taskPlanBlockerMessage ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {taskPlanBlockerMessage}
-                </div>
-              ) : null}
-
-              {usesBusinessDateAxis ? (
-                <div className="space-y-2">
-                  <div className="text-xs font-medium text-muted-foreground">选择日期</div>
-                  <div className="flex flex-wrap gap-2">
-                    {trialAvailableBusinessDates.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">当前范围暂无可选业务日期。</span>
-                    ) : trialAvailableBusinessDates.slice(0, 18).map((businessDate) => (
-                      <button
-                        key={businessDate}
-                        type="button"
-                        onClick={() => handleToggleTrialBusinessDate(businessDate)}
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[11px]",
-                          trialBusinessDates.includes(businessDate)
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
-                        )}
-                      >
-                        {businessDate}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-medium text-muted-foreground">选择采集参数</div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTrialParameterRowKeys([])}
-                    className="text-[11px] text-muted-foreground hover:text-foreground"
-                  >
-                    全部
-                  </button>
-                </div>
-                {trialParameterColumns.length === 0 ? (
-                  <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
-                    当前宽表没有可展示的采集参数列，将按当前预览范围抽样试运行。
-                  </div>
-                ) : trialParameterRows.length === 0 ? (
-                  <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
-                    当前需求暂无可选择的采集参数，请先回到【需求】页完善采集参数表并保存。
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-lg border bg-background">
-                    <div className="max-h-72 overflow-auto">
-                      <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-muted/40">
-                          <tr className="border-b">
-                            <th className="w-12 px-3 py-2 text-left">选择</th>
-                            <th className="w-12 px-3 py-2 text-left">#</th>
-                            {trialParameterColumns.map((column) => (
-                              <th key={column.id} className="px-3 py-2 text-left font-medium">
-                                <div>{column.chineseName ?? column.name}</div>
-                                <div className="font-normal text-[11px] text-muted-foreground">{column.name}</div>
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {trialParameterRows.map((row, index) => {
-                            const checked = selectedTrialParameterRowKeys.includes(row.rowKey);
-                            return (
-                              <tr
-                                key={row.rowKey}
-                                className={cn(
-                                  "border-b last:border-b-0 cursor-pointer hover:bg-muted/20",
-                                  checked && "bg-primary/5",
-                                )}
-                                onClick={() => handleToggleTrialParameterRow(row.rowKey)}
-                              >
-                                <td className="px-3 py-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => handleToggleTrialParameterRow(row.rowKey)}
-                                    onClick={(event) => event.stopPropagation()}
-                                  />
-                                </td>
-                                <td className="px-3 py-2 text-muted-foreground">{index + 1}</td>
-                                {trialParameterColumns.map((column) => (
-                                  <td key={`${row.rowKey}-${column.name}`} className="px-3 py-2">
-                                    {row.values[column.name] || "-"}
-                                  </td>
-                                ))}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {false ? (
-              <div className="space-y-3">
-                <div className="text-xs font-medium text-muted-foreground">选择维度值</div>
-                {trialParameterColumns.length === 0 ? (
-                  <div className="rounded-lg border border-dashed bg-background px-4 py-4 text-xs text-muted-foreground">
-                    当前宽表没有可筛选维度，将按单次快照范围抽样试运行。
-                  </div>
-                ) : (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {trialDimensionColumns.map((column) => {
-                      const values = trialAvailableDimensionValues[column.name] ?? [];
-                      const selectedValues = trialDimensionValues[column.name] ?? [];
-                      return (
-                        <div key={column.id} className="rounded-lg border bg-background px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">{column.chineseName ?? column.name}</div>
-                              <div className="text-[11px] text-muted-foreground">{column.name}</div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setTrialDimensionValues((current) => ({ ...current, [column.name]: [] }))}
-                              className="text-[11px] text-muted-foreground hover:text-foreground"
-                            >
-                              全部
-                            </button>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {values.length === 0 ? (
-                              <span className="text-[11px] text-muted-foreground">暂无可选值。</span>
-                            ) : values.slice(0, 12).map((value) => (
-                              <button
-                                key={value}
-                                type="button"
-                                onClick={() => handleToggleTrialDimensionValue(column.name, value)}
-                                className={cn(
-                                  "rounded-full border px-2.5 py-1 text-[11px]",
-                                  selectedValues.includes(value)
-                                    ? "border-primary bg-primary/10 text-primary"
-                                    : "bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
-                                )}
-                              >
-                                {value}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              ) : null}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 px-4 py-3">
-                <div className="text-xs text-muted-foreground">
-                  预计试运行 <span className="font-medium text-foreground">{trialEstimatedRows}</span> 行，
-                  生成 <span className="font-medium text-foreground">{trialEstimatedTaskCount}</span> 个采集任务。
-                  {trialFilteredRecords.length > trialMaxRows ? ` 当前筛选命中 ${trialFilteredRecords.length} 行，将按上限抽样。` : ""}
-                </div>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  最大采样行数
-                  <input
-                    type="number"
-                    min={1}
-                    max={200}
-                    value={trialMaxRows}
-                    onChange={(event) => setTrialMaxRows(Math.min(200, Math.max(1, Number(event.target.value) || 1)))}
-                    className="w-20 rounded-md border bg-background px-2 py-1 text-xs text-foreground"
-                  />
-                </label>
-              </div>
-
-              {latestTrialTaskGroup ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-                  <span>最近一次试运行：{latestTrialTaskGroup.partitionLabel || latestTrialTaskGroup.businessDateLabel || latestTrialTaskGroup.id}</span>
-                  <Link
-                    href={`/projects/${requirement.projectId}/requirements/${requirement.id}?${navQuery}tab=tasks&sub=output`}
-                    className="font-medium text-primary hover:underline"
-                    onClick={() => setIsTrialModalOpen(false)}
-                  >
-                    查看试运行数据
-                  </Link>
-                </div>
-              ) : null}
-
-              {trialRunMessage ? (
-                <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-                  {trialRunMessage}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {selectedWt && activeTaskSubTab === "prompts" ? (
-        <section className="rounded-xl border bg-card p-6 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="font-semibold">采集提示词管理</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                提示词用于指导 Agent 采集，按指标组折叠配置。提示词配置不会影响指标拆分规则。
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void handlePersistPromptTemplates()}
-              disabled={!isDefinitionSubmitted || isPersistingPrompts}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-xs font-medium",
-                !isDefinitionSubmitted || isPersistingPrompts
-                  ? "cursor-not-allowed bg-muted text-muted-foreground"
-                  : "bg-primary text-primary-foreground hover:opacity-90",
-              )}
-            >
-              {isPersistingPrompts ? "保存中..." : "保存提示词"}
-            </button>
-          </div>
-
-          {promptSaveMessage ? (
-            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-              {promptSaveMessage}
-            </div>
-          ) : null}
-
-          {!hasIndicatorColumns ? (
-            <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-sm text-muted-foreground">
-              当前宽表没有指标列，暂不需要配置采集提示词。
-            </div>
-          ) : promptEditorGroups.length === 0 ? (
-            <div className="rounded-lg border border-dashed bg-background px-4 py-8 text-center text-sm text-muted-foreground">
-              暂无可编辑的提示词配置。
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {promptEditorGroups
-                .slice()
-                .sort((a, b) => a.priority - b.priority)
-                .map((group, index) => {
-                  const promptBundle = indicatorGroupPromptMap.get(group.id)
-                    ?? (effectiveWideTable ? buildIndicatorGroupPrompt(requirement, effectiveWideTable, group) : buildIndicatorGroupPrompt(requirement, selectedWt, group));
-                  const editMode = promptEditorModes[group.id] ?? "markdown";
-                  const markdownDraft = promptMarkdownDrafts[group.id] ?? group.promptTemplate ?? promptBundle.markdown;
-                  const shouldOpen = promptEditorGroups.length === 1 || index === 0;
-
-                  return (
-                    <details
-                      key={group.id}
-                      open={shouldOpen}
-                      className={cn(
-                        "group rounded-lg border bg-background",
-                        groupToneClass(group.id, promptEditorGroups),
-                      )}
-                    >
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold truncate">{group.name}</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            已关联 {group.indicatorColumns.length} 个指标
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-                      </summary>
-                      <div className="border-t px-4 py-4 space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <div className="text-sm font-medium">Agent 提示词</div>
-                            <div className="text-[11px] text-muted-foreground">
-                              可编辑核心查询需求、业务知识和输出限制；指标与维度信息始终由需求定义生成。
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              disabled
-                              className={cn(
-                                "rounded-md border px-2.5 py-1 text-[11px]",
-                                "cursor-not-allowed text-muted-foreground opacity-70",
-                              )}
-                            >
-                              分段编辑
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPromptEditorModes((current) => ({ ...current, [group.id]: "markdown" }));
-                                setPromptMarkdownDrafts((current) => ({
-                                  ...current,
-                                  [group.id]: current[group.id] ?? (group.promptTemplate ?? promptBundle.markdown),
-                                }));
-                              }}
-                              className={cn(
-                                "rounded-md border px-2.5 py-1 text-[11px]",
-                                editMode === "markdown"
-                                  ? "border-primary bg-primary/10 text-primary"
-                                  : "text-muted-foreground hover:text-foreground",
-                              )}
-                            >
-                              整体 Markdown
-                            </button>
-                          </div>
-                        </div>
-
-                        {editMode === "sections" ? (
-                          <div className="space-y-3">
-                            <PromptSectionField
-                              label="核心查询需求"
-                              value={promptBundle.sections.coreQueryRequirement}
-                              editable={isPromptEditable}
-                              rows={5}
-                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "coreQueryRequirement", value)}
-                            />
-                            <PromptSectionField
-                              label="业务知识"
-                              value={promptBundle.sections.businessKnowledge}
-                              editable={isPromptEditable}
-                              rows={4}
-                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "businessKnowledge", value)}
-                            />
-                            <PromptReadonlyBlock
-                              label="指标列表"
-                              value={promptBundle.sections.metricList}
-                              editable={isPromptEditable}
-                              rows={8}
-                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "metricList", value)}
-                            />
-                            <PromptReadonlyBlock
-                              label="维度列信息"
-                              value={promptBundle.sections.dimensionColumns}
-                              editable={isPromptEditable}
-                              rows={8}
-                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "dimensionColumns", value)}
-                            />
-                            <PromptSectionField
-                              label="输出限制"
-                              value={promptBundle.sections.outputConstraints}
-                              editable={isPromptEditable}
-                              rows={6}
-                              onChange={(value) => handleIndicatorGroupPromptSectionChange(group.id, "outputConstraints", value)}
-                            />
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="text-[11px] text-muted-foreground">
-                              这里编辑的是完整 Markdown 提示词，保存后会同步到当前分组。
-                            </div>
-                            <textarea
-                              value={markdownDraft}
-                              onChange={(event) => setPromptMarkdownDrafts((current) => ({
-                                ...current,
-                                [group.id]: event.target.value,
-                              }))}
-                              rows={20}
-                              readOnly={!isPromptEditable}
-                              className={cn(
-                                "w-full rounded-md border bg-background px-3 py-2 text-xs leading-6",
-                                !isPromptEditable ? "cursor-default text-muted-foreground" : "",
-                              )}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  );
-                })}
-              </div>
-            )}
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="button"
-              onClick={() => setIsTrialModalOpen(true)}
-              disabled={!isDefinitionSubmitted || isPersistingPrompts}
-              className={cn(
-                "rounded-md px-4 py-2 text-sm font-medium",
-                !isDefinitionSubmitted || isPersistingPrompts
-                  ? "cursor-not-allowed bg-muted text-muted-foreground"
-                  : "bg-primary text-primary-foreground hover:opacity-90",
-              )}
-            >
-              试运行
-            </button>
-          </div>
-        </section>
+      {selectedWt ? (
+        <TrialRunModal
+          isOpen={isTrialModalOpen}
+          selectedWt={selectedWt}
+          requirementProjectId={requirement.projectId}
+          requirementId={requirement.id}
+          navQuery={navQuery}
+          onClose={closeTrialModal}
+          onStartTrialRun={() => void handleStartTrialRun()}
+          canStartTrialRun={canStartTrialRun}
+          isStartingTrialRun={isStartingTrialRun}
+          taskPlanBlockerMessage={taskPlanBlockerMessage}
+          usesBusinessDateAxis={usesBusinessDateAxis}
+          trialAvailableBusinessDates={trialAvailableBusinessDates}
+          trialBusinessDates={trialBusinessDates}
+          onToggleTrialBusinessDate={handleToggleTrialBusinessDate}
+          trialParameterColumns={trialParameterColumns}
+          trialParameterRows={trialParameterRows}
+          selectedTrialParameterRowKeys={selectedTrialParameterRowKeys}
+          onClearTrialParameterSelection={() => setSelectedTrialParameterRowKeys([])}
+          onToggleTrialParameterRow={handleToggleTrialParameterRow}
+          trialEstimatedRows={trialEstimatedRows}
+          trialEstimatedTaskCount={trialEstimatedTaskCount}
+          trialFilteredRecordsCount={trialFilteredRecords.length}
+          trialMaxRows={trialMaxRows}
+          onTrialMaxRowsChange={(value) => setTrialMaxRows(Math.min(200, Math.max(1, value)))}
+          latestTrialTaskGroup={latestTrialTaskGroup}
+          trialRunMessage={trialRunMessage}
+        />
       ) : null}
 
       {selectedWt && activeTaskSubTab === "tasks" ? (
-        <section className="rounded-xl border bg-card p-6 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="font-semibold">任务计划</h3>
-            </div>
-            <div className="text-xs text-muted-foreground">{selectedWt.name}</div>
-          </div>
-
-          {taskPlan ? (
-            <>
-              <div className="grid gap-3 md:grid-cols-2">
-                <PlanMetricCard
-                  title={usesBusinessDateAxis ? "业务日期数" : "单次快照行数"}
-                  value={String(usesBusinessDateAxis ? taskPlan.businessDateCount : taskPlan.plannedRowCount)}
-                  hint={
-                    usesBusinessDateAxis
-                      ? `${taskPlan.frequencyLabel} · 历史 ${taskPlan.historicalDateCount}${taskPlan.futureDateCount > 0 ? ` · 未来 ${taskPlan.futureDateCount}` : ""}`
-                      : taskPlan.scheduleSummary
-                  }
-                />
-                <PlanMetricCard
-                  title="采集任务"
-                  value={String(taskPlan.collectionTaskCount)}
-                  hint={taskPlan.collectionTasks.length > 0 ? (
-                    <div className="space-y-1">
-                      {taskPlan.collectionTasks.map((task, index) => (
-                        <div key={task.id} className="space-y-1">
-                          <div>
-                            {`${normalizeCollectionTaskLabel(task.name)}：${formatIndicatorSummary(task.indicatorLabels)}`}
-                          </div>
-                          {task.indicatorLabels.length > 3 ? (
-                            <button
-                              type="button"
-                              className="text-xs text-primary hover:underline"
-                              onClick={() => setSelectedIndicatorTask({
-                                collectionTaskLabel: normalizeCollectionTaskLabel(task.name),
-                                indicatorLabels: task.indicatorLabels,
-                              })}
-                            >
-                              查看全部
-                            </button>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : "未配置采集任务"}
-                />
-              </div>
-            </>
-          ) : taskPlanBlockerMessage ? (
-            <div className="rounded-lg border border-dashed px-4 py-8 text-sm text-muted-foreground">
-              {taskPlanBlockerMessage}
-            </div>
-          ) : null}
-        </section>
+        <TaskPlanSection
+          wideTableName={selectedWt.name}
+          taskPlan={taskPlan}
+          usesBusinessDateAxis={usesBusinessDateAxis}
+          taskPlanBlockerMessage={taskPlanBlockerMessage}
+          onOpenIndicatorList={(collectionTaskLabel, indicatorLabels) => {
+            setSelectedIndicatorTask({
+              collectionTaskLabel,
+              indicatorLabels,
+            });
+          }}
+        />
       ) : null}
 
       {selectedWt && activeTaskSubTab === "tasks" ? (
-        <section className="rounded-xl border bg-card p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">{`任务运行记录 - ${selectedWt?.name ?? "-"}`}</h3>
-          </div>
-        </div>
-
-        {taskActionMessage ? (
-          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            {taskActionMessage}
-          </div>
-        ) : null}
-
-        {taskGroupRunViews.length === 0 ? (
-          <div className="text-sm text-muted-foreground">
-            {taskPlanBlockerMessage
-              ? taskPlanBlockerMessage
-              : usesBusinessDateAxis && taskPlan && taskPlan.historicalDateCount > 0
-                ? "历史任务计划已确定，但当前还没有任何执行记录。"
-                : usesBusinessDateAxis
-                  ? "当前宽表暂无历史任务。"
-                  : "当前宽表暂无全量快照任务组。"}
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {trialTaskGroupRunViews.length > 0 ? (
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-3 px-1">
-                  <div>
-                    <div className="text-base font-semibold text-foreground">试运行任务</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsTrialTaskListExpanded((current) => !current)}
-                    className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    {isTrialTaskListExpanded ? "收起" : "展开"}
-                  </button>
-                </div>
-                {isTrialTaskListExpanded
-                  ? renderSelectableTaskInstanceTable(
-                    trialTaskInstanceRows,
-                    `trial:${selectedWt.id}`,
-                    "褰撳墠杩樻病鏈夊彲灞曠ず鐨勮瘯杩愯瀹炰緥銆?",
-                  )
-                  : null}
-              </div>
-            ) : null}
-
-            {collectionTaskGroupSections.map((section, sectionIndex) => {
-              const displayIndicatorLabels = collectionTaskIndicatorLabelsMap.get(section.id)
-                ?? collectionTaskIndicatorLabelsMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
-                ?? (taskPlan?.collectionTasks.length === 1 ? taskPlan.collectionTasks[0]?.indicatorLabels : undefined)
-                ?? [];
-              const displayGroupLabel = collectionTaskNameMap.get(section.id)
-                ?? collectionTaskNameMap.get(section.taskGroups[0]?.indicatorGroupId ?? "")
-                ?? defaultCollectionTaskName
-                ?? normalizeCollectionTaskLabel(section.taskGroups[0]?.indicatorGroupName);
-              const collectionTaskTitle = `采集任务：${displayGroupLabel}`;
-
-              return (
-                <div key={section.id} className="space-y-3">
-                  <div className="space-y-1 px-1">
-                    <div className="text-base font-semibold text-foreground">{collectionTaskTitle}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatIndicatorSummary(displayIndicatorLabels)}
-                    </div>
-                    {displayIndicatorLabels.length > 3 ? (
-                      <button
-                        type="button"
-                        className="text-xs text-primary hover:underline"
-                        onClick={() => setSelectedIndicatorTask({
-                          collectionTaskLabel: displayGroupLabel,
-                          indicatorLabels: displayIndicatorLabels,
-                        })}
-                      >
-                        查看全部指标
-                      </button>
-                    ) : null}
-                  </div>
-                  {renderTaskGroupCards(section.taskGroups)}
-                </div>
-              );
-            })}
-
-            {false && taskGroupRunSections.map((section, sectionIndex) => {
-              const rawLabel = (section.label ?? "").trim();
-              const groupLabel = rawLabel.endsWith("采集任务")
-                ? rawLabel.slice(0, rawLabel.length - "采集任务".length)
-                : rawLabel;
-              const displayGroupLabel = groupLabel || "统一提示词";
-
-              return (
-                <div key={section.id} className="space-y-3">
-                  <div className="px-1">
-                    <div className="text-base font-semibold text-foreground">{`采集任务${sectionIndex + 1}：${displayGroupLabel}`}</div>
-                  </div>
-                  <div className="rounded-xl border bg-background divide-y overflow-hidden">
-                  {section.taskGroups.map((tg) => {
-              const isExpanded = expandedTgId === tg.id;
-
-              return (
-                <div
-                  key={tg.id}
-                  className={cn(
-                    "transition-colors",
-                    isExpanded ? "bg-muted/10" : "hover:bg-muted/20",
-                  )}
-                >
-                  <div className="flex items-center gap-3 px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => toggleTaskGroupExpand(tg.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{tg.displayLabel}</span>
-                          <StatusBadge
-                            status={tg.displayStatus}
-                            label={getTaskGroupStatusLabel(tg)}
-                          />
-                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded border bg-background")}>
-                            {getTriggerDisplayLabel(tg.triggeredBy)}
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {tg.isReal
-                            ? `${tg.id} | 总计 ${tg.totalTasks} | 运行中 ${tg.runningTasks} | 已完成 ${tg.completedTasks} | 失败 ${tg.failedTasks}${tg.cancelledTasks > 0 ? ` | 已取消 ${tg.cancelledTasks}` : ""}${tg.pendingTasks > 0 ? ` | 待执行 ${tg.pendingTasks}` : ""}`
-                            : isScheduledFutureTaskGroupView(tg)
-                              ? `待调度任务组 | 总计 ${tg.totalTasks} | 到期后由系统自动创建并执行`
-                              : `计划任务组 | 总计 ${tg.totalTasks} | 尚未建立运行记录`}
-                        </div>
-                      </div>
-                      <div className="w-24 shrink-0">
-                        <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className={cn(
-                              "h-full rounded-full",
-                              "",
-                            )}
-                            style={{
-                              width: `${tg.progressPercent}%`,
-                              backgroundColor: getTaskStatusRailFillColor(tg.displayStatus),
-                            }}
-                          />
-                        </div>
-                        <div className="text-[10px] text-muted-foreground text-right mt-0.5">
-                        {tg.progressPercent}%
-                        </div>
-                      </div>
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {isExpanded ? "▲" : "▼"}
-                      </span>
-                    </button>
-
-                    {canShowTaskGroupRunAction({
-                      id: tg.id,
-                      isReal: tg.isReal,
-                      displayStatus: tg.displayStatus,
-                    }) ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleRequestTaskGroupRerun(tg)}
-                        disabled={runningTaskGroupIds.includes(tg.id)}
-                        className={cn(
-                          "inline-flex shrink-0 items-center gap-1 rounded-md border px-3 py-1.5 text-xs",
-                          "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60",
-                        )}
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        {runningTaskGroupIds.includes(tg.id)
-                          ? "执行中..."
-                          : tg.displayStatus === "pending" || tg.displayStatus === "invalidated"
-                            ? "执行任务组"
-                            : "重新执行任务组"}
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {isExpanded ? (
-                    <div className="border-t bg-background px-4 py-3">
-                      {expandedTaskCards.length === 0 ? (
-                        <div className="text-xs text-muted-foreground">当前任务组还没有可展示的采集任务。</div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                            {expandedTaskStatusLegend.map((item) => (
-                              <span
-                                key={item.status}
-                                className={cn(
-                                  "inline-flex items-center gap-1 rounded-full border px-2 py-1",
-                                  item.badgeClassName,
-                                )}
-                              >
-                                <span className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
-                                {item.label} {item.count}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="overflow-x-auto rounded-lg border bg-background shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-                          <table className="w-full border-separate border-spacing-0 text-xs leading-5">
-                              <thead>
-                                <tr>
-                                  <th className="p-0" style={{ width: 3 }} />
-                                  {returnContextColumns.map((column) => (
-                                    <th key={column.id} className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">
-                                      {column.name}
-                                    </th>
-                                  ))}
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">指标名</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">指标值</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">原始指标值</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">单位</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">数据发布时间</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">数据来源站点</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">最大值</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">最小值</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">来源URL</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">原文摘录</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">指标逻辑</th>
-                                  <th className="border-b border-muted/60 bg-muted/30 px-2 py-2 text-left font-medium">逻辑补充</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(() => {
-                                  return expandedTaskCards.flatMap((task, index) =>
-                                    task.returnRows.map((row, rowIndex) => {
-                                      const isTaskFirst = rowIndex === 0;
-                                      const isTaskLast = rowIndex === task.returnRows.length - 1;
-                                      const dataCellBorder = isTaskFirst
-                                        ? "border-t-2 border-t-slate-200"
-                                        : "border-t border-dashed border-t-slate-200/90";
-
-                                      const railColor = getTaskStatusRailFillColor(task.status);
-                                      const railStyle: React.CSSProperties = {
-                                        width: 3,
-                                        padding: 0,
-                                        paddingTop: isTaskFirst ? 3 : 0,
-                                        paddingBottom: isTaskLast ? 3 : 0,
-                                        backgroundImage: `linear-gradient(${railColor},${railColor})`,
-                                        backgroundOrigin: "content-box",
-                                        backgroundClip: "content-box",
-                                        backgroundSize: "100% 100%",
-                                        borderRadius: isTaskFirst && isTaskLast ? 1.5 : isTaskFirst ? "1.5px 1.5px 0 0" : isTaskLast ? "0 0 1.5px 1.5px" : 0,
-                                      };
-
-                                      return (
-                                        <tr
-                                          key={`${task.id}-${row.indicatorName}`}
-                                          onClick={() => setSelectedTaskId(task.id)}
-                                          className={cn(
-                                            "cursor-pointer transition-colors hover:brightness-[0.985]",
-                                            getTaskBlockSurfaceClass(index),
-                                          )}
-                                        >
-                                          <td style={railStyle} />
-                                          {returnContextColumns.map((column) => (
-                                            <td key={column.id} className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>
-                                              {row.contextValues[column.name] ?? ""}
-                                            </td>
-                                          ))}
-                                          <td className={cn("px-2 py-2 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>
-                                            {row.indicatorName}
-                                          </td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.indicatorValue}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.rawIndicatorValue}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.indicatorUnit}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.publishedAt}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.sourceSite}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.maxValue}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.minValue}</td>
-                                          <td className={cn("px-2 py-2 text-primary align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>
-                                            {row.sourceUrl ? (
-                                              <a href={row.sourceUrl} target="_blank" rel="noreferrer" className="hover:underline">
-                                                {row.sourceUrl}
-                                              </a>
-                                            ) : (
-                                              ""
-                                            )}
-                                          </td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.quoteText}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.indicatorLogic}</td>
-                                          <td className={cn("px-2 py-2 text-slate-700 align-top", index > 0 || rowIndex > 0 ? dataCellBorder : "")}>{row.indicatorLogicSupplement}</td>
-                                        </tr>
-                                      );
-                                    }),
-                                  );
-                                })()}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-      ) : null}
-
-      {selectedWt && activeTaskSubTab === "tasks" && wtScheduleJobs.length > 0 ? (
-        <section className="rounded-xl border bg-card p-6 space-y-4">
-          <h3 className="font-semibold">任务组触发记录</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/40 border-b">
-                <tr>
-                  <th className="px-2 py-1.5 text-left">触发ID</th>
-                  <th className="px-2 py-1.5 text-left">关联任务组</th>
-                  <th className="px-2 py-1.5 text-left">触发类型</th>
-                  <th className="px-2 py-1.5 text-left">状态</th>
-                  <th className="px-2 py-1.5 text-left">开始时间</th>
-                  <th className="px-2 py-1.5 text-left">结束时间</th>
-                  <th className="px-2 py-1.5 text-left">操作人</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {wtScheduleJobs.map((sj) => (
-                  <tr key={sj.id}>
-                    <td className="px-2 py-1.5 font-mono">{sj.id}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{sj.taskGroupId}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{getTriggerDisplayLabel(sj.triggerType)}</td>
-                    <td className="px-2 py-1.5">
-                      <StatusBadge status={sj.status} />
-                    </td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{sj.startedAt}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{sj.endedAt ?? "-"}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{sj.operator}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <TaskExecutionTab
+          wideTableName={selectedWt.name}
+          taskActionMessage={taskActionMessage}
+          taskPlanBlockerMessage={taskPlanBlockerMessage}
+          usesBusinessDateAxis={usesBusinessDateAxis}
+          historicalDateCount={taskPlan?.historicalDateCount ?? 0}
+          taskGroupRunViews={taskGroupRunViews}
+          trialTaskGroupRunViews={trialTaskGroupRunViews}
+          isTrialTaskListExpanded={isTrialTaskListExpanded}
+          onToggleTrialTaskListExpanded={() => setIsTrialTaskListExpanded((current) => !current)}
+          renderTrialTaskTable={() => renderSelectableTaskInstanceTable(
+            trialTaskInstanceRows,
+            `trial:${selectedWt.id}`,
+            "当前还没有可展示的试运行实例。",
+          )}
+          collectionTaskSections={collectionTaskSectionViews}
+          onOpenIndicatorList={(collectionTaskLabel, indicatorLabels) => {
+            setSelectedIndicatorTask({
+              collectionTaskLabel,
+              indicatorLabels,
+            });
+          }}
+          renderTaskGroupCards={renderTaskGroupCards}
+          scheduleJobs={wtScheduleJobs}
+          renderStatusBadge={(status) => <StatusBadge status={status} />}
+        />
       ) : null}
 
       {selectedTask ? (
@@ -3767,1277 +1495,9 @@ function StatusBadge({ status, label }: { status: string; label?: string }) {
   );
 }
 
-function PlanMetricCard({ title, value, hint }: { title: string; value: string; hint: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border bg-muted/10 px-4 py-3">
-      <div className="text-[11px] text-muted-foreground">{title}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
-      <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>
-    </div>
-  );
-}
-
-function PromptSectionField({
-  label,
-  value,
-  editable,
-  rows,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  editable: boolean;
-  rows: number;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block space-y-1.5">
-      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        rows={rows}
-        readOnly={!editable}
-        className={cn(
-          "w-full rounded-md border bg-background px-3 py-2 text-xs leading-6",
-          !editable ? "cursor-default text-muted-foreground" : "",
-        )}
-      />
-    </label>
-  );
-}
-
-function PromptReadonlyBlock({
-  label,
-  value,
-  editable,
-  rows,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  editable: boolean;
-  rows: number;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <PromptSectionField
-      label={label}
-      value={value}
-      editable={editable}
-      rows={rows}
-      onChange={onChange}
-    />
-  );
-}
-
-function VersionTabContent({
-  selectedWt,
-  versionViews,
-  selectedVersion,
-  selectedVersionTaskGroups,
-  onSelectVersion,
-}: {
-  selectedWt?: WideTable;
-  versionViews: PlanVersionView[];
-  selectedVersion: PlanVersionView | null;
-  selectedVersionTaskGroups: HistoricalTaskGroupView[];
-  onSelectVersion: (version: number) => void;
-}) {
-  if (!selectedWt || versionViews.length === 0 || !selectedVersion) {
-    return (
-      <div className="text-sm text-muted-foreground">当前宽表还没有可展示的版本信息。</div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-2 overflow-x-auto">
-        {versionViews.map((version) => (
-          <button
-            key={version.version}
-            type="button"
-            onClick={() => onSelectVersion(version.version)}
-            className={cn(
-              "shrink-0 rounded-md border px-3 py-1.5 text-xs",
-              selectedVersion.version === version.version
-                ? "border-primary bg-primary/10 text-primary"
-                : "bg-background text-muted-foreground",
-            )}
-          >
-            V{version.version}
-            {version.isCurrent ? " · 当前" : ""}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <PlanMetricCard title="基线任务组" value={String(selectedVersion.baselineGroupCount)} hint="该版本直接生效的业务日期" />
-        <PlanMetricCard title="差异补差组" value={String(selectedVersion.deltaGroupCount)} hint="历史版本补丁" />
-        <PlanMetricCard title="历史补差日期" value={String(selectedVersion.historicalPatchDates.length)} hint={summarizeDateSlots(selectedVersion.historicalPatchDates, "无历史补差")} />
-        <PlanMetricCard title="未来待调度日期" value={String(selectedVersion.futureScheduledDates.length)} hint={summarizeDateSlots(selectedVersion.futureScheduledDates, "无未来调度")} />
-      </div>
-
-      <div className="rounded-lg border bg-muted/10 p-4 text-xs text-muted-foreground space-y-1">
-        <div>版本时间：{selectedVersion.createdAt || "-"}</div>
-        <div>历史补丁：{selectedVersion.historicalPatchDates.length > 0 ? selectedVersion.historicalPatchDates.join("、") : "无"}</div>
-        <div>未来待调度：{selectedVersion.futureScheduledDates.length > 0 ? selectedVersion.futureScheduledDates.join("、") : "无"}</div>
-      </div>
-
-      <div className="space-y-2">
-        {selectedVersionTaskGroups.length === 0 ? (
-          <div className="rounded-lg border border-dashed px-4 py-6 text-xs text-muted-foreground">
-            当前版本还没有落成任务组。
-          </div>
-        ) : (
-          selectedVersionTaskGroups.map((taskGroup) => (
-            <div key={taskGroup.id} className="rounded-lg border bg-background px-4 py-3 text-xs space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-foreground">{taskGroup.displayLabel}</span>
-                <StatusBadge status={taskGroup.displayStatus} />
-                <span className={cn("rounded border px-1.5 py-0.5", taskGroupKindBadgeClass(taskGroup.groupKind))}>
-                  {taskGroupKindLabel(taskGroup.groupKind)}
-                </span>
-              </div>
-              <div className="text-muted-foreground">
-                {taskGroup.id} | 总计 {taskGroup.totalTasks} | 已完成 {taskGroup.completedTasks} | 失败 {taskGroup.failedTasks}{taskGroup.cancelledTasks > 0 ? ` | 已取消 ${taskGroup.cancelledTasks}` : ""}
-              </div>
-              {taskGroup.deltaReason ? (
-                <div className="text-amber-700">{taskGroup.deltaReason}</div>
-              ) : null}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function taskGroupKindLabel(groupKind: TaskGroup["groupKind"] | undefined): string {
-  return (groupKind ?? "baseline") === "delta" ? "差异补差组" : "基线任务组";
-}
-
-function taskGroupKindBadgeClass(groupKind: TaskGroup["groupKind"] | undefined): string {
-  return (groupKind ?? "baseline") === "delta"
-    ? "border-amber-200 bg-amber-50 text-amber-700"
-    : "border-slate-200 bg-slate-50 text-slate-700";
-}
-
-function resolveTaskRecordBusinessDate(wideTable: WideTable, record: WideTableRecord): string {
-  const businessDateColumn = wideTable.schema.columns.find((column) => column.isBusinessDate);
-  return String(
-    (businessDateColumn ? record[businessDateColumn.name] : undefined)
-    ?? record.business_date
-    ?? record.BIZ_DATE
-    ?? "",
-  );
-}
-
-function buildTaskStatusLegend(tasks: Array<{ status: string }>): Array<{
-  status: string;
-  label: string;
-  count: number;
-  badgeClassName: string;
-  dotClassName: string;
-}> {
-  const countMap = new Map<string, number>();
-
-  for (const task of tasks) {
-    countMap.set(task.status, (countMap.get(task.status) ?? 0) + 1);
-  }
-
-  return buildTaskStatusLegendFromCountMap(countMap);
-}
-
-function buildTaskStatusLegendFromCounts(counts: Record<string, number>): Array<{
-  status: string;
-  label: string;
-  count: number;
-  badgeClassName: string;
-  dotClassName: string;
-}> {
-  return buildTaskStatusLegendFromCountMap(new Map(Object.entries(counts)));
-}
-
-function buildTaskStatusLegendFromCountMap(countMap: Map<string, number>): Array<{
-  status: string;
-  label: string;
-  count: number;
-  badgeClassName: string;
-  dotClassName: string;
-}> {
-  const orderedStatuses = ["completed", "running", "queued", "failed", "cancelled", "pending", "invalidated"];
-  return orderedStatuses
-    .filter((status) => (countMap.get(status) ?? 0) > 0)
-    .map((status) => ({
-      status,
-      label: taskStatusLabel[status] ?? status,
-      count: countMap.get(status) ?? 0,
-      badgeClassName: getTaskStatusBadgeClass(status),
-      dotClassName: getTaskStatusDotClass(status),
-    }));
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
 }
 
-function formatTaskActionError(error: unknown): string {
-  if (error instanceof Error && error.message === "Failed to fetch") {
-    return "无法连接后端接口，请确认服务可访问。";
-  }
-  if (error instanceof Error && error.message.trim() !== "") {
-    return error.message;
-  }
-  return "未知错误";
-}
-
-function applyTaskRecordCompletion(
-  record: WideTableRecord,
-  wideTable: WideTable,
-  tasks: FetchTask[],
-  completedAt: string,
-): WideTableRecord {
-  const rowId = Number(record.ROW_ID ?? record.id);
-  const rowTasks = tasks.filter((task) => task.rowId === rowId);
-  if (rowTasks.length === 0) {
-    return record;
-  }
-
-  const indicatorGroupMap = new Map(
-    wideTable.indicatorGroups.map((group) => [group.id, group.indicatorColumns]),
-  );
-  const nextRecord: WideTableRecord = {
-    ...record,
-    _metadata: {
-      ...record._metadata,
-      confidence: 0.88,
-    },
-  };
-
-  for (const task of rowTasks) {
-    const indicatorColumns = indicatorGroupMap.get(task.indicatorGroupId) ?? [];
-    for (const columnName of indicatorColumns) {
-      nextRecord[columnName] = buildLocalIndicatorValue(rowId, columnName);
-    }
-  }
-
-  nextRecord.updated_at = completedAt;
-  return nextRecord;
-}
-
-function buildLocalIndicatorValue(rowId: number, columnName: string): number {
-  let hash = rowId * 97;
-  for (const char of columnName) {
-    hash = (hash * 31 + char.charCodeAt(0)) % 100000;
-  }
-  return Number(((hash % 9000) / 10 + 10).toFixed(1));
-}
-
-function buildTaskGroupSummaryFromCards(
-  taskGroup: TaskGroup,
-  fallbackSummary: TaskGroupExecutionSummary,
-  taskCards: FetchTaskCardView[],
-): TaskGroupExecutionSummary {
-  const counts = taskCards.reduce(
-    (summary, taskCard) => {
-      summary[taskCard.status] += 1;
-      return summary;
-    },
-    {
-      pending: 0,
-      running: 0,
-      completed: 0,
-      failed: 0,
-      cancelled: 0,
-      invalidated: 0,
-    } satisfies Record<FetchTask["status"], number>,
-  );
-  const totalTasks = Math.max(fallbackSummary.totalTasks, taskCards.length);
-  const pendingTasks = Math.max(
-    totalTasks - counts.completed - counts.failed - counts.cancelled - counts.running - counts.invalidated,
-    0,
-  );
-  const progressPercent = totalTasks > 0
-    ? Math.round((counts.completed / totalTasks) * 100)
-    : 0;
-  const lastUpdatedAt = taskCards.reduce((latest, taskCard) => {
-    const candidate = taskCard.endedAt || taskCard.startedAt || fallbackSummary.lastUpdatedAt;
-    return candidate > latest ? candidate : latest;
-  }, fallbackSummary.lastUpdatedAt);
-
-  return {
-    status: resolveTaskGroupDisplayStatus(taskGroup.status, {
-      pendingTasks,
-      runningTasks: counts.running,
-      completedTasks: counts.completed,
-      failedTasks: counts.failed,
-      cancelledTasks: counts.cancelled,
-      invalidatedTasks: counts.invalidated,
-    }),
-    totalTasks,
-    pendingTasks,
-    runningTasks: counts.running,
-    completedTasks: counts.completed,
-    failedTasks: counts.failed,
-    cancelledTasks: counts.cancelled,
-    invalidatedTasks: counts.invalidated,
-    progressPercent,
-    lastUpdatedAt,
-  };
-}
-
-function resolveTaskGroupDisplayStatus(
-  fallbackStatus: TaskGroup["status"],
-  counts: {
-    pendingTasks: number;
-    runningTasks: number;
-    completedTasks: number;
-    failedTasks: number;
-    cancelledTasks: number;
-    invalidatedTasks: number;
-  },
-): TaskGroup["status"] {
-  if (fallbackStatus === "invalidated") {
-    return "invalidated";
-  }
-  if (fallbackStatus === "cancelled" && counts.runningTasks === 0 && counts.pendingTasks === 0) {
-    return "cancelled";
-  }
-  if (counts.runningTasks > 0) {
-    return "running";
-  }
-  if (counts.failedTasks > 0 && counts.pendingTasks === 0) {
-    if (counts.completedTasks === 0 && counts.cancelledTasks === 0 && counts.invalidatedTasks === 0) {
-      return "failed";
-    }
-    return "partial";
-  }
-  if (counts.cancelledTasks > 0 && counts.pendingTasks === 0) {
-    if (counts.completedTasks === 0 && counts.failedTasks === 0 && counts.invalidatedTasks === 0) {
-      return "cancelled";
-    }
-    return "partial";
-  }
-  if (counts.completedTasks > 0 && counts.pendingTasks > 0) {
-    return "running";
-  }
-  if (counts.pendingTasks > 0) {
-    return "pending";
-  }
-  return "completed";
-}
-
-type TaskPlanView = {
-  businessDates: string[];
-  businessDateCount: number;
-  historicalDateCount: number;
-  futureDateCount: number;
-  historicalRangeLabel: string;
-  futureRangeLabel: string;
-  dimensionCombinationCount: number;
-  indicatorGroupCount: number;
-  collectionTaskCount: number;
-  collectionTasks: Array<{
-    id: string;
-    name: string;
-    indicatorLabels: string[];
-  }>;
-  plannedRowCount: number;
-  plannedTaskCount: number;
-  dimensionSummary: string;
-  indicatorGroupSummary: string;
-  frequencyLabel: string;
-  scheduleSummary: string;
-  futureWindowLabel?: string;
-};
-
-type HistoricalTaskGroupView = {
-  id: string;
-  businessDate: string;
-  businessDateLabel: string;
-  displayLabel: string;
-  indicatorGroupId?: string;
-  indicatorGroupName?: string;
-  totalTasks: number;
-  pendingTasks: number;
-  runningTasks: number;
-  completedTasks: number;
-  failedTasks: number;
-  cancelledTasks: number;
-  invalidatedTasks: number;
-  progressPercent: number;
-  triggeredBy: TaskGroup["triggeredBy"];
-  displayStatus: string;
-  isReal: boolean;
-  planVersion?: number;
-  groupKind?: TaskGroup["groupKind"];
-  coverageStatus?: TaskGroup["coverageStatus"];
-  deltaReason?: string;
-  taskGroupForTasks: TaskGroup;
-};
-
-type TaskGroupRunSectionView = {
-  id: string;
-  label: string;
-  taskGroups: HistoricalTaskGroupView[];
-};
-
-type TaskInstanceRowView = {
-  fetchTaskId: string;
-  taskGroupId: string;
-  rowLabel: string;
-  parameterLines: string[];
-  businessDateLabel: string;
-  indicatorGroupName: string;
-  indicatorLabels: string[];
-  collectionTaskId?: string;
-  status: string;
-};
-
-type PlanVersionView = {
-  version: number;
-  isCurrent: boolean;
-  createdAt: string;
-  baselineGroupCount: number;
-  deltaGroupCount: number;
-  historicalPatchDates: string[];
-  futureScheduledDates: string[];
-};
-
-function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
-  const collectionTasks = resolveCollectionTaskSummaries(wideTable);
-  const collectionTaskCount = collectionTasks.length;
-
-  if (!hasWideTableBusinessDateDimension(wideTable)) {
-    const dimensionColumns = wideTable.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate);
-    const dimensionCombinationCount = calculateDimensionCombinationCount(wideTable, dimensionColumns);
-    const indicatorGroupLabels = resolveIndicatorGroupLabels(wideTable);
-    const indicatorGroupCount = indicatorGroupLabels.length;
-    const plannedRowCount = countExpectedFetchTasksForBusinessDate(wideTable, "", wideTable.recordCount > 0 ? wideTable.recordCount : dimensionCombinationCount);
-    return {
-      businessDates: [],
-      businessDateCount: 0,
-      historicalDateCount: 0,
-      futureDateCount: 0,
-      historicalRangeLabel: "不按业务日期拆分",
-      futureRangeLabel: "由调度规则持续生成",
-      dimensionCombinationCount,
-      indicatorGroupCount,
-      collectionTaskCount,
-      collectionTasks,
-      plannedRowCount,
-      plannedTaskCount: plannedRowCount * indicatorGroupCount,
-      dimensionSummary: summarizeDimensions(wideTable, dimensionColumns),
-      indicatorGroupSummary: indicatorGroupLabels.join("、") || "未配置指标分组",
-      frequencyLabel: taskFrequencyLabel(wideTable.businessDateRange.frequency),
-      scheduleSummary: describeFullSnapshotScheduleRule(wideTable.scheduleRule),
-    };
-  }
-
-  const businessDates = buildBusinessDateSlots(wideTable.businessDateRange);
-  const today = formatBusinessDate(new Date());
-  const historicalDates = businessDates.filter((value) => value <= today);
-  const futureDates = businessDates.filter((value) => value > today);
-  const dimensionColumns = wideTable.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate);
-  const dimensionCombinationCount = calculateDimensionCombinationCount(wideTable, dimensionColumns);
-  const indicatorGroupLabels = resolveIndicatorGroupLabels(wideTable);
-  const indicatorGroupCount = indicatorGroupLabels.length;
-  const computedRowCount = businessDates.reduce(
-    (sum, businessDate) => sum + countExpectedFetchTasksForBusinessDate(wideTable, businessDate, dimensionCombinationCount),
-    0,
-  );
-  const isOpenEnded = isOpenEndedBusinessDateRange(wideTable.businessDateRange);
-  const plannedRowCount = isOpenEndedBusinessDateRange(wideTable.businessDateRange)
-    ? computedRowCount
-    : (wideTable.parameterRows?.length ?? 0) > 0
-      ? computedRowCount
-      : wideTable.recordCount > 0
-      ? wideTable.recordCount
-      : computedRowCount;
-  const plannedTaskCount = plannedRowCount * indicatorGroupCount;
-  const scheduleSummary = wideTable.scheduleRule
-    ? `业务日期后 +${wideTable.scheduleRule.businessDateOffsetDays} 天触发`
-    : isOpenEnded
-      ? "未配置未来调度"
-      : "固定结束日期，无未来调度";
-
-  return {
-    businessDates,
-    businessDateCount: businessDates.length,
-    historicalDateCount: historicalDates.length,
-    futureDateCount: futureDates.length,
-    historicalRangeLabel: summarizeDateSlots(historicalDates, "暂无历史任务"),
-    futureRangeLabel: summarizeDateSlots(futureDates, "当前范围内无未来任务"),
-    dimensionCombinationCount,
-    indicatorGroupCount,
-    collectionTaskCount,
-    collectionTasks,
-    plannedRowCount,
-    plannedTaskCount,
-    dimensionSummary: summarizeDimensions(wideTable, dimensionColumns),
-    indicatorGroupSummary: indicatorGroupLabels.join("、") || "未配置指标分组",
-    frequencyLabel: taskFrequencyLabel(wideTable.businessDateRange.frequency),
-    scheduleSummary,
-    futureWindowLabel: isOpenEnded
-      ? `open-ended 范围当前仅预估未来 ${OPEN_ENDED_PREVIEW_PERIODS} 期`
-      : undefined,
-  };
-}
-
-function buildPlanVersionViews(
-  wideTable: WideTable,
-  taskGroups: TaskGroup[],
-): PlanVersionView[] {
-  const scopedTaskGroups = taskGroups.filter((taskGroup) => taskGroup.wideTableId === wideTable.id);
-  const currentVersion = wideTable.currentPlanVersion ?? Math.max(1, ...scopedTaskGroups.map((taskGroup) => taskGroup.planVersion ?? 1));
-  const versionSet = new Set<number>([currentVersion]);
-  scopedTaskGroups.forEach((taskGroup) => versionSet.add(taskGroup.planVersion ?? 1));
-  const today = formatBusinessDate(new Date());
-  const currentFutureDates = buildBusinessDateSlots(wideTable.businessDateRange)
-    .filter((businessDate) => businessDate > today)
-    .sort((left, right) => right.localeCompare(left));
-
-  return Array.from(versionSet)
-    .sort((left, right) => right - left)
-    .map((version) => {
-      const versionTaskGroups = scopedTaskGroups.filter(
-        (taskGroup) => (taskGroup.planVersion ?? 1) === version && (taskGroup.businessDate <= today || version === currentVersion),
-      );
-      const baselineGroups = versionTaskGroups.filter((taskGroup) => (taskGroup.groupKind ?? "baseline") === "baseline");
-      const deltaGroups = versionTaskGroups.filter((taskGroup) => (taskGroup.groupKind ?? "baseline") === "delta");
-      return {
-        version,
-        isCurrent: version === currentVersion,
-        createdAt: versionTaskGroups
-          .map((taskGroup) => taskGroup.updatedAt || taskGroup.createdAt)
-          .sort((left, right) => right.localeCompare(left))[0] ?? wideTable.updatedAt,
-        baselineGroupCount: baselineGroups.length,
-        deltaGroupCount: deltaGroups.length,
-        historicalPatchDates: Array.from(new Set(deltaGroups.map((taskGroup) => taskGroup.businessDate))).sort((left, right) => right.localeCompare(left)),
-        futureScheduledDates: version === currentVersion ? currentFutureDates : [],
-      };
-    });
-}
-
-function buildTaskGroupRunViews(
-  requirement: Requirement,
-  wideTable: WideTable,
-  taskPlan: TaskPlanView,
-  taskGroups: TaskGroup[],
-  taskGroupSummaryMap: Map<string, TaskGroupExecutionSummary>,
-  scheduleJobs: ScheduleJob[],
-): HistoricalTaskGroupView[] {
-  const sortedIndicatorGroups = [...wideTable.indicatorGroups].sort(
-    (left, right) => left.priority - right.priority,
-  );
-  const indicatorGroupById = new Map(sortedIndicatorGroups.map((group) => [group.id, group] as const));
-  const indicatorGroupingEnabled = sortedIndicatorGroups.length > 1;
-
-  if (!hasWideTableBusinessDateDimension(wideTable)) {
-    const snapshotPages = buildFullSnapshotTaskGroupPages(taskGroups, scheduleJobs);
-    const snapshotPageMap = new Map(snapshotPages.map((page) => [page.taskGroupId, page]));
-    return [...taskGroups]
-      .sort((left, right) => {
-        const leftStartedAt = snapshotPageMap.get(left.id)?.startedAt ?? left.createdAt ?? left.updatedAt;
-        const rightStartedAt = snapshotPageMap.get(right.id)?.startedAt ?? right.createdAt ?? right.updatedAt;
-        if (leftStartedAt !== rightStartedAt) {
-          return rightStartedAt.localeCompare(leftStartedAt);
-        }
-        return right.updatedAt.localeCompare(left.updatedAt);
-      })
-      .map((taskGroup) => {
-        const indicatorGroupId = indicatorGroupingEnabled && taskGroup.partitionKey && indicatorGroupById.has(taskGroup.partitionKey)
-          ? taskGroup.partitionKey
-          : undefined;
-        const indicatorGroupName = indicatorGroupId
-          ? indicatorGroupById.get(indicatorGroupId)?.name ?? taskGroup.partitionLabel
-          : undefined;
-        const summary = taskGroupSummaryMap.get(taskGroup.id);
-        const snapshotPage = snapshotPageMap.get(taskGroup.id);
-        return {
-          id: taskGroup.id,
-          businessDate: taskGroup.businessDate,
-          businessDateLabel: taskGroup.partitionLabel ?? taskGroup.businessDateLabel ?? "全量快照",
-          displayLabel: snapshotPage?.pageLabel ?? taskGroup.partitionLabel ?? taskGroup.businessDateLabel ?? taskGroup.id,
-          indicatorGroupId,
-          indicatorGroupName,
-          totalTasks: summary?.totalTasks ?? taskGroup.totalTasks,
-          pendingTasks: summary?.pendingTasks ?? 0,
-          runningTasks: summary?.runningTasks ?? 0,
-          completedTasks: summary?.completedTasks ?? taskGroup.completedTasks,
-          failedTasks: summary?.failedTasks ?? taskGroup.failedTasks,
-          cancelledTasks: summary?.cancelledTasks ?? 0,
-          invalidatedTasks: summary?.invalidatedTasks ?? 0,
-          progressPercent: summary?.progressPercent ?? 0,
-          triggeredBy: taskGroup.triggeredBy,
-          displayStatus: summary?.status ?? taskGroup.status,
-          isReal: true,
-          planVersion: taskGroup.planVersion,
-          groupKind: "baseline",
-          coverageStatus: "current",
-          taskGroupForTasks: taskGroup,
-        };
-      });
-  }
-
-  const taskGroupsByDate = new Map<string, TaskGroup[]>();
-  const today = formatBusinessDate(new Date());
-  for (const taskGroup of taskGroups) {
-    const scopedTaskGroups = taskGroupsByDate.get(taskGroup.businessDate) ?? [];
-    scopedTaskGroups.push(taskGroup);
-    taskGroupsByDate.set(taskGroup.businessDate, scopedTaskGroups);
-  }
-  const historicalRealDates = taskGroups
-    .map((taskGroup) => taskGroup.businessDate)
-    .filter((businessDate) => businessDate <= today);
-  const currentHistoricalDates = taskPlan.businessDates.filter((businessDate) => businessDate <= today);
-  const futureBusinessDates = Array.from(
-    new Set([
-      ...taskPlan.businessDates.filter((businessDate) => businessDate > today),
-      ...taskGroups.map((taskGroup) => taskGroup.businessDate).filter((businessDate) => businessDate > today),
-    ]),
-  ).sort((left, right) => left.localeCompare(right));
-  const visibleBusinessDates = Array.from(
-    new Set([...historicalRealDates, ...currentHistoricalDates, ...futureBusinessDates]),
-  );
-
-  return visibleBusinessDates
-    .sort((left, right) => right.localeCompare(left))
-    .flatMap((businessDate): HistoricalTaskGroupView[] => {
-      const scopedTaskGroups = [...(taskGroupsByDate.get(businessDate) ?? [])]
-        .sort(compareTaskGroupsForDisplay);
-      if (scopedTaskGroups.length > 0) {
-        return scopedTaskGroups.map((taskGroup) => {
-          const indicatorGroupId = indicatorGroupingEnabled && taskGroup.partitionKey && indicatorGroupById.has(taskGroup.partitionKey)
-            ? taskGroup.partitionKey
-            : undefined;
-          const indicatorGroupName = indicatorGroupId
-            ? indicatorGroupById.get(indicatorGroupId)?.name ?? taskGroup.partitionLabel
-            : undefined;
-          const summary = taskGroupSummaryMap.get(taskGroup.id);
-          const businessDateLabel = formatBusinessDateLabel(
-            businessDate,
-            wideTable.businessDateRange.frequency,
-          );
-          return {
-            id: taskGroup.id,
-            businessDate,
-            businessDateLabel,
-            displayLabel: businessDateLabel,
-            indicatorGroupId,
-            indicatorGroupName,
-            totalTasks: summary?.totalTasks ?? taskGroup.totalTasks,
-            pendingTasks: summary?.pendingTasks ?? 0,
-            runningTasks: summary?.runningTasks ?? 0,
-            completedTasks: summary?.completedTasks ?? taskGroup.completedTasks,
-            failedTasks: summary?.failedTasks ?? taskGroup.failedTasks,
-            cancelledTasks: summary?.cancelledTasks ?? 0,
-            invalidatedTasks: summary?.invalidatedTasks ?? 0,
-            progressPercent: summary?.progressPercent ?? 0,
-            triggeredBy: taskGroup.triggeredBy,
-            displayStatus: summary?.status ?? taskGroup.status,
-            isReal: true,
-            planVersion: taskGroup.planVersion,
-            groupKind: "baseline",
-            coverageStatus: "current",
-            taskGroupForTasks: taskGroup,
-          };
-        });
-      }
-
-      if (!taskPlan.businessDates.includes(businessDate)) {
-        return [];
-      }
-
-      const businessDateLabel = formatBusinessDateLabel(businessDate, wideTable.businessDateRange.frequency);
-      const plannedTriggerType = resolvePlannedTriggerType(businessDate, today);
-      const totalTasksPerTimeGroup = countExpectedFetchTasksForBusinessDate(
-        wideTable,
-        businessDate,
-        taskPlan.dimensionCombinationCount,
-      );
-
-      if (indicatorGroupingEnabled) {
-        return sortedIndicatorGroups.map((group) => ({
-          id: `tg_planned_${businessDate}_${group.id}`,
-          businessDate,
-          businessDateLabel,
-          displayLabel: businessDateLabel,
-          indicatorGroupId: group.id,
-          indicatorGroupName: group.name,
-          totalTasks: totalTasksPerTimeGroup,
-          pendingTasks: totalTasksPerTimeGroup,
-          runningTasks: 0,
-          completedTasks: 0,
-          failedTasks: 0,
-          cancelledTasks: 0,
-          invalidatedTasks: 0,
-          progressPercent: 0,
-          triggeredBy: plannedTriggerType,
-          displayStatus: "pending",
-          isReal: false,
-          planVersion: wideTable.currentPlanVersion ?? 1,
-          groupKind: "baseline" as const,
-          coverageStatus: "current" as const,
-          deltaReason: undefined,
-          taskGroupForTasks: {
-            id: `tg_planned_${businessDate}_${group.id}`,
-            wideTableId: wideTable.id,
-            businessDate,
-            businessDateLabel,
-            planVersion: wideTable.currentPlanVersion ?? 1,
-            groupKind: "baseline",
-            coverageStatus: "current",
-            status: "pending",
-            totalTasks: totalTasksPerTimeGroup,
-            pendingTasks: totalTasksPerTimeGroup,
-            runningTasks: 0,
-            completedTasks: 0,
-            failedTasks: 0,
-            cancelledTasks: 0,
-            invalidatedTasks: 0,
-            triggeredBy: plannedTriggerType,
-            partitionType: "business_date",
-            partitionKey: group.id,
-            partitionLabel: group.name,
-            createdAt: "",
-            updatedAt: "",
-          },
-        }));
-      }
-
-      return [{
-        id: `tg_planned_${businessDate}`,
-        businessDate,
-        businessDateLabel,
-        displayLabel: businessDateLabel,
-        totalTasks: totalTasksPerTimeGroup,
-        pendingTasks: totalTasksPerTimeGroup,
-        runningTasks: 0,
-        completedTasks: 0,
-        failedTasks: 0,
-        cancelledTasks: 0,
-        invalidatedTasks: 0,
-        progressPercent: 0,
-        triggeredBy: plannedTriggerType,
-        displayStatus: "pending",
-        isReal: false,
-        planVersion: wideTable.currentPlanVersion ?? 1,
-        groupKind: "baseline" as const,
-        coverageStatus: "current" as const,
-        deltaReason: undefined,
-        taskGroupForTasks: {
-          id: `tg_planned_${businessDate}`,
-          wideTableId: wideTable.id,
-          businessDate,
-          businessDateLabel,
-          planVersion: wideTable.currentPlanVersion ?? 1,
-          groupKind: "baseline",
-          coverageStatus: "current",
-          status: "pending",
-          totalTasks: totalTasksPerTimeGroup,
-          pendingTasks: totalTasksPerTimeGroup,
-          runningTasks: 0,
-          completedTasks: 0,
-          failedTasks: 0,
-          cancelledTasks: 0,
-          invalidatedTasks: 0,
-          triggeredBy: plannedTriggerType,
-          createdAt: "",
-          updatedAt: "",
-        },
-      }];
-    });
-}
-
-function buildTaskGroupRunSections(
-  wideTable: WideTable,
-  taskGroupRunViews: HistoricalTaskGroupView[],
-): TaskGroupRunSectionView[] {
-  const sortedIndicatorGroups = [...wideTable.indicatorGroups].sort(
-    (left, right) => left.priority - right.priority,
-  );
-  if (sortedIndicatorGroups.length <= 1) {
-    return [{ id: "__all__", label: "", taskGroups: taskGroupRunViews }];
-  }
-
-  const grouped = new Map<string, HistoricalTaskGroupView[]>();
-  const unscoped: HistoricalTaskGroupView[] = [];
-  for (const view of taskGroupRunViews) {
-    if (view.indicatorGroupId) {
-      const bucket = grouped.get(view.indicatorGroupId) ?? [];
-      bucket.push(view);
-      grouped.set(view.indicatorGroupId, bucket);
-    } else {
-      unscoped.push(view);
-    }
-  }
-
-  const sections: TaskGroupRunSectionView[] = sortedIndicatorGroups
-    .map((group) => ({
-      id: group.id,
-      label: `${group.name}采集任务`,
-      taskGroups: grouped.get(group.id) ?? [],
-    }))
-    .filter((section) => section.taskGroups.length > 0);
-
-  if (unscoped.length > 0) {
-    sections.push({ id: "__other__", label: "其他", taskGroups: unscoped });
-  }
-
-  return sections.length > 0 ? sections : [{ id: "__all__", label: "", taskGroups: taskGroupRunViews }];
-}
-
-function compareTaskGroupsForDisplay(left: TaskGroup, right: TaskGroup): number {
-  return right.updatedAt.localeCompare(left.updatedAt);
-}
-
-function resolvePlannedTriggerType(
-  businessDate: string,
-  today: string,
-): TaskGroup["triggeredBy"] {
-  return businessDate <= today ? "backfill" : "schedule";
-}
-
-function resolveIndicatorGroupLabels(wideTable: WideTable): string[] {
-  if (wideTable.indicatorGroups.length > 0) {
-    return [...wideTable.indicatorGroups]
-      .sort((left, right) => left.priority - right.priority)
-      .map((group) => group.name);
-  }
-
-  return [];
-}
-
-function resolveCollectionTaskSummaries(
-  wideTable: WideTable,
-): Array<{ id: string; name: string; indicatorLabels: string[] }> {
-  const indicatorColumns = wideTable.schema.columns.filter((column) => column.category === "indicator");
-  if (indicatorColumns.length === 0) {
-    return [];
-  }
-
-  if (wideTable.indicatorGroups.length > 0) {
-    return [...wideTable.indicatorGroups]
-      .filter((group) => group.indicatorColumns.length > 0)
-      .sort((left, right) => left.priority - right.priority)
-      .map((group) => ({
-        id: group.id,
-        name: group.name || "统一提示词",
-        indicatorLabels: group.indicatorColumns.map((columnName) => findIndicatorColumnLabel(indicatorColumns, columnName)),
-      }));
-  }
-
-  return [{
-    id: buildDefaultIndicatorGroupId(wideTable.id),
-    name: "统一提示词",
-    indicatorLabels: indicatorColumns.map((column) => findIndicatorColumnLabel(indicatorColumns, column.name)),
-  }];
-}
-
-function buildTaskInstanceRowViews(params: {
-  wideTable?: WideTable;
-  fetchTasks: FetchTask[];
-  indicatorGroups: WideTable["indicatorGroups"];
-  parameterColumns: ColumnDefinition[];
-  overrideBusinessDateLabel?: string;
-}): TaskInstanceRowView[] {
-  const { wideTable, fetchTasks, indicatorGroups, parameterColumns, overrideBusinessDateLabel } = params;
-  if (!wideTable || fetchTasks.length === 0) {
-    return [];
-  }
-
-  const indicatorColumns = wideTable.schema.columns.filter((column) => column.category === "indicator");
-  const indicatorGroupById = new Map(indicatorGroups.map((group) => [group.id, group] as const));
-
-  return fetchTasks.map((fetchTask) => {
-    const matchedIndicatorGroup = indicatorGroupById.get(fetchTask.indicatorGroupId);
-    const indicatorLabels = (matchedIndicatorGroup?.indicatorColumns ?? [])
-      .map((columnName) => findIndicatorColumnLabel(indicatorColumns, columnName));
-
-    return {
-      fetchTaskId: fetchTask.id,
-      taskGroupId: fetchTask.taskGroupId,
-      rowLabel: buildTaskInstanceRowLabelFromTask(fetchTask),
-      parameterLines: formatTaskInstanceParameterLinesFromTask(parameterColumns, fetchTask),
-      businessDateLabel: overrideBusinessDateLabel || (
-        fetchTask.businessDate
-          ? formatBusinessDateLabel(fetchTask.businessDate, wideTable.businessDateRange.frequency)
-          : fetchTask.id
-      ),
-      indicatorGroupName: matchedIndicatorGroup?.name ?? fetchTask.indicatorGroupName ?? "统一提示词",
-      indicatorLabels,
-      collectionTaskId: fetchTask.collectionTaskId,
-      status: fetchTask.status,
-    };
-  });
-}
-
-function formatTaskInstanceParameterLines(
-  parameterColumns: ColumnDefinition[],
-  record?: WideTableRecord,
-): string[] {
-  if (!record) {
-    return ["参数行未匹配到当前宽表记录"];
-  }
-
-  const lines = parameterColumns
-    .map((column) => {
-      const label = column.chineseName || column.name;
-      const value = record[column.name];
-      const text = value == null ? "" : String(value).trim();
-      return text ? `${label}：${text}` : "";
-    })
-    .filter(Boolean);
-
-  return lines.length > 0 ? lines : [`rowId：${record.id}`];
-}
-
-function buildTaskInstanceRowLabel(fetchTask: FetchTask, record?: WideTableRecord): string {
-  if (record?.rowBindingKey) {
-    return record.rowBindingKey;
-  }
-  if (record) {
-    return `row-${record.id}`;
-  }
-  return fetchTask.id;
-}
-
-function formatTaskInstanceParameterLinesFromTask(
-  parameterColumns: ColumnDefinition[],
-  fetchTask: FetchTask,
-): string[] {
-  const dimensionValues = fetchTask.dimensionValues ?? {};
-  const lines = parameterColumns
-    .map((column) => {
-      const label = column.chineseName || column.name;
-      const value = dimensionValues[column.name];
-      const text = value == null ? "" : String(value).trim();
-      return text ? `${label}: ${text}` : "";
-    })
-    .filter(Boolean);
-
-  return lines.length > 0 ? lines : [`rowId: ${fetchTask.rowId}`];
-}
-
-function buildTaskInstanceRowLabelFromTask(fetchTask: FetchTask): string {
-  if (fetchTask.rowBindingKey) {
-    return fetchTask.rowBindingKey;
-  }
-  if (fetchTask.rowId > 0) {
-    return `row-${fetchTask.rowId}`;
-  }
-  return fetchTask.id;
-}
-
-function buildTrialParameterRowKey(
-  columns: Array<WideTable["schema"]["columns"][number]>,
-  valueSource: Record<string, unknown>,
-): string {
-  return columns
-    .map((column) => String(valueSource[column.name] ?? "").trim())
-    .join("\u0001");
-}
-
-function summarizeDimensions(wideTable: WideTable, dimensionColumns: Array<WideTable["schema"]["columns"][number]>): string {
-  if (dimensionColumns.length === 0) {
-    return "无普通维度";
-  }
-
-  return dimensionColumns.map((column) => {
-    const valueCount = wideTable.dimensionRanges.find((range) => range.dimensionName === column.name)?.values.length ?? 0;
-    return `${column.chineseName ?? column.name}(${valueCount})`;
-  }).join("、");
-}
-
-function calculateDimensionCombinationCount(
-  wideTable: WideTable,
-  dimensionColumns: Array<WideTable["schema"]["columns"][number]>,
-): number {
-  if (dimensionColumns.length === 0) {
-    return 1;
-  }
-
-  return dimensionColumns.reduce((product, column) => {
-    const valueCount = wideTable.dimensionRanges.find((range) => range.dimensionName === column.name)?.values.length ?? 0;
-    if (valueCount === 0) {
-      return 0;
-    }
-    return product * valueCount;
-  }, 1);
-}
-
-function summarizeDateSlots(dateSlots: string[], emptyLabel: string): string {
-  if (dateSlots.length === 0) {
-    return emptyLabel;
-  }
-
-  return `${dateSlots[0]} ~ ${dateSlots[dateSlots.length - 1]}（${dateSlots.length} 个）`;
-}
-
-function taskFrequencyLabel(frequency: WideTable["businessDateRange"]["frequency"]): string {
-  if (frequency === "daily") {
-    return "日频";
-  }
-  if (frequency === "weekly") {
-    return "周频";
-  }
-  if (frequency === "monthly") {
-    return "月频";
-  }
-  if (frequency === "quarterly") {
-    return "季频";
-  }
-  return "年频";
-}
-
-function getTriggerDisplayLabel(triggerType: string): string {
-  return triggerLabel[triggerType] ?? triggerType;
-}
-
-function isScheduledFutureTaskGroupView(
-  taskGroup: Pick<HistoricalTaskGroupView, "triggeredBy" | "businessDate" | "displayStatus">,
-): boolean {
-  return taskGroup.triggeredBy === "schedule"
-    && taskGroup.displayStatus === "pending"
-    && taskGroup.businessDate > formatBusinessDate(new Date());
-}
-
-function getTaskGroupStatusLabel(
-  taskGroup: Pick<HistoricalTaskGroupView, "triggeredBy" | "businessDate" | "displayStatus">,
-): string {
-  if (isScheduledFutureTaskGroupView(taskGroup)) {
-    return "待调度";
-  }
-
-  return taskStatusLabel[taskGroup.displayStatus] ?? taskGroup.displayStatus;
-}
-
-function buildTaskGroupRunId(scheduleJobs: ScheduleJob[]): string {
-  const nextIndex = scheduleJobs.length + 1;
-  return `RUN-MANUAL-${String(nextIndex).padStart(3, "0")}`;
-}
-
-function buildExecutionRecordId(taskId: string, attempt: number, suffix: "manual" | "retry"): string {
-  return `${taskId}_${suffix}_${String(attempt).padStart(2, "0")}`;
-}
-
-function materializeLocalTaskGroupArtifacts(
-  taskGroupView: HistoricalTaskGroupView,
-  wideTable: WideTable,
-  wideTableRecords: WideTableRecord[],
-  fetchTasks: FetchTask[],
-  timestamp: string,
-): { taskGroup: TaskGroup; fetchTasks: FetchTask[] } | null {
-  const existingTasks = fetchTasks.filter((task) => task.taskGroupId === taskGroupView.id);
-  const scopedRecords = resolveLocalTaskGroupRecords(wideTable, wideTableRecords, taskGroupView.businessDate);
-  const tasks = existingTasks.length > 0
-    ? existingTasks
-    : buildLocalFetchTasks(
-        taskGroupView.id,
-        wideTable,
-        taskGroupView.planVersion ?? wideTable.currentPlanVersion ?? 1,
-        scopedRecords,
-        timestamp,
-        taskGroupView.indicatorGroupId,
-      );
-
-  if (tasks.length === 0) {
-    return null;
-  }
-
-  return {
-    taskGroup: {
-      ...taskGroupView.taskGroupForTasks,
-      id: taskGroupView.id,
-      wideTableId: wideTable.id,
-      triggeredBy: "manual",
-      totalTasks: tasks.length,
-      completedTasks: 0,
-      failedTasks: 0,
-      rowSnapshots: scopedRecords,
-      createdAt: taskGroupView.taskGroupForTasks.createdAt || timestamp,
-      updatedAt: timestamp,
-    },
-    fetchTasks: tasks,
-  };
-}
-
-function resolveLocalTaskGroupRecords(
-  wideTable: WideTable,
-  wideTableRecords: WideTableRecord[],
-  businessDate: string,
-): WideTableRecord[] {
-  if (!hasWideTableBusinessDateDimension(wideTable)) {
-    return wideTableRecords.filter((record) => record.wideTableId === wideTable.id);
-  }
-
-  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "BIZ_DATE";
-  return wideTableRecords.filter(
-    (record) =>
-      record.wideTableId === wideTable.id
-      && String(record[businessDateFieldName] ?? "") === businessDate,
-  );
-}
-
-function buildLocalFetchTasks(
-  taskGroupId: string,
-  wideTable: WideTable,
-  planVersion: number,
-  scopedRecords: WideTableRecord[],
-  timestamp: string,
-  indicatorGroupId?: string,
-): FetchTask[] {
-  const businessDateFieldName = wideTable.schema.columns.find((column) => column.isBusinessDate)?.name ?? "BIZ_DATE";
-  const indicatorGroups = resolveRunnableIndicatorGroups(wideTable);
-  const scopedIndicatorGroups = indicatorGroups.length > 1 && indicatorGroupId
-    ? indicatorGroups.filter((group) => group.id === indicatorGroupId)
-    : indicatorGroups;
-
-  return scopedRecords.flatMap((record) => {
-    const rowId = getWideTableRecordRowId(record);
-    const businessDate = String(record[businessDateFieldName] ?? record.business_date ?? "");
-    return scopedIndicatorGroups.map((indicatorGroup) => ({
-      id: `${LOCAL_FETCH_TASK_PREFIX}${taskGroupId}_${indicatorGroup.id}_${rowId}`,
-      taskGroupId,
-      wideTableId: wideTable.id,
-      rowId,
-      planVersion,
-      indicatorGroupId: indicatorGroup.id,
-      indicatorGroupName: indicatorGroup.name,
-      dimensionValues: Object.fromEntries(
-        getVisibleNarrowTableContextColumns(wideTable)
-          .filter((column) => !column.isBusinessDate)
-          .map((column) => [column.name, String(record[column.name] ?? "")]),
-      ),
-      businessDate: businessDate || undefined,
-      status: "pending" as const,
-      executionRecords: [],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }));
-  });
-}
-
-function resolveRunnableIndicatorGroups(wideTable: WideTable): Array<{
-  id: string;
-  name: string;
-}> {
-  if (wideTable.indicatorGroups.length > 0) {
-    return [...wideTable.indicatorGroups]
-      .sort((left, right) => left.priority - right.priority)
-      .map((indicatorGroup) => ({
-        id: indicatorGroup.id,
-        name: indicatorGroup.name,
-      }));
-  }
-
-  return [];
-}
-
-function groupToneClass(groupId: string, groups: WideTable["indicatorGroups"]): string {
-  const toneIndex = Math.max(
-    0,
-    groups.findIndex((group) => group.id === groupId),
-  ) % GROUP_TONE_CLASSES.length;
-  return GROUP_TONE_CLASSES[toneIndex];
-}
-
-function groupSelectClass(groupId: string | undefined, groups: WideTable["indicatorGroups"]): string {
-  if (!groupId) {
-    return "border-gray-200 bg-gray-50 text-gray-700";
-  }
-  return groupToneClass(groupId, groups);
-}
-
-function findIndicatorColumnLabel(columns: ColumnDefinition[], columnName: string): string {
-  const column = columns.find((item) => item.name === columnName);
-  return column?.chineseName ?? column?.name ?? columnName;
-}
-
-const GROUP_TONE_CLASSES = [
-  "border-sky-200 bg-sky-50 text-sky-700",
-  "border-emerald-200 bg-emerald-50 text-emerald-700",
-  "border-orange-200 bg-orange-50 text-orange-700",
-  "border-rose-200 bg-rose-50 text-rose-700",
-  "border-violet-200 bg-violet-50 text-violet-700",
-  "border-cyan-200 bg-cyan-50 text-cyan-700",
-];
-
-function getWideTableRecordRowId(record: WideTableRecord): number {
-  return Number(record.ROW_ID ?? record.id);
-}
-
-function formatRunTimestamp(value: Date): string {
-  return value.toISOString().replace("T", " ").replace("Z", "");
-}
-
-function buildDemoExecutionSnapshot(tasks: FetchTask[]): {
-  statusByTaskId: Map<string, FetchTask["status"]>;
-  completedTasks: number;
-  failedTasks: number;
-  taskGroupStatus: TaskGroup["status"];
-} {
-  const demoStatuses = buildDemoStatusSequence(tasks.length);
-  const statusByTaskId = new Map<string, FetchTask["status"]>();
-
-  tasks.forEach((task, index) => {
-    statusByTaskId.set(task.id, demoStatuses[index] ?? "pending");
-  });
-
-  return {
-    statusByTaskId,
-    completedTasks: demoStatuses.filter((status) => status === "completed").length,
-    failedTasks: demoStatuses.filter((status) => status === "failed").length,
-    taskGroupStatus: demoStatuses.includes("running")
-      ? "running"
-      : demoStatuses.includes("failed")
-        ? "partial"
-        : demoStatuses.includes("pending")
-          ? "pending"
-          : "completed",
-  };
-}
-
-function buildDemoStatusSequence(taskCount: number): FetchTask["status"][] {
-  if (taskCount <= 0) {
-    return [];
-  }
-
-  const seedStatuses: FetchTask["status"][] = ["completed", "running", "failed", "pending", "invalidated"];
-  const statuses = seedStatuses.slice(0, Math.min(seedStatuses.length, taskCount));
-  while (statuses.length < taskCount) {
-    statuses.push(statuses.length % 2 === 0 ? "completed" : "pending");
-  }
-  return statuses;
-}
-
-function buildDemoExecutionRecords(
-  task: FetchTask,
-  status: FetchTask["status"],
-  runId: string,
-  startedAt: string,
-): FetchTask["executionRecords"] {
-  const attempt = task.executionRecords.length + 1;
-  if (status === "pending" || status === "invalidated") {
-    return task.executionRecords;
-  }
-
-  return [
-    ...task.executionRecords,
-    {
-      id: buildExecutionRecordId(task.id, attempt, "manual"),
-      fetchTaskId: task.id,
-      attempt,
-      status: status === "completed" ? "success" : status === "failed" ? "failure" : "running",
-      triggeredBy: "manual",
-      taskGroupRunId: runId,
-      errorMessage: status === "failed" ? "示例任务执行失败，等待人工处理。" : undefined,
-      startedAt,
-      endedAt: status === "completed" || status === "failed" ? startedAt : undefined,
-    },
-  ];
-}
