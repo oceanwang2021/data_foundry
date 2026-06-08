@@ -31,3 +31,18 @@ data-foundry:
     base-url: http://127.0.0.1:8000
     # Optional hardening: if backend enables internal callback token check, set the same token here.
     callback-token: ""
+
+xxl:
+  job:
+    admin:
+      addresses: ""
+    accessToken: ""
+    timeout: 3
+    executor:
+      enabled: false
+      appname: data-foundry-scheduler
+      address: ""
+      ip: ""
+      port: 9999
+      logpath: ./logs/xxl-job/jobhandler
+      logretentiondays: 30

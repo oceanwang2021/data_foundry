@@ -1,0 +1,15 @@
+xxl:
+  job:
+    admin:
+      # The local Admin runs with server.servlet.context-path=/.
+      addresses: http://127.0.0.1:8080
+    accessToken: default_token
+    timeout: 3
+    executor:
+      enabled: true
+      appname: data-foundry-scheduler-local
+      address: ""
+      ip: 127.0.0.1
+      port: 9999
+      logpath: ./logs/xxl-job/jobhandler
+      logretentiondays: 30
