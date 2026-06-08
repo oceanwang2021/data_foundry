@@ -25,8 +25,13 @@ public class ScheduleJobController {
   @GetMapping("/api/schedule-jobs")
   public List<ScheduleJob> list(
       @RequestParam(value = "trigger_type", required = false) String triggerType,
-      @RequestParam(value = "status", required = false) String status) {
-    List<ScheduleJobReadDto> records = scheduleJobAppService.list(triggerType, status);
+      @RequestParam(value = "status", required = false) String status,
+      @RequestParam(value = "task_group_id", required = false) String taskGroupId,
+      @RequestParam(value = "schedule_rule_id", required = false) String scheduleRuleId,
+      @RequestParam(value = "job_source", required = false) String jobSource) {
+    List<ScheduleJobReadDto> records =
+        scheduleJobAppService.list(
+            triggerType, status, taskGroupId, scheduleRuleId, jobSource);
     List<ScheduleJob> out = new ArrayList<ScheduleJob>();
     for (ScheduleJobReadDto record : records) {
       out.add(toContract(record));
@@ -53,6 +58,11 @@ public class ScheduleJobController {
     dto.setId(record.getId());
     dto.setTaskGroupId(record.getTaskGroupId());
     dto.setTaskId(record.getTaskId());
+    dto.setJobSource(record.getJobSource());
+    dto.setScheduleRuleId(record.getScheduleRuleId());
+    dto.setBusinessDate(record.getBusinessDate());
+    dto.setRequestPayload(record.getRequestPayload());
+    dto.setErrorMessage(record.getErrorMessage());
     dto.setTriggerType(record.getTriggerType());
     dto.setStatus(record.getStatus());
     dto.setStartedAt(record.getStartedAt());

@@ -4,6 +4,11 @@ public class ScheduleJob {
   private String id;
   private String taskGroupId;
   private String taskId;
+  private String jobSource;
+  private String scheduleRuleId;
+  private String businessDate;
+  private String requestPayload;
+  private String errorMessage;
   private String triggerType;
   private String status;
   private String startedAt;
@@ -34,6 +39,17 @@ public class ScheduleJob {
   public void setTaskId(String taskId) {
     this.taskId = taskId;
   }
+
+  public String getJobSource() { return jobSource; }
+  public void setJobSource(String jobSource) { this.jobSource = jobSource; }
+  public String getScheduleRuleId() { return scheduleRuleId; }
+  public void setScheduleRuleId(String scheduleRuleId) { this.scheduleRuleId = scheduleRuleId; }
+  public String getBusinessDate() { return businessDate; }
+  public void setBusinessDate(String businessDate) { this.businessDate = businessDate; }
+  public String getRequestPayload() { return requestPayload; }
+  public void setRequestPayload(String requestPayload) { this.requestPayload = requestPayload; }
+  public String getErrorMessage() { return errorMessage; }
+  public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
 
   public String getTriggerType() {
     return triggerType;
@@ -83,4 +99,3 @@ public class ScheduleJob {
     this.logRef = logRef;
   }
 }
-

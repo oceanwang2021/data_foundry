@@ -40,6 +40,10 @@ public class ScheduleJobCreatedHandler {
     String jobId = event.getJobId();
     ScheduleJob record = scheduleJobRepository.get(jobId);
     if (record == null) return;
+    if ("RULE_DISPATCH".equalsIgnoreCase(record.getJobSource())) {
+      log.debug("Ignore RULE_DISPATCH schedule job event: jobId={}", jobId);
+      return;
+    }
 
     try {
       AgentExecutionRequest req = new AgentExecutionRequest();

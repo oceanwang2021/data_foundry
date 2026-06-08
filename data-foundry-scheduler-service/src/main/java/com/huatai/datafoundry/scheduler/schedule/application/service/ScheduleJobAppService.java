@@ -25,8 +25,15 @@ public class ScheduleJobAppService {
     this.eventPublisher = eventPublisher;
   }
 
-  public List<ScheduleJobReadDto> list(String triggerType, String status) {
-    List<ScheduleJob> records = scheduleJobRepository.list(triggerType, status);
+  public List<ScheduleJobReadDto> list(
+      String triggerType,
+      String status,
+      String taskGroupId,
+      String scheduleRuleId,
+      String jobSource) {
+    List<ScheduleJob> records =
+        scheduleJobRepository.list(
+            triggerType, status, taskGroupId, scheduleRuleId, jobSource);
     List<ScheduleJobReadDto> out = new ArrayList<ScheduleJobReadDto>();
     if (records == null) return out;
     for (ScheduleJob record : records) {
@@ -68,6 +75,10 @@ public class ScheduleJobAppService {
     record.setId(id);
     record.setTaskGroupId(body.getTaskGroupId());
     record.setTaskId(body.getTaskId());
+    record.setJobSource(defaultValue(body.getJobSource(), "TASK_EXECUTION").toUpperCase());
+    record.setScheduleRuleId(body.getScheduleRuleId());
+    record.setBusinessDate(body.getBusinessDate());
+    record.setRequestPayload(body.getRequestPayload());
     record.setTriggerType(triggerType);
     record.setStatus("running");
     record.setStartedAt(startedAt);
@@ -76,7 +87,9 @@ public class ScheduleJobAppService {
     record.setLogRef("log://scheduler/" + id);
     scheduleJobRepository.insert(record);
 
-    eventPublisher.publishEvent(new ScheduleJobCreatedEvent(id));
+    if (!"RULE_DISPATCH".equalsIgnoreCase(record.getJobSource())) {
+      eventPublisher.publishEvent(new ScheduleJobCreatedEvent(id));
+    }
     return toReadDto(record);
   }
 
@@ -85,6 +98,11 @@ public class ScheduleJobAppService {
     dto.setId(record.getId());
     dto.setTaskGroupId(record.getTaskGroupId());
     dto.setTaskId(record.getTaskId());
+    dto.setJobSource(record.getJobSource());
+    dto.setScheduleRuleId(record.getScheduleRuleId());
+    dto.setBusinessDate(record.getBusinessDate());
+    dto.setRequestPayload(record.getRequestPayload());
+    dto.setErrorMessage(record.getErrorMessage());
     dto.setTriggerType(record.getTriggerType());
     dto.setStatus(record.getStatus());
     dto.setStartedAt(record.getStartedAt());
@@ -100,5 +118,9 @@ public class ScheduleJobAppService {
     }
     UUID uuid = UUID.nameUUIDFromBytes(("schedule-job:" + idempotencyKey.trim()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     return uuid.toString();
+  }
+
+  private static String defaultValue(String value, String fallback) {
+    return value != null && !value.trim().isEmpty() ? value.trim() : fallback;
   }
 }

@@ -17,8 +17,14 @@ public class MybatisScheduleJobRepository implements ScheduleJobRepository {
   }
 
   @Override
-  public List<ScheduleJob> list(String triggerType, String status) {
-    List<ScheduleJobRecord> records = mapper.list(triggerType, status);
+  public List<ScheduleJob> list(
+      String triggerType,
+      String status,
+      String taskGroupId,
+      String scheduleRuleId,
+      String jobSource) {
+    List<ScheduleJobRecord> records =
+        mapper.list(triggerType, status, taskGroupId, scheduleRuleId, jobSource);
     if (records == null) return new ArrayList<ScheduleJob>();
     List<ScheduleJob> out = new ArrayList<ScheduleJob>(records.size());
     for (ScheduleJobRecord r : records) {
@@ -44,11 +50,28 @@ public class MybatisScheduleJobRepository implements ScheduleJobRepository {
     return mapper.updateStatus(jobId, status, endedAt, logRef);
   }
 
+  @Override
+  public int updateDispatchResult(
+      String jobId,
+      String taskGroupId,
+      String businessDate,
+      String status,
+      String endedAt,
+      String errorMessage) {
+    return mapper.updateDispatchResult(
+        jobId, taskGroupId, businessDate, status, endedAt, errorMessage);
+  }
+
   private static ScheduleJob toDomain(ScheduleJobRecord record) {
     ScheduleJob job = new ScheduleJob();
     job.setId(record.getId());
     job.setTaskGroupId(record.getTaskGroupId());
     job.setTaskId(record.getTaskId());
+    job.setJobSource(record.getJobSource());
+    job.setScheduleRuleId(record.getScheduleRuleId());
+    job.setBusinessDate(record.getBusinessDate());
+    job.setRequestPayload(record.getRequestPayload());
+    job.setErrorMessage(record.getErrorMessage());
     job.setTriggerType(record.getTriggerType());
     job.setStatus(record.getStatus());
     job.setStartedAt(record.getStartedAt());
@@ -64,6 +87,11 @@ public class MybatisScheduleJobRepository implements ScheduleJobRepository {
     record.setId(job.getId());
     record.setTaskGroupId(job.getTaskGroupId());
     record.setTaskId(job.getTaskId());
+    record.setJobSource(job.getJobSource());
+    record.setScheduleRuleId(job.getScheduleRuleId());
+    record.setBusinessDate(job.getBusinessDate());
+    record.setRequestPayload(job.getRequestPayload());
+    record.setErrorMessage(job.getErrorMessage());
     record.setTriggerType(job.getTriggerType());
     record.setStatus(job.getStatus());
     record.setStartedAt(job.getStartedAt());
@@ -73,4 +101,3 @@ public class MybatisScheduleJobRepository implements ScheduleJobRepository {
     return record;
   }
 }
-
