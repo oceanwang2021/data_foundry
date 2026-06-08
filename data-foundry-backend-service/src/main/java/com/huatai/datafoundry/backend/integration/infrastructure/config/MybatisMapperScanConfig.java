@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
       "com.huatai.datafoundry.backend.account.infrastructure.persistence.mybatis.mapper",
       "com.huatai.datafoundry.backend.project.infrastructure.persistence.mybatis.mapper",
       "com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper",
-      "com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.mapper"
+      "com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.mapper",
+      "com.huatai.datafoundry.backend.schedule.infrastructure.persistence.mybatis.mapper"
     })
 public class MybatisMapperScanConfig {}

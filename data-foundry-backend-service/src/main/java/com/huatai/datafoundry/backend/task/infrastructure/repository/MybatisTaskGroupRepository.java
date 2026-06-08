@@ -28,6 +28,13 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
   }
 
   @Override
+  public TaskGroup getByScheduleRuleAndBusinessDate(String scheduleRuleId, String businessDate) {
+    TaskGroupRecord record =
+        taskGroupMapper.getByScheduleRuleAndBusinessDate(scheduleRuleId, businessDate);
+    return record != null ? toDomain(record) : null;
+  }
+
+  @Override
   public List<TaskGroup> listAll() {
     return toDomainList(taskGroupMapper.listAll());
   }
@@ -53,6 +60,11 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
   @Override
   public int upsert(TaskGroup taskGroup) {
     return taskGroupMapper.upsert(toRecord(taskGroup));
+  }
+
+  @Override
+  public int insertIfAbsent(TaskGroup taskGroup) {
+    return taskGroupMapper.insertIfAbsent(toRecord(taskGroup));
   }
 
   @Override
@@ -94,6 +106,7 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     tg.setWideTableId(record.getWideTableId());
     tg.setBatchId(record.getBatchId());
     tg.setBusinessDate(record.getBusinessDate());
+    tg.setFrequency(record.getFrequency());
     tg.setSourceType(record.getSourceType());
     tg.setStatus(record.getStatus());
     tg.setScheduleRuleId(record.getScheduleRuleId());
@@ -126,6 +139,7 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     record.setWideTableId(taskGroup.getWideTableId());
     record.setBatchId(taskGroup.getBatchId());
     record.setBusinessDate(taskGroup.getBusinessDate());
+    record.setFrequency(taskGroup.getFrequency());
     record.setSourceType(taskGroup.getSourceType());
     record.setStatus(taskGroup.getStatus());
     record.setScheduleRuleId(taskGroup.getScheduleRuleId());

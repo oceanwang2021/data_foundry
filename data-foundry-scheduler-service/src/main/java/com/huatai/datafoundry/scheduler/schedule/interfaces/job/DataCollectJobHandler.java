@@ -8,6 +8,7 @@ import com.xxl.job.core.handler.annotation.XxlJob;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import java.util.Map;
 
 @Component
 public class DataCollectJobHandler {
@@ -30,18 +31,23 @@ public class DataCollectJobHandler {
 
     try {
       ScheduleDispatchParam parsed = objectMapper.readValue(rawParam, ScheduleDispatchParam.class);
-      ScheduleDispatchParam prepared = dispatchAppService.prepareDispatch(parsed);
+      String scheduleJobId = String.valueOf(XxlJobHelper.getJobId());
+      String idempotencyKey =
+          "xxl-job:" + XxlJobHelper.getJobId() + ":" + XxlJobHelper.getJobLogFileName();
+      Map<String, Object> result =
+          dispatchAppService.dispatch(parsed, rawParam, scheduleJobId, idempotencyKey);
       XxlJobHelper.log(
-          "Schedule parameter accepted, ruleId={}, frequency={}, triggerType={}",
-          prepared.getRuleId(),
-          prepared.getFrequency(),
-          prepared.getTriggerType());
+          "Schedule dispatch completed, ruleId={}, status={}, taskGroupId={}, businessDate={}",
+          parsed.getRuleId(),
+          result.get("status"),
+          result.get("task_group_id"),
+          result.get("business_date"));
       log.info(
-          "XXL-JOB schedule parameter accepted: ruleId={}, frequency={}, triggerType={}, businessDate={}",
-          prepared.getRuleId(),
-          prepared.getFrequency(),
-          prepared.getTriggerType(),
-          prepared.getBusinessDate());
+          "XXL-JOB schedule dispatch completed: ruleId={}, status={}, taskGroupId={}, businessDate={}",
+          parsed.getRuleId(),
+          result.get("status"),
+          result.get("task_group_id"),
+          result.get("business_date"));
     } catch (Exception ex) {
       XxlJobHelper.log("Schedule parameter rejected, error={}", ex.getMessage());
       log.warn("XXL-JOB schedule parameter rejected: {}", ex.getMessage(), ex);

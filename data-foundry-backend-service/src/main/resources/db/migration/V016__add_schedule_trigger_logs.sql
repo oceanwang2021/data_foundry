@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS schedule_trigger_logs (
+  id                 VARCHAR(64) NOT NULL PRIMARY KEY,
+  schedule_rule_id   VARCHAR(64) NOT NULL,
+  schedule_job_id    VARCHAR(64) NULL,
+  task_group_id      VARCHAR(64) NULL,
+  trigger_type       VARCHAR(32) NOT NULL,
+  trigger_source     VARCHAR(32) NOT NULL,
+  business_date      VARCHAR(32) NULL,
+  trigger_param_json LONGTEXT    NULL,
+  trigger_status     VARCHAR(32) NOT NULL,
+  skip_reason        VARCHAR(255) NULL,
+  error_message      TEXT        NULL,
+  started_at         DATETIME    NULL,
+  ended_at           DATETIME    NULL,
+  created_at         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_schedule_trigger_logs_rule_created_at (schedule_rule_id, created_at),
+  INDEX idx_schedule_trigger_logs_task_group_id (task_group_id),
+  INDEX idx_schedule_trigger_logs_status_created_at (trigger_status, created_at),
+  INDEX idx_schedule_trigger_logs_business_date (business_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -9,6 +9,7 @@ public class TaskGroup {
   private String wideTableId;
   private String batchId;
   private String businessDate;
+  private String frequency;
   private String sourceType;
   private String status;
   private String scheduleRuleId;
@@ -76,6 +77,14 @@ public class TaskGroup {
 
   public void setBusinessDate(String businessDate) {
     this.businessDate = businessDate;
+  }
+
+  public String getFrequency() {
+    return frequency;
+  }
+
+  public void setFrequency(String frequency) {
+    this.frequency = frequency;
   }
 
   public String getSourceType() {

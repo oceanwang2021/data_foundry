@@ -696,6 +696,85 @@ public class TaskPlanAppService {
     taskGroupRepository.upsert(withTotals(taskGroup, tasks.size()));
   }
 
+  /**
+   * Scheduled rules use one task group per business period. Generate tasks for every indicator
+   * group inside that aggregate so the rule/business-date pair remains the hard idempotency key.
+   */
+  public void ensureFetchTasksForScheduledTaskGroup(TaskGroup taskGroup) {
+    if (taskGroup == null) return;
+
+    WideTablePlanSource wideTable =
+        wideTableReadRepository.getByIdForRequirement(
+            taskGroup.getRequirementId(), taskGroup.getWideTableId());
+    if (wideTable == null) {
+      return;
+    }
+    List<FetchTask> existingTasks = fetchTaskRepository.listByTaskGroup(taskGroup.getId());
+    if (existingTasks != null && !existingTasks.isEmpty()) {
+      taskGroupRepository.upsert(withTotals(taskGroup, existingTasks.size()));
+      return;
+    }
+
+    Scope scope = parseScope(wideTable.getScopeJson());
+    List<IndicatorGroup> indicatorGroups =
+        parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTable.getId());
+    if (indicatorGroups == null || indicatorGroups.isEmpty()) {
+      return;
+    }
+    List<ParameterRow> parameterRows =
+        resolveParameterRowsForTaskGroup(
+            resolveScopeParameterRows(scope), taskGroup.getBusinessDate(), scope.frequency);
+    List<FetchTask> tasks = new ArrayList<FetchTask>();
+    for (IndicatorGroup indicatorGroup : indicatorGroups) {
+      PlanFetchTasksInput input = new PlanFetchTasksInput();
+      input.taskGroupId = taskGroup.getId();
+      input.businessDate = taskGroup.getBusinessDate();
+      input.planVersion = taskGroup.getPlanVersion() != null ? taskGroup.getPlanVersion() : 1;
+      input.schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion() : 1;
+      input.partitionKey = indicatorGroup.id;
+      input.dimensions = scope.dimensions;
+      input.parameterRows = parameterRows;
+      input.indicatorGroups = indicatorGroups;
+
+      List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
+      for (FetchTaskDraft draft : drafts) {
+        FetchTask task = new FetchTask();
+        task.setId(draft.id);
+        task.setSortOrder(tasks.size());
+        task.setRequirementId(taskGroup.getRequirementId());
+        task.setWideTableId(taskGroup.getWideTableId());
+        task.setTaskGroupId(taskGroup.getId());
+        task.setBatchId(taskGroup.getBatchId());
+        task.setRowId(draft.rowId);
+        task.setIndicatorGroupId(draft.indicatorGroupId);
+        task.setIndicatorGroupName(draft.indicatorGroupName);
+        task.setName(draft.name);
+        task.setSchemaVersion(draft.schemaVersion);
+        task.setExecutionMode(draft.executionMode);
+        task.setIndicatorKeysJson(writeJson(draft.indicatorKeys));
+        task.setDimensionValuesJson(writeJson(draft.dimensionValues));
+        task.setPromptTemplateSnapshot(indicatorGroup.promptTemplate);
+        task.setBusinessDate(draft.businessDate);
+        task.setRenderedPromptText(
+            renderPromptTemplate(
+                indicatorGroup.promptTemplate,
+                draft.dimensionValues,
+                draft.businessDate,
+                scope.frequency));
+        task.setStatus(draft.status);
+        task.setCanRerun(draft.canRerun);
+        task.setPlanVersion(draft.planVersion);
+        task.setRowBindingKey(draft.rowBindingKey);
+        tasks.add(task);
+      }
+    }
+
+    if (!tasks.isEmpty()) {
+      fetchTaskRepository.upsertBatch(tasks);
+    }
+    taskGroupRepository.upsert(withTotals(taskGroup, tasks.size()));
+  }
+
   public List<FetchTask> refreshPromptSnapshotsForCollection(List<FetchTask> fetchTasks) {
     if (fetchTasks == null || fetchTasks.isEmpty()) {
       return Collections.emptyList();
@@ -754,6 +833,7 @@ public class TaskPlanAppService {
     tg.setWideTableId(taskGroup.getWideTableId());
     tg.setBatchId(taskGroup.getBatchId());
     tg.setBusinessDate(taskGroup.getBusinessDate());
+    tg.setFrequency(taskGroup.getFrequency());
     tg.setSourceType(taskGroup.getSourceType());
     tg.setStatus(taskGroup.getStatus());
     tg.setScheduleRuleId(taskGroup.getScheduleRuleId());

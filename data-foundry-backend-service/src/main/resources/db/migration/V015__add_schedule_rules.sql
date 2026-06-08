@@ -1,0 +1,33 @@
+CREATE TABLE IF NOT EXISTS schedule_rules (
+  id                  VARCHAR(64)  NOT NULL PRIMARY KEY,
+  requirement_id      VARCHAR(64)  NOT NULL,
+  wide_table_id       VARCHAR(64)  NOT NULL,
+  indicator_group_id  VARCHAR(64)  NOT NULL,
+  rule_name           VARCHAR(255) NOT NULL,
+  rule_code           VARCHAR(128) NULL,
+  frequency           VARCHAR(32)  NOT NULL,
+  cron_expression     VARCHAR(128) NOT NULL,
+  business_date_mode  VARCHAR(64)  NOT NULL DEFAULT 'PREVIOUS_PERIOD',
+  xxl_job_group       VARCHAR(128) NULL,
+  xxl_executor_name   VARCHAR(128) NULL,
+  xxl_job_handler     VARCHAR(128) NOT NULL DEFAULT 'dataCollectJobHandler',
+  xxl_job_id          VARCHAR(64)  NULL,
+  enabled             TINYINT(1)   NOT NULL DEFAULT 1,
+  last_trigger_time   DATETIME     NULL,
+  last_success_time   DATETIME     NULL,
+  last_trigger_status VARCHAR(32)  NULL,
+  next_trigger_time   DATETIME     NULL,
+  created_by          VARCHAR(128) NULL,
+  updated_by          VARCHAR(128) NULL,
+  created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_schedule_rules_requirement_id (requirement_id),
+  INDEX idx_schedule_rules_wide_table_id (wide_table_id),
+  INDEX idx_schedule_rules_enabled_frequency (enabled, frequency),
+  UNIQUE KEY uk_schedule_rules_indicator_group (
+    requirement_id,
+    wide_table_id,
+    indicator_group_id
+  ),
+  UNIQUE KEY uk_schedule_rules_rule_code (rule_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

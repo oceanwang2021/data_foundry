@@ -8,6 +8,8 @@ public interface TaskGroupRepository {
 
   TaskGroup getById(String taskGroupId);
 
+  TaskGroup getByScheduleRuleAndBusinessDate(String scheduleRuleId, String businessDate);
+
   List<TaskGroup> listAll();
 
   List<TaskGroup> listByIds(List<String> taskGroupIds);
@@ -17,6 +19,8 @@ public interface TaskGroupRepository {
   List<TaskGroup> listByRequirementAndWideTable(String requirementId, String wideTableId);
 
   int upsert(TaskGroup taskGroup);
+
+  int insertIfAbsent(TaskGroup taskGroup);
 
   int upsertBatch(List<TaskGroup> taskGroups);
 

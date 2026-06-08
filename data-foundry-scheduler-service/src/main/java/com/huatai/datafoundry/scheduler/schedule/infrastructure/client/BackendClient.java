@@ -16,6 +16,7 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
 public class BackendClient implements BackendGateway {
@@ -33,18 +34,47 @@ public class BackendClient implements BackendGateway {
   }
 
   @Override
+  public Map<String, Object> dispatchScheduleRule(
+      String ruleId, Object body, String idempotencyKey) {
+    if (ruleId == null || ruleId.trim().isEmpty()) {
+      throw new IllegalArgumentException("ruleId is required");
+    }
+    HttpHeaders headers = internalHeaders(idempotencyKey);
+    URI uri =
+        UriComponentsBuilder.fromHttpUrl(backendBaseUrl)
+            .pathSegment("internal", "scheduler", "rules", ruleId.trim(), "dispatch")
+            .build()
+            .encode()
+            .toUri();
+    try {
+      ResponseEntity<Object> response =
+          restTemplate.exchange(
+              uri, HttpMethod.POST, new HttpEntity<Object>(body, headers), Object.class);
+      if (!response.getStatusCode().is2xxSuccessful()) {
+        throw new ResponseStatusException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "Backend schedule dispatch rejected: " + response.getStatusCode());
+      }
+      if (response.getBody() instanceof Map) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) response.getBody();
+        return result;
+      }
+      return new HashMap<String, Object>();
+    } catch (HttpStatusCodeException ex) {
+      throw translateDownstream(ex);
+    } catch (RestClientException ex) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable", ex);
+    }
+  }
+
+  @Override
   public void callbackExecutionResult(Map<String, Object> body, String idempotencyKey) {
     if (body == null) {
       return;
     }
-    HttpHeaders headers = new HttpHeaders();
-    headers.add("Content-Type", "application/json");
-    if (idempotencyKey != null && idempotencyKey.trim().length() > 0) {
-      headers.add("X-Idempotency-Key", idempotencyKey.trim());
-    }
-    if (callbackToken != null && callbackToken.trim().length() > 0) {
-      headers.add("X-Internal-Token", callbackToken.trim());
-    }
+    HttpHeaders headers = internalHeaders(idempotencyKey);
 
     try {
       ResponseEntity<Object> response =
@@ -71,13 +101,7 @@ public class BackendClient implements BackendGateway {
       return new HashMap<String, Object>();
     }
 
-    HttpHeaders headers = new HttpHeaders();
-    if (idempotencyKey != null && idempotencyKey.trim().length() > 0) {
-      headers.add("X-Idempotency-Key", idempotencyKey.trim());
-    }
-    if (callbackToken != null && callbackToken.trim().length() > 0) {
-      headers.add("X-Internal-Token", callbackToken.trim());
-    }
+    HttpHeaders headers = internalHeaders(idempotencyKey);
 
     try {
       ResponseEntity<Object> response =
@@ -115,5 +139,17 @@ public class BackendClient implements BackendGateway {
       return new ResponseStatusException(status, "Backend callback rejected");
     }
     return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable");
+  }
+
+  private HttpHeaders internalHeaders(String idempotencyKey) {
+    HttpHeaders headers = new HttpHeaders();
+    headers.add("Content-Type", "application/json");
+    if (idempotencyKey != null && idempotencyKey.trim().length() > 0) {
+      headers.add("X-Idempotency-Key", idempotencyKey.trim());
+    }
+    if (callbackToken != null && callbackToken.trim().length() > 0) {
+      headers.add("X-Internal-Token", callbackToken.trim());
+    }
+    return headers;
   }
 }

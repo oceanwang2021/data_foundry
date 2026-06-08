@@ -1,10 +1,18 @@
 package com.huatai.datafoundry.scheduler.schedule.application.service;
 
 import com.huatai.datafoundry.scheduler.schedule.application.dto.ScheduleDispatchParam;
+import com.huatai.datafoundry.scheduler.schedule.application.dto.DispatchScheduleRuleCommand;
+import com.huatai.datafoundry.scheduler.schedule.domain.gateway.BackendGateway;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 
 @Service
 public class XxlJobDispatchAppService {
+  private final BackendGateway backendGateway;
+
+  public XxlJobDispatchAppService(BackendGateway backendGateway) {
+    this.backendGateway = backendGateway;
+  }
 
   public ScheduleDispatchParam prepareDispatch(ScheduleDispatchParam param) {
     if (param == null) {
@@ -19,6 +27,24 @@ public class XxlJobDispatchAppService {
         defaultValue(param.getBusinessDateMode(), "PREVIOUS_PERIOD").toUpperCase());
     param.setOperator(defaultValue(param.getOperator(), "system"));
     return param;
+  }
+
+  public Map<String, Object> dispatch(
+      ScheduleDispatchParam param,
+      String rawJobParam,
+      String scheduleJobId,
+      String idempotencyKey) {
+    ScheduleDispatchParam prepared = prepareDispatch(param);
+    DispatchScheduleRuleCommand command = new DispatchScheduleRuleCommand();
+    command.setTriggerType(prepared.getTriggerType());
+    command.setTriggerSource("XXL_JOB");
+    command.setFrequency(prepared.getFrequency());
+    command.setBusinessDate(prepared.getBusinessDate());
+    command.setBusinessDateMode(prepared.getBusinessDateMode());
+    command.setScheduleJobId(scheduleJobId);
+    command.setXxlJobParam(rawJobParam);
+    command.setOperator(prepared.getOperator());
+    return backendGateway.dispatchScheduleRule(prepared.getRuleId(), command, idempotencyKey);
   }
 
   private static String requireText(String value, String message) {
