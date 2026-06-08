@@ -6,6 +6,7 @@ public class ScheduleRule {
   private String id;
   private String requirementId;
   private String wideTableId;
+  private String indicatorGroupId;
   private String ruleName;
   private String ruleCode;
   private String frequency;
@@ -31,6 +32,8 @@ public class ScheduleRule {
   public void setRequirementId(String requirementId) { this.requirementId = requirementId; }
   public String getWideTableId() { return wideTableId; }
   public void setWideTableId(String wideTableId) { this.wideTableId = wideTableId; }
+  public String getIndicatorGroupId() { return indicatorGroupId; }
+  public void setIndicatorGroupId(String indicatorGroupId) { this.indicatorGroupId = indicatorGroupId; }
   public String getRuleName() { return ruleName; }
   public void setRuleName(String ruleName) { this.ruleName = ruleName; }
   public String getRuleCode() { return ruleCode; }

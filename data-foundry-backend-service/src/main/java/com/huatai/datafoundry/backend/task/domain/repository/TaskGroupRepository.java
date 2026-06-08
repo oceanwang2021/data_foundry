@@ -8,7 +8,8 @@ public interface TaskGroupRepository {
 
   TaskGroup getById(String taskGroupId);
 
-  TaskGroup getByScheduleRuleAndBusinessDate(String scheduleRuleId, String businessDate);
+  TaskGroup getByScheduleRulePeriodAndIndicatorGroup(
+      String scheduleRuleId, String businessDate, String indicatorGroupId);
 
   List<TaskGroup> listAll();
 

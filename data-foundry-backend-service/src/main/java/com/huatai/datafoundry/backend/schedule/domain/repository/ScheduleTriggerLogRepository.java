@@ -11,4 +11,7 @@ public interface ScheduleTriggerLogRepository {
       String status,
       String skipReason,
       String errorMessage);
+
+  int updateExecutionStatusByTaskGroup(
+      String taskGroupId, String status, String errorMessage);
 }

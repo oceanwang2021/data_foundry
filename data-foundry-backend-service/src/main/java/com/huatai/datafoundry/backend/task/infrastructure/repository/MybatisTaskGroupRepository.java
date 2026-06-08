@@ -28,9 +28,11 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
   }
 
   @Override
-  public TaskGroup getByScheduleRuleAndBusinessDate(String scheduleRuleId, String businessDate) {
+  public TaskGroup getByScheduleRulePeriodAndIndicatorGroup(
+      String scheduleRuleId, String businessDate, String indicatorGroupId) {
     TaskGroupRecord record =
-        taskGroupMapper.getByScheduleRuleAndBusinessDate(scheduleRuleId, businessDate);
+        taskGroupMapper.getByScheduleRulePeriodAndIndicatorGroup(
+            scheduleRuleId, businessDate, indicatorGroupId);
     return record != null ? toDomain(record) : null;
   }
 
@@ -110,6 +112,7 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     tg.setSourceType(record.getSourceType());
     tg.setStatus(record.getStatus());
     tg.setScheduleRuleId(record.getScheduleRuleId());
+    tg.setIndicatorGroupId(record.getIndicatorGroupId());
     tg.setBackfillRequestId(record.getBackfillRequestId());
     tg.setPlanVersion(record.getPlanVersion());
     tg.setGroupKind(record.getGroupKind());
@@ -143,6 +146,7 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     record.setSourceType(taskGroup.getSourceType());
     record.setStatus(taskGroup.getStatus());
     record.setScheduleRuleId(taskGroup.getScheduleRuleId());
+    record.setIndicatorGroupId(taskGroup.getIndicatorGroupId());
     record.setBackfillRequestId(taskGroup.getBackfillRequestId());
     record.setPlanVersion(taskGroup.getPlanVersion());
     record.setGroupKind(taskGroup.getGroupKind());

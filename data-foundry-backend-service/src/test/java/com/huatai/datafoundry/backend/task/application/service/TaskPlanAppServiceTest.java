@@ -9,7 +9,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
+import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.WideTableReadRepository;
@@ -26,6 +28,84 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 public class TaskPlanAppServiceTest {
+
+  @Test
+  void scheduledTaskGroupGeneratesOnlyBoundIndicatorGroup() {
+    WideTableReadRepository wideTableRepository = Mockito.mock(WideTableReadRepository.class);
+    TaskGroupRepository taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
+    FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
+    TaskPlanAppService svc =
+        new TaskPlanAppService(
+            wideTableRepository,
+            taskGroupRepository,
+            fetchTaskRepository,
+            new TaskPlanDomainService(),
+            null,
+            new ObjectMapper());
+
+    WideTablePlanSource wideTable = new WideTablePlanSource();
+    wideTable.setId("WT1");
+    wideTable.setRequirementId("R1");
+    wideTable.setSchemaVersion(1);
+    wideTable.setScopeJson("{}");
+    wideTable.setIndicatorGroupsJson(
+        "[{\"id\":\"ig-1\",\"name\":\"Group 1\",\"indicator_columns\":[\"a\"]},"
+            + "{\"id\":\"ig-2\",\"name\":\"Group 2\",\"indicator_columns\":[\"b\"]}]");
+    when(wideTableRepository.getByIdForRequirement("R1", "WT1")).thenReturn(wideTable);
+    when(fetchTaskRepository.listByTaskGroup("TG1"))
+        .thenReturn(Collections.<FetchTask>emptyList());
+
+    TaskGroup taskGroup = new TaskGroup();
+    taskGroup.setId("TG1");
+    taskGroup.setRequirementId("R1");
+    taskGroup.setWideTableId("WT1");
+    taskGroup.setBatchId("TG1");
+    taskGroup.setBusinessDate("2026-05");
+    taskGroup.setIndicatorGroupId("ig-2");
+    taskGroup.setPlanVersion(1);
+
+    svc.ensureFetchTasksForScheduledTaskGroup(taskGroup);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<FetchTask>> captor = ArgumentCaptor.forClass((Class) List.class);
+    verify(fetchTaskRepository).upsertBatch(captor.capture());
+    assertEquals(1, captor.getValue().size());
+    assertEquals("ig-2", captor.getValue().get(0).getIndicatorGroupId());
+    assertEquals("ig-2", taskGroup.getPartitionKey());
+    assertEquals("Group 2", taskGroup.getPartitionLabel());
+  }
+
+  @Test
+  void scheduledTaskGroupRejectsUnknownIndicatorGroup() {
+    WideTableReadRepository wideTableRepository = Mockito.mock(WideTableReadRepository.class);
+    TaskPlanAppService svc =
+        new TaskPlanAppService(
+            wideTableRepository,
+            Mockito.mock(TaskGroupRepository.class),
+            Mockito.mock(FetchTaskRepository.class),
+            new TaskPlanDomainService(),
+            null,
+            new ObjectMapper());
+
+    WideTablePlanSource wideTable = new WideTablePlanSource();
+    wideTable.setId("WT1");
+    wideTable.setRequirementId("R1");
+    wideTable.setScopeJson("{}");
+    wideTable.setIndicatorGroupsJson("[{\"id\":\"ig-1\",\"name\":\"Group 1\"}]");
+    when(wideTableRepository.getByIdForRequirement("R1", "WT1")).thenReturn(wideTable);
+
+    TaskGroup taskGroup = new TaskGroup();
+    taskGroup.setId("TG1");
+    taskGroup.setRequirementId("R1");
+    taskGroup.setWideTableId("WT1");
+    taskGroup.setIndicatorGroupId("ig-missing");
+
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> svc.ensureFetchTasksForScheduledTaskGroup(taskGroup));
+    assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+  }
 
   @Test
   void persistPlanDoesNotRegressStatusOrCounters() {

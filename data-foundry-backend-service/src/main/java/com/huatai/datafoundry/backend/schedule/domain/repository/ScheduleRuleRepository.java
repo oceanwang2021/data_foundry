@@ -8,4 +8,6 @@ public interface ScheduleRuleRepository {
 
   int updateLastTrigger(
       String id, LocalDateTime triggerTime, LocalDateTime successTime, String triggerStatus);
+
+  int updateExecutionStatus(String id, LocalDateTime successTime, String triggerStatus);
 }

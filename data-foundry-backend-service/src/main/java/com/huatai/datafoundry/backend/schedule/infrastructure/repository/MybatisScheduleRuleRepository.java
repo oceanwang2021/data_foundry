@@ -24,4 +24,10 @@ public class MybatisScheduleRuleRepository implements ScheduleRuleRepository {
       String id, LocalDateTime triggerTime, LocalDateTime successTime, String triggerStatus) {
     return mapper.updateLastTrigger(id, triggerTime, successTime, triggerStatus);
   }
+
+  @Override
+  public int updateExecutionStatus(
+      String id, LocalDateTime successTime, String triggerStatus) {
+    return mapper.updateExecutionStatus(id, successTime, triggerStatus);
+  }
 }

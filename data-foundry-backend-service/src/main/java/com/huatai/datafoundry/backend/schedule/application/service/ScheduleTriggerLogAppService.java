@@ -35,8 +35,8 @@ public class ScheduleTriggerLogAppService {
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void markSuccess(String id, String taskGroupId) {
-    repository.updateResult(id, taskGroupId, "SUCCESS", null, null);
+  public void markDispatched(String id, String taskGroupId) {
+    repository.updateResult(id, taskGroupId, "DISPATCHED", null, null);
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)

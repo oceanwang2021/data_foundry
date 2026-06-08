@@ -14,7 +14,7 @@ public interface TaskGroupMapper {
   @Select(
       "select "
           + "id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status, "
-          + "schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
+          + "schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
           + "partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks, "
           + "cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at, created_at, updated_at "
           + "from task_groups "
@@ -25,7 +25,7 @@ public interface TaskGroupMapper {
   @Select(
       "select "
           + "id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status, "
-          + "schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
+          + "schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
           + "partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks, "
           + "cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at, created_at, updated_at "
           + "from task_groups "
@@ -35,7 +35,7 @@ public interface TaskGroupMapper {
   @Select(
       "select "
           + "id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status, "
-          + "schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
+          + "schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
           + "partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks, "
           + "cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at, created_at, updated_at "
           + "from task_groups "
@@ -48,7 +48,7 @@ public interface TaskGroupMapper {
   @Select(
       "select "
           + "id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status, "
-          + "schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
+          + "schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
           + "partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks, "
           + "cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at, created_at, updated_at "
           + "from task_groups where id = #{id} limit 1")
@@ -57,19 +57,21 @@ public interface TaskGroupMapper {
   @Select(
       "select "
           + "id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status, "
-          + "schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
+          + "schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, "
           + "partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks, "
           + "cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at, created_at, updated_at "
-          + "from task_groups where schedule_rule_id = #{scheduleRuleId} and business_date = #{businessDate} limit 1")
-  TaskGroupRecord getByScheduleRuleAndBusinessDate(
+          + "from task_groups where schedule_rule_id = #{scheduleRuleId} and business_date = #{businessDate} "
+          + "and indicator_group_id = #{indicatorGroupId} limit 1")
+  TaskGroupRecord getByScheduleRulePeriodAndIndicatorGroup(
       @Param("scheduleRuleId") String scheduleRuleId,
-      @Param("businessDate") String businessDate);
+      @Param("businessDate") String businessDate,
+      @Param("indicatorGroupId") String indicatorGroupId);
 
   @Select({
       "<script>",
       "select ",
       "  id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status, ",
-      "  schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, ",
+      "  schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key, ",
       "  partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks, ",
       "  cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at, created_at, updated_at ",
       "from task_groups ",
@@ -87,12 +89,12 @@ public interface TaskGroupMapper {
   @Insert({
       "insert into task_groups (",
       "  id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status,",
-      "  schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key,",
+      "  schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key,",
       "  partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks,",
       "  cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at",
       ") values (",
       "  #{id}, #{sortOrder}, #{requirementId}, #{wideTableId}, #{batchId}, #{businessDate}, #{frequency}, #{sourceType}, #{status},",
-      "  #{scheduleRuleId}, #{backfillRequestId}, #{planVersion}, #{groupKind}, #{partitionType}, #{partitionKey},",
+      "  #{scheduleRuleId}, #{indicatorGroupId}, #{backfillRequestId}, #{planVersion}, #{groupKind}, #{partitionType}, #{partitionKey},",
       "  #{partitionLabel}, #{totalTasks}, #{pendingTasks}, #{runningTasks}, #{completedTasks}, #{failedTasks},",
       "  #{cancelledTasks}, #{invalidatedTasks}, #{triggeredBy}, #{lastAggregatedAt}",
       ") on duplicate key update ",
@@ -103,6 +105,7 @@ public interface TaskGroupMapper {
       "  source_type = values(source_type),",
       "  status = values(status),",
       "  schedule_rule_id = values(schedule_rule_id),",
+      "  indicator_group_id = values(indicator_group_id),",
       "  backfill_request_id = values(backfill_request_id),",
       "  plan_version = values(plan_version),",
       "  group_kind = values(group_kind),",
@@ -125,12 +128,12 @@ public interface TaskGroupMapper {
   @Insert({
       "insert ignore into task_groups (",
       "  id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status,",
-      "  schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key,",
+      "  schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key,",
       "  partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks,",
       "  cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at",
       ") values (",
       "  #{id}, #{sortOrder}, #{requirementId}, #{wideTableId}, #{batchId}, #{businessDate}, #{frequency}, #{sourceType}, #{status},",
-      "  #{scheduleRuleId}, #{backfillRequestId}, #{planVersion}, #{groupKind}, #{partitionType}, #{partitionKey},",
+      "  #{scheduleRuleId}, #{indicatorGroupId}, #{backfillRequestId}, #{planVersion}, #{groupKind}, #{partitionType}, #{partitionKey},",
       "  #{partitionLabel}, #{totalTasks}, #{pendingTasks}, #{runningTasks}, #{completedTasks}, #{failedTasks},",
       "  #{cancelledTasks}, #{invalidatedTasks}, #{triggeredBy}, #{lastAggregatedAt}",
       ")"
@@ -141,13 +144,13 @@ public interface TaskGroupMapper {
       "<script>",
       "insert into task_groups (",
       "  id, sort_order, requirement_id, wide_table_id, batch_id, business_date, frequency, source_type, status,",
-      "  schedule_rule_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key,",
+      "  schedule_rule_id, indicator_group_id, backfill_request_id, plan_version, group_kind, partition_type, partition_key,",
       "  partition_label, total_tasks, pending_tasks, running_tasks, completed_tasks, failed_tasks,",
       "  cancelled_tasks, invalidated_tasks, triggered_by, last_aggregated_at",
       ") values ",
       "  <foreach collection='records' item='r' separator=','>",
       "    (#{r.id}, #{r.sortOrder}, #{r.requirementId}, #{r.wideTableId}, #{r.batchId}, #{r.businessDate}, #{r.frequency}, #{r.sourceType}, #{r.status},",
-      "     #{r.scheduleRuleId}, #{r.backfillRequestId}, #{r.planVersion}, #{r.groupKind}, #{r.partitionType}, #{r.partitionKey},",
+      "     #{r.scheduleRuleId}, #{r.indicatorGroupId}, #{r.backfillRequestId}, #{r.planVersion}, #{r.groupKind}, #{r.partitionType}, #{r.partitionKey},",
       "     #{r.partitionLabel}, #{r.totalTasks}, #{r.pendingTasks}, #{r.runningTasks}, #{r.completedTasks}, #{r.failedTasks},",
       "     #{r.cancelledTasks}, #{r.invalidatedTasks}, #{r.triggeredBy}, #{r.lastAggregatedAt})",
       "  </foreach>",
@@ -159,6 +162,7 @@ public interface TaskGroupMapper {
       "  source_type = values(source_type),",
       "  status = values(status),",
       "  schedule_rule_id = values(schedule_rule_id),",
+      "  indicator_group_id = values(indicator_group_id),",
       "  backfill_request_id = values(backfill_request_id),",
       "  plan_version = values(plan_version),",
       "  group_kind = values(group_kind),",

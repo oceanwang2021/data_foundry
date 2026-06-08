@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.task.application.service;
 
 import com.huatai.datafoundry.backend.task.application.command.SchedulerExecutionCallbackCommand;
+import com.huatai.datafoundry.backend.schedule.application.service.ScheduleExecutionStatusAppService;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskStatus;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
@@ -22,18 +23,21 @@ public class TaskExecutionCallbackAppService {
   private final TaskExecutionDomainService taskExecutionDomainService;
   private final CollectionResultAppService collectionResultAppService;
   private final TaskGroupAggregateService taskGroupAggregateService;
+  private final ScheduleExecutionStatusAppService scheduleExecutionStatusAppService;
 
   public TaskExecutionCallbackAppService(
       TaskGroupRepository taskGroupRepository,
       FetchTaskRepository fetchTaskRepository,
       TaskExecutionDomainService taskExecutionDomainService,
       CollectionResultAppService collectionResultAppService,
-      TaskGroupAggregateService taskGroupAggregateService) {
+      TaskGroupAggregateService taskGroupAggregateService,
+      ScheduleExecutionStatusAppService scheduleExecutionStatusAppService) {
     this.taskGroupRepository = taskGroupRepository;
     this.fetchTaskRepository = fetchTaskRepository;
     this.taskExecutionDomainService = taskExecutionDomainService;
     this.collectionResultAppService = collectionResultAppService;
     this.taskGroupAggregateService = taskGroupAggregateService;
+    this.scheduleExecutionStatusAppService = scheduleExecutionStatusAppService;
   }
 
   @Transactional
@@ -53,7 +57,9 @@ public class TaskExecutionCallbackAppService {
       String merged = taskExecutionDomainService.mergeStatusOnCallback(tg.getStatus(), callbackStatus);
       if (merged != null) {
         taskGroupRepository.updateStatus(tg.getId(), merged);
+        tg.setStatus(merged);
       }
+      scheduleExecutionStatusAppService.updateFromTaskGroup(tg);
     }
 
     if (command.getTaskId() != null && command.getTaskId().trim().length() > 0) {
@@ -116,7 +122,8 @@ public class TaskExecutionCallbackAppService {
         callbackTaskGroupId != null && callbackTaskGroupId.trim().length() > 0
             ? callbackTaskGroupId.trim()
             : taskTaskGroupId;
-    taskGroupAggregateService.refreshTaskGroup(taskGroupId);
+    TaskGroup taskGroup = taskGroupAggregateService.refreshTaskGroup(taskGroupId);
+    scheduleExecutionStatusAppService.updateFromTaskGroup(taskGroup);
   }
 
   private static String firstNonBlank(String first, String second) {

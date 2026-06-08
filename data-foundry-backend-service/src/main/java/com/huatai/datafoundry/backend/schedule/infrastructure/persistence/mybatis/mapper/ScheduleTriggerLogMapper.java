@@ -27,4 +27,13 @@ public interface ScheduleTriggerLogMapper {
       @Param("status") String status,
       @Param("skipReason") String skipReason,
       @Param("errorMessage") String errorMessage);
+
+  @Update(
+      "update schedule_trigger_logs set trigger_status = #{status}, "
+          + "error_message = #{errorMessage}, ended_at = current_timestamp "
+          + "where task_group_id = #{taskGroupId} and trigger_status = 'DISPATCHED'")
+  int updateExecutionStatusByTaskGroup(
+      @Param("taskGroupId") String taskGroupId,
+      @Param("status") String status,
+      @Param("errorMessage") String errorMessage);
 }

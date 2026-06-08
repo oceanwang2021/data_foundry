@@ -52,6 +52,8 @@ public class ScheduleRuleDispatchAppService {
     if (rule == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Schedule rule not found");
     }
+    String indicatorGroupId =
+        requireText(rule.getIndicatorGroupId(), "Schedule rule indicatorGroupId is required");
 
     String businessDate = businessDateResolver.resolve(rule, command);
     String triggerLogId = triggerLogAppService.createRunning(rule.getId(), businessDate, command);
@@ -65,7 +67,8 @@ public class ScheduleRuleDispatchAppService {
       }
 
       TaskGroup existing =
-          taskGroupRepository.getByScheduleRuleAndBusinessDate(rule.getId(), businessDate);
+          taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
+              rule.getId(), businessDate, indicatorGroupId);
       if (existing != null) {
         triggerLogAppService.markSkipped(
             triggerLogId, existing.getId(), "Task group already exists for business date");
@@ -82,7 +85,8 @@ public class ScheduleRuleDispatchAppService {
       TaskGroup taskGroup = taskGroupBuilder.build(rule, command, businessDate);
       if (taskGroupRepository.insertIfAbsent(taskGroup) == 0) {
         TaskGroup concurrent =
-            taskGroupRepository.getByScheduleRuleAndBusinessDate(rule.getId(), businessDate);
+            taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
+                rule.getId(), businessDate, indicatorGroupId);
         String concurrentId = concurrent != null ? concurrent.getId() : taskGroup.getId();
         triggerLogAppService.markSkipped(
             triggerLogId, concurrentId, "Concurrent dispatch already created task group");
@@ -100,9 +104,9 @@ public class ScheduleRuleDispatchAppService {
           Collections.<String, Object>emptyMap(),
           firstNonBlank(idempotencyKey, "schedule-rule:" + rule.getId() + ":" + businessDate));
 
-      triggerLogAppService.markSuccess(triggerLogId, taskGroup.getId());
+      triggerLogAppService.markDispatched(triggerLogId, taskGroup.getId());
       scheduleRuleRepository.updateLastTrigger(
-          rule.getId(), triggerTime, LocalDateTime.now(), "DISPATCHED");
+          rule.getId(), triggerTime, null, "DISPATCHED");
       return result(
           rule.getId(), taskGroup.getId(), businessDate, triggerLogId, "DISPATCHED");
     } catch (RuntimeException ex) {

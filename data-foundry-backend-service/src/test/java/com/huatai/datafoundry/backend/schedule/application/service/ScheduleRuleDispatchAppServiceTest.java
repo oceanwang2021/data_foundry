@@ -18,6 +18,7 @@ import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 class ScheduleRuleDispatchAppServiceTest {
@@ -65,7 +66,9 @@ class ScheduleRuleDispatchAppServiceTest {
     TaskGroup existing = new TaskGroup();
     existing.setId("tg-existing");
     when(ruleRepository.getById("rule-1")).thenReturn(rule);
-    when(taskGroupRepository.getByScheduleRuleAndBusinessDate("rule-1", "2026-05"))
+    when(
+            taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
+                "rule-1", "2026-05", "ig-1"))
         .thenReturn(existing);
 
     ScheduleRuleDispatchResult result =
@@ -86,9 +89,12 @@ class ScheduleRuleDispatchAppServiceTest {
         service.dispatch("rule-1", command("2026-05"), "key-1");
 
     assertEquals("DISPATCHED", result.getStatus());
-    verify(taskPlanAppService).ensureFetchTasksForScheduledTaskGroup(any());
+    ArgumentCaptor<TaskGroup> captor = ArgumentCaptor.forClass(TaskGroup.class);
+    verify(taskPlanAppService).ensureFetchTasksForScheduledTaskGroup(captor.capture());
+    assertEquals("ig-1", captor.getValue().getIndicatorGroupId());
+    assertEquals("ig-1", captor.getValue().getPartitionKey());
     verify(taskAppService).executeTaskGroup(any(), any(), org.mockito.ArgumentMatchers.eq("key-1"));
-    verify(triggerLogAppService).markSuccess("stl-1", result.getTaskGroupId());
+    verify(triggerLogAppService).markDispatched("stl-1", result.getTaskGroupId());
   }
 
   private static ScheduleRule rule(boolean enabled) {
@@ -96,6 +102,7 @@ class ScheduleRuleDispatchAppServiceTest {
     rule.setId("rule-1");
     rule.setRequirementId("req-1");
     rule.setWideTableId("wt-1");
+    rule.setIndicatorGroupId("ig-1");
     rule.setRuleName("Monthly rule");
     rule.setFrequency("MONTHLY");
     rule.setBusinessDateMode("PREVIOUS_PERIOD");

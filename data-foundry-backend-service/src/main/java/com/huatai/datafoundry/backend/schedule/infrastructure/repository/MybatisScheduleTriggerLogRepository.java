@@ -27,4 +27,10 @@ public class MybatisScheduleTriggerLogRepository implements ScheduleTriggerLogRe
       String errorMessage) {
     return mapper.updateResult(id, taskGroupId, status, skipReason, errorMessage);
   }
+
+  @Override
+  public int updateExecutionStatusByTaskGroup(
+      String taskGroupId, String status, String errorMessage) {
+    return mapper.updateExecutionStatusByTaskGroup(taskGroupId, status, errorMessage);
+  }
 }

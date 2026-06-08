@@ -22,10 +22,11 @@ public class ScheduleTaskGroupBuilder {
     group.setSourceType(upper(firstNonBlank(command.getTriggerType(), "SCHEDULE")));
     group.setStatus("pending");
     group.setScheduleRuleId(rule.getId());
+    group.setIndicatorGroupId(rule.getIndicatorGroupId());
     group.setPlanVersion(1);
     group.setGroupKind("scheduled");
-    group.setPartitionType("schedule_rule");
-    group.setPartitionKey(null);
+    group.setPartitionType("indicator_group");
+    group.setPartitionKey(rule.getIndicatorGroupId());
     group.setPartitionLabel(rule.getRuleName());
     group.setTotalTasks(0);
     group.setPendingTasks(0);

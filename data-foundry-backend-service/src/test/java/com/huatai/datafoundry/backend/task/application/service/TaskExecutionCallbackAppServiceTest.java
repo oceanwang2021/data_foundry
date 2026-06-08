@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.huatai.datafoundry.backend.task.application.command.SchedulerExecutionCallbackCommand;
+import com.huatai.datafoundry.backend.schedule.application.service.ScheduleExecutionStatusAppService;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository;
@@ -32,7 +33,8 @@ public class TaskExecutionCallbackAppServiceTest {
             fetchTaskRepository,
             new TaskExecutionDomainService(),
             Mockito.mock(CollectionResultAppService.class),
-            Mockito.mock(TaskGroupAggregateService.class));
+            Mockito.mock(TaskGroupAggregateService.class),
+            Mockito.mock(ScheduleExecutionStatusAppService.class));
 
     SchedulerExecutionCallbackCommand cmd = new SchedulerExecutionCallbackCommand();
     cmd.setTaskGroupId("TG1");
@@ -59,7 +61,8 @@ public class TaskExecutionCallbackAppServiceTest {
             fetchTaskRepository,
             new TaskExecutionDomainService(),
             Mockito.mock(CollectionResultAppService.class),
-            Mockito.mock(TaskGroupAggregateService.class));
+            Mockito.mock(TaskGroupAggregateService.class),
+            Mockito.mock(ScheduleExecutionStatusAppService.class));
 
     SchedulerExecutionCallbackCommand cmd = new SchedulerExecutionCallbackCommand();
     cmd.setTaskId("T1");
@@ -67,7 +70,7 @@ public class TaskExecutionCallbackAppServiceTest {
 
     svc.applyCallback(cmd);
 
-    verify(fetchTaskRepository).updateStatus("T1", "completed");
+    verify(fetchTaskRepository).updateStatusIfCurrent("T1", "failed", "completed");
   }
 }
 
