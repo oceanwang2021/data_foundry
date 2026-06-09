@@ -5,6 +5,7 @@ import com.huatai.datafoundry.scheduler.schedule.application.dto.DispatchSchedul
 import com.huatai.datafoundry.scheduler.schedule.domain.gateway.BackendGateway;
 import com.huatai.datafoundry.scheduler.schedule.domain.model.ScheduleJob;
 import com.huatai.datafoundry.scheduler.schedule.domain.repository.ScheduleJobRepository;
+import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashMap;
@@ -29,11 +30,21 @@ public class XxlJobDispatchAppService {
     }
 
     param.setRuleId(requireText(param.getRuleId(), "ruleId is required"));
-    param.setFrequency(defaultValue(param.getFrequency(), "MONTHLY").toUpperCase());
+    ScheduleFrequency frequency =
+        ScheduleFrequency.parse(defaultValue(param.getFrequency(), "MONTHLY"));
+    param.setFrequency(frequency.name());
     param.setTriggerType(defaultValue(param.getTriggerType(), "SCHEDULE").toUpperCase());
-    param.setBusinessDate(trimToNull(param.getBusinessDate()));
-    param.setBusinessDateMode(
-        defaultValue(param.getBusinessDateMode(), "PREVIOUS_PERIOD").toUpperCase());
+    String businessDate = trimToNull(param.getBusinessDate());
+    param.setBusinessDate(
+        businessDate != null ? frequency.normalizeBusinessDate(businessDate) : null);
+    String businessDateMode =
+        defaultValue(param.getBusinessDateMode(), "PREVIOUS_PERIOD").toUpperCase();
+    if (!"CURRENT_PERIOD".equals(businessDateMode)
+        && !"PREVIOUS_PERIOD".equals(businessDateMode)) {
+      throw new IllegalArgumentException(
+          "Unsupported businessDateMode: " + businessDateMode);
+    }
+    param.setBusinessDateMode(businessDateMode);
     param.setOperator(defaultValue(param.getOperator(), "system"));
     return param;
   }

@@ -45,7 +45,12 @@ import type {
 } from "./domain";
 import { buildApiUrl } from "./api-base";
 import { loadAuthToken, type PermissionUser } from "./auth-permissions";
-import { normalizeBusinessDateToken } from "./business-date";
+import {
+  normalizeBusinessDateForFrequency,
+  normalizeBusinessDateFrequency,
+  normalizeBusinessDateToken,
+  toApiBusinessDateFrequency,
+} from "./business-date";
 import {
   normalizeWideTableMode,
   resolveWideTableCollectionCoverageMode,
@@ -306,14 +311,15 @@ function mapIndicatorGroup(raw: any, wideTableId: string): IndicatorGroup {
 
 /** 后端 ScheduleRule → 前端 ScheduleRule */
 function mapScheduleRule(raw: any, wideTableId: string): ScheduleRule {
+  const frequency = normalizeBusinessDateFrequency(raw.frequency);
   return {
     id: raw.id,
     wideTableId,
-    type: raw.frequency === "monthly" || raw.frequency === "yearly" ? "periodic" : "adhoc",
+    type: "periodic",
     cronExpression: raw.trigger_time ?? undefined,
-    periodLabel: raw.frequency ?? undefined,
+    periodLabel: frequency,
     businessDateOffsetDays: 0,
-    description: `${raw.frequency ?? ""} schedule`,
+    description: `${frequency} schedule`,
   };
 }
 
@@ -354,6 +360,8 @@ function mapWideTable(raw: any, requirementId?: string): WideTable {
   );
   const scopeImport = mapWideTableScopeImport(raw.scopeImport ?? raw.scope_import);
 
+  const businessDateFrequency = normalizeBusinessDateFrequency(bizDate.frequency);
+
   return normalizeWideTableMode({
     id: raw.id,
     requirementId: raw.requirement_id ?? raw.requirementId ?? requirementId ?? "",
@@ -378,9 +386,11 @@ function mapWideTable(raw: any, requirementId?: string): WideTable {
         }
       : undefined,
     businessDateRange: {
-      start: normalizeApiBusinessDate(bizDate.start),
-      end: bizDate.end === "never" ? "never" : normalizeApiBusinessDate(bizDate.end),
-      frequency: bizDate.frequency ?? "monthly",
+      start: normalizeBusinessDateForFrequency(String(bizDate.start ?? ""), businessDateFrequency),
+      end: bizDate.end === "never"
+        ? "never"
+        : normalizeBusinessDateForFrequency(String(bizDate.end ?? ""), businessDateFrequency),
+      frequency: businessDateFrequency,
       quarterlyForLatestYear: bizDate.latest_year_quarterly ?? false,
     },
     scopeImport,
@@ -1115,8 +1125,8 @@ function toBackendRequirementStatus(status: Requirement["status"]): string {
 
 function toBackendWideTableFrequency(
   frequency: WideTable["businessDateRange"]["frequency"],
-): "monthly" | "yearly" {
-  return frequency === "yearly" ? "yearly" : "monthly";
+): Uppercase<WideTable["businessDateRange"]["frequency"]> {
+  return toApiBusinessDateFrequency(frequency);
 }
 
 function toBackendWideTableColumn(column: ColumnDefinition) {
@@ -1729,23 +1739,24 @@ type BackendIndicatorGroup = {
 
 type BackendScheduleRule = {
   id: string;
-  frequency: "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+  frequency: "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
   trigger_time: string;
   auto_retry_limit?: number;
   enabled?: boolean;
 };
 
 function isValidBackendFrequency(value: unknown): value is BackendScheduleRule["frequency"] {
-  return value === "daily"
-    || value === "weekly"
-    || value === "monthly"
-    || value === "quarterly"
-    || value === "yearly";
+  return value === "DAILY"
+    || value === "WEEKLY"
+    || value === "MONTHLY"
+    || value === "QUARTERLY"
+    || value === "YEARLY";
 }
 
 function resolveBackendFrequency(wideTable: WideTable, scheduleRule?: ScheduleRule): BackendScheduleRule["frequency"] {
   const candidate = scheduleRule?.periodLabel ?? wideTable.businessDateRange.frequency;
-  return isValidBackendFrequency(candidate) ? candidate : "monthly";
+  const normalized = String(candidate ?? "").toUpperCase();
+  return isValidBackendFrequency(normalized) ? normalized : "MONTHLY";
 }
 
 function resolveBackendTriggerTime(scheduleRule?: ScheduleRule): string {

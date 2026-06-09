@@ -53,6 +53,44 @@ class XxlJobDispatchAppServiceTest {
   }
 
   @Test
+  void acceptsWeeklyAndNormalizesExplicitBusinessDate() {
+    ScheduleDispatchParam param = new ScheduleDispatchParam();
+    param.setRuleId("rule-weekly");
+    param.setFrequency("weekly");
+    param.setBusinessDate("2026-W24");
+
+    ScheduleDispatchParam prepared = service.prepareDispatch(param);
+
+    assertEquals("WEEKLY", prepared.getFrequency());
+    assertEquals("2026-W24", prepared.getBusinessDate());
+  }
+
+  @Test
+  void rejectsInvalidWeeklyBusinessDateBeforeDispatch() {
+    ScheduleDispatchParam param = new ScheduleDispatchParam();
+    param.setRuleId("rule-weekly");
+    param.setFrequency("WEEKLY");
+    param.setBusinessDate("2026-W54");
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> service.prepareDispatch(param));
+
+    assertEquals("Invalid businessDate for WEEKLY: 2026-W54", error.getMessage());
+  }
+
+  @Test
+  void rejectsUnknownFrequency() {
+    ScheduleDispatchParam param = new ScheduleDispatchParam();
+    param.setRuleId("rule-local");
+    param.setFrequency("BIWEEKLY");
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> service.prepareDispatch(param));
+
+    assertEquals("Unsupported schedule frequency: BIWEEKLY", error.getMessage());
+  }
+
+  @Test
   void dispatchesNormalizedCommandToBackend() {
     ScheduleDispatchParam param = new ScheduleDispatchParam();
     param.setRuleId(" rule-local ");

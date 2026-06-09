@@ -1,5 +1,8 @@
 import type { WideTable, WideTableRecord, ColumnDefinition } from "@/lib/types";
-import { buildBusinessDateSlots } from "@/lib/business-date";
+import {
+  buildBusinessDateSlots,
+  normalizeBusinessDateForFrequency,
+} from "@/lib/business-date";
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
 
 export function getWideTableDimensionBindingKey(
@@ -144,7 +147,14 @@ export function generateWideTablePreviewRecordsFromDimensionRows(
       ? String(row[businessDateFieldName] ?? row.BIZ_DATE ?? row.business_date ?? "").trim()
       : "";
     const businessDates = usesBusinessDateAxis
-      ? (rowBusinessDate ? [rowBusinessDate] : fallbackBusinessDates)
+      ? (
+          rowBusinessDate
+            ? [normalizeBusinessDateForFrequency(
+                rowBusinessDate,
+                wideTable.businessDateRange.frequency,
+              ) || rowBusinessDate]
+            : fallbackBusinessDates
+        )
       : [null];
 
     for (const businessDate of businessDates) {
@@ -233,7 +243,12 @@ function buildPreviewRecordKey(
   dimensionValues: Record<string, string>,
 ): string {
   const businessDateKey = hasWideTableBusinessDateDimension(wideTable)
-    ? (businessDate ?? "")
+    ? (
+        normalizeBusinessDateForFrequency(
+          businessDate ?? "",
+          wideTable.businessDateRange.frequency,
+        ) || businessDate || ""
+      )
     : "__full_table__";
   return `${businessDateKey}::${getWideTableDimensionBindingKey(wideTable, dimensionValues)}`;
 }

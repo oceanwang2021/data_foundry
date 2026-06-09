@@ -111,10 +111,10 @@ describe("generateWideTablePreviewRecords", () => {
         company: String(record.company),
       })),
     ).toEqual([
-      { rowId: 1, businessDate: "2025-12-31", company: "Waymo" },
-      { rowId: 2, businessDate: "2025-12-31", company: "Pony.ai" },
-      { rowId: 3, businessDate: "2026-01-31", company: "Waymo" },
-      { rowId: 4, businessDate: "2026-01-31", company: "Pony.ai" },
+      { rowId: 1, businessDate: "2025-12", company: "Waymo" },
+      { rowId: 2, businessDate: "2025-12", company: "Pony.ai" },
+      { rowId: 3, businessDate: "2026-01", company: "Waymo" },
+      { rowId: 4, businessDate: "2026-01", company: "Pony.ai" },
     ]);
   });
 });
@@ -151,9 +151,9 @@ describe("generateWideTablePreviewRecordsFromDimensionRows", () => {
         city: String(record.city),
       })),
     ).toEqual([
-      { rowId: 1, businessDate: "2025-12-31", company: "Waymo", city: "旧金山" },
-      { rowId: 2, businessDate: "2025-12-31", company: "Pony.ai", city: "旧金山" },
-      { rowId: 3, businessDate: "2026-01-31", company: "Waymo", city: "旧金山" },
+      { rowId: 1, businessDate: "2025-12", company: "Waymo", city: "旧金山" },
+      { rowId: 2, businessDate: "2025-12", company: "Pony.ai", city: "旧金山" },
+      { rowId: 3, businessDate: "2026-01", company: "Waymo", city: "旧金山" },
     ]);
   });
 });

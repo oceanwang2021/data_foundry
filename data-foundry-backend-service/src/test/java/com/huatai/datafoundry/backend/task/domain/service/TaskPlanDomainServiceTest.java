@@ -4,6 +4,7 @@ import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.FetchTaskDraft;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.IndicatorGroup;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.PlanFetchTasksInput;
+import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.Scope;
 import java.util.Arrays;
 import java.util.Collections;
 import org.junit.jupiter.api.Test;
@@ -67,5 +68,48 @@ public class TaskPlanDomainServiceTest {
     assertFalse(drafts.isEmpty());
     assertEquals("2026-01::a=1|b=2", drafts.get(0).rowBindingKey);
   }
-}
 
+  @Test
+  void buildsDailyBusinessDatesAcrossMonthBoundary() {
+    Scope scope = scope("DAILY", "2026-01-30", "2026-02-02");
+
+    assertEquals(
+        Arrays.asList("2026-01-30", "2026-01-31", "2026-02-01", "2026-02-02"),
+        new TaskPlanDomainService().buildBusinessDates(scope));
+  }
+
+  @Test
+  void buildsWeeklyBusinessDatesAcrossIsoWeekYear() {
+    Scope scope = scope("WEEKLY", "2025-W51", "2026-W02");
+
+    assertEquals(
+        Arrays.asList("2025-W51", "2025-W52", "2026-W01", "2026-W02"),
+        new TaskPlanDomainService().buildBusinessDates(scope));
+  }
+
+  @Test
+  void buildsQuarterlyBusinessDatesAcrossYear() {
+    Scope scope = scope("QUARTERLY", "2025-Q3", "2026-Q2");
+
+    assertEquals(
+        Arrays.asList("2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2"),
+        new TaskPlanDomainService().buildBusinessDates(scope));
+  }
+
+  @Test
+  void buildsYearlyBusinessDates() {
+    Scope scope = scope("YEARLY", "2024", "2026");
+
+    assertEquals(
+        Arrays.asList("2024", "2025", "2026"),
+        new TaskPlanDomainService().buildBusinessDates(scope));
+  }
+
+  private static Scope scope(String frequency, String start, String end) {
+    Scope scope = new Scope();
+    scope.frequency = frequency;
+    scope.businessDateStart = start;
+    scope.businessDateEnd = end;
+    return scope;
+  }
+}

@@ -10,6 +10,7 @@ import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
 import com.huatai.datafoundry.backend.task.application.service.TaskPlanAppService;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
+import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import org.springframework.http.HttpStatus;
@@ -52,6 +53,17 @@ public class ScheduleRuleDispatchAppService {
     if (rule == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Schedule rule not found");
     }
+    ScheduleFrequency ruleFrequency = ScheduleFrequency.parse(rule.getFrequency());
+    String requestedFrequency = firstNonBlank(command.getFrequency());
+    if (requestedFrequency != null
+        && ruleFrequency != ScheduleFrequency.parse(requestedFrequency)) {
+      throw new IllegalArgumentException(
+          "Dispatch frequency does not match schedule rule: "
+              + requestedFrequency
+              + " != "
+              + ruleFrequency.name());
+    }
+    command.setFrequency(ruleFrequency.name());
     String indicatorGroupId =
         requireText(rule.getIndicatorGroupId(), "Schedule rule indicatorGroupId is required");
 

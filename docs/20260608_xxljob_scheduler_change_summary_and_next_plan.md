@@ -460,49 +460,31 @@ XXL-JOB Job Log
 
 显式 `businessDate` 是指调用方直接给出本次采集所属的业务周期。只要该字段非空，backend 就优先使用它，不再按当前日期和 frequency 自动推算。
 
-当前代码没有对显式值做严格格式校验，因此调用方必须保证格式与 frequency 一致：
+当前代码会根据 frequency 对显式值做严格格式校验：
 
-| frequency | 推荐格式 | 示例 |
+| frequency | 格式 | 示例 |
 |---|---|---|
+| `DAILY` | `yyyy-MM-dd` | `2026-06-09` |
+| `WEEKLY` | `yyyy-Www` | `2026-W24` |
 | `MONTHLY` | `yyyy-MM` | `2026-05` |
+| `QUARTERLY` | `yyyy-Qn` | `2026-Q2` |
 | `YEARLY` | `yyyy` | `2025` |
 
 ### 7.4 当前自动解析能力
 
-当前 `BusinessDateResolver` 仅支持：
+当前 `BusinessDateResolver` 支持：
 
 | frequency | `PREVIOUS_PERIOD` | `CURRENT_PERIOD` |
 |---|---|---|
+| `DAILY` | 前一天 | 当天 |
+| `WEEKLY` | 上一个 ISO 周 | 当前 ISO 周 |
 | `MONTHLY` | 上一个自然月 | 当前自然月 |
+| `QUARTERLY` | 上一个自然季度 | 当前自然季度 |
 | `YEARLY` | 上一个自然年 | 当前自然年 |
 
-其他 frequency 在未显式传 `businessDate` 时会抛出：
+### 7.5 频率一致性
 
-```text
-Unsupported schedule frequency
-```
-
-### 7.5 后续支持日频和季频
-
-XXL-JOB 本身可以通过 cron 配置日频和季频触发，但 backend 目前缺少对应的 business date 解析。
-
-新增日频需要：
-
-- `BusinessDateResolver` 增加 `DAILY`。
-- 约定格式为 `yyyy-MM-dd`。
-- `PREVIOUS_PERIOD` 返回前一天。
-- `CURRENT_PERIOD` 返回当天。
-- 增加跨月、跨年和闰日测试。
-
-新增季频需要：
-
-- `BusinessDateResolver` 增加 `QUARTERLY`。
-- 约定统一格式，例如 `yyyy-Qn`。
-- 实现当前季度、上一季度以及跨年计算。
-- 检查任务规划中 scope frequency 和参数行对季度格式的兼容性。
-- 增加 Q1 上一周期为上一年 Q4 的测试。
-
-scheduler 的参数对象当前不会限制 frequency 枚举，因此主要改动位于 backend；同时需要增加规则创建校验、数据库历史值治理和 XXL-JOB cron 配置样例。
+backend 以 `schedule_rules.frequency` 为业务事实来源。XXL-JOB Job Param 可以不传 frequency；如果传入，则必须与规则 frequency 一致，否则本次分发失败，避免按错误周期生成 task group。
 
 ---
 
@@ -983,13 +965,13 @@ ORDER BY sort_order;
 
 `schedule_rules.cron_expression`、`xxl_job_id`、`next_trigger_time` 当前主要是业务记录或预留字段，平台尚未调用 XXL-JOB Admin API 自动创建、更新和删除任务。
 
-### 13.4 当前只自动解析月频和年频
+### 13.4 已解决：业务频率范围
 
-日频、季频需要扩展 backend 的日期解析、格式校验和测试。显式传入 business date 虽可绕过自动解析，但不应作为长期替代方案。
+当前已支持日频、周频、月频、季频和年频的自动业务日期解析；后续风险转为真实规则数据、cron 和服务器时区是否保持一致。
 
-### 13.5 显式 businessDate 缺少格式校验
+### 13.5 已解决：显式 businessDate 格式校验
 
-当前只检查非空，不校验是否符合 frequency 对应格式。错误格式可能进入 task group 和后续任务规划。
+scheduler 和 backend 均会按 frequency 严格校验显式 business date。任务规划仍保留对历史具体日期或月份值的兼容归一化，但不会放宽外部分发入口。
 
 ### 13.6 scheduler 与 backend 状态粒度不同
 
@@ -1063,28 +1045,45 @@ GET    /api/schedule-trigger-logs
 GET    /api/schedule-trigger-logs/{id}
 ```
 
-## 14.3 下一阶段三：支持日频和季频
+## 14.3 已完成：支持日频、周频和季频
 
-目标：让业务频率不局限于月频和年频。
+本阶段已将业务频率统一扩展为 `DAILY`、`WEEKLY`、`MONTHLY`、`QUARTERLY`、`YEARLY`，并在 scheduler 参数校验、backend 业务日期解析和任务规划中使用同一套 `ScheduleFrequency` 规则。
 
-计划改造：
-
-- 新增统一 frequency 枚举。
-- `BusinessDateResolver` 支持 `DAILY`、`QUARTERLY`。
-- 增加显式 business date 格式校验。
-- 更新规则接口校验。
-- 验证任务规划对日、季度参数的兼容性。
-- 增加日频和季频 cron 示例。
-- 增加跨日、跨月、跨季度、跨年测试。
-
-建议业务日期格式：
+业务日期格式：
 
 ```text
 DAILY      -> yyyy-MM-dd
+WEEKLY     -> yyyy-Www
 MONTHLY    -> yyyy-MM
 QUARTERLY  -> yyyy-Qn
 YEARLY     -> yyyy
 ```
+
+其中周频按 ISO-8601 周定义：周一为一周起点，业务日期中的年份为 ISO week-based-year。例如 2025 年 12 月 29 日属于 `2026-W01`。
+
+已完成内容：
+
+- 新增统一 `ScheduleFrequency` 枚举，集中处理频率解析、格式校验、当前周期、上一周期、下一周期和周期起始日。
+- `BusinessDateResolver` 支持五种频率的 `CURRENT_PERIOD` 和 `PREVIOUS_PERIOD`。
+- 显式 `businessDate` 按对应频率严格校验，不合法日期、季度和 ISO 周会在分发前拒绝。
+- backend 以规则表中的 frequency 为准；调用参数携带 frequency 时必须与规则一致。
+- scheduler 在创建 `schedule_jobs` 和调用 backend 前完成 frequency、mode 和显式日期校验。
+- 任务规划按频率生成日期范围，并兼容历史具体日期或月份值向目标周期归一化。
+- 增加跨日、闰日、跨 ISO 周年、跨季度和跨年测试。
+
+XXL-JOB cron 示例（均以服务器时区为准）：
+
+```text
+日频：每天 02:00       0 0 2 * * ?
+周频：每周一 02:00     0 0 2 ? * MON
+月频：每月 1 日 02:00  0 0 2 1 * ?
+季频：1/4/7/10 月 1 日 02:00
+                       0 0 2 1 1,4,7,10 ?
+年频：每年 1 月 1 日 02:00
+                       0 0 2 1 1 ?
+```
+
+本阶段只扩展业务频率和业务日期能力，不新增数据库字段或迁移脚本；`schedule_rules.frequency`、`task_groups.frequency` 和现有 `business_date` 字段继续存储字符串值。
 
 ## 14.4 下一阶段四：XXL-JOB Admin 配置同步
 
@@ -1136,10 +1135,74 @@ YEARLY     -> yyyy
 4. 完成成功、重复、禁用、异常四类联调
 5. 修复端到端联调发现的问题
 6. 开发规则 CRUD、手工触发和日志查询
-7. 增加 DAILY、QUARTERLY
+7. 配置并联调 DAILY、WEEKLY、QUARTERLY 真实规则
 8. 再评估 XXL-JOB Admin API 自动同步
 9. 补安全、监控和数据库迁移治理
 ```
 
 当前最优先事项不是继续扩展更多表，而是完成一次真实端到端联调，确认当前四个阶段在本地环境中形成稳定闭环。
 
+---
+
+## 16. 需求时间粒度与调度频率统一
+
+### 16.1 统一数据口径
+
+新建需求和需求编辑页面中的“时间粒度”现在与 scheduler/backend 使用同一组周期定义：
+
+| 前端显示 | frequency | business date 格式 | 示例 |
+|---|---|---|---|
+| 日 | `DAILY` | `yyyy-MM-dd` | `2026-06-09` |
+| 周 | `WEEKLY` | `yyyy-Www` | `2026-W24` |
+| 月 | `MONTHLY` | `yyyy-MM` | `2026-05` |
+| 季 | `QUARTERLY` | `yyyy-Qn` | `2026-Q2` |
+| 年 | `YEARLY` | `yyyy` | `2025` |
+
+前端 TypeScript 模型内部仍使用小写枚举值，向 backend 提交时统一转换为大写值。backend 返回大小写形式时，前端统一归一化为内部小写枚举。
+
+### 16.2 周频规则
+
+周频使用 ISO-8601 周：
+
+- 周一为周期开始日。
+- 周日为周期结束日。
+- 周年份使用 ISO week-based-year，而不是简单使用自然年。
+- `2025-12-29` 至 `2026-01-04` 对应 `2026-W01`。
+- 不存在的周，例如 `2025-W53`、`2026-W54`，会被拒绝。
+
+周频起止值不再保存为任意具体日期，也不再以用户选择的日期为起点每七天拆分，而是直接保存和拆分为 ISO 周 token。
+
+### 16.3 前端任务规划
+
+前端预览、任务规划和参数行匹配现在使用规范周期 token。历史数据中的月末日、季末日或年末日仍可在前端兼容读取，并归一化到对应周期：
+
+```text
+2026-05-31 + MONTHLY   -> 2026-05
+2026-06-30 + QUARTERLY -> 2026-Q2
+2025-12-31 + YEARLY    -> 2025
+2025-12-29 + WEEKLY    -> 2026-W01
+```
+
+生成的新预览记录、task group 规划值和 API scope 均使用规范 token，不再继续产生周期末日格式的新数据。
+
+### 16.4 调度规则同步
+
+`wide_tables.scope_json.business_date.frequency` 是需求时间粒度的事实来源。
+
+- 新建需求时，scope frequency 与 schedule rule frequency 使用同一个值。
+- 编辑需求并切换时间粒度时，同步更新前端 `scheduleRule.periodLabel`。
+- API 提交时，scope 和 schedule rule 均转换为相同的大写 frequency。
+- backend 保存宽表前校验 scope 与 schedule rule frequency 一致。
+- scheduler 分发时仍以正式 `schedule_rules.frequency` 为准。
+
+### 16.5 backend 保存校验
+
+新增需求范围校验：
+
+- frequency 必须是五种支持值之一。
+- 非空 start/end 必须符合 frequency 对应格式。
+- `end=never` 允许表示持续更新。
+- 固定结束周期不得早于开始周期。
+- schedule rule frequency 必须与 scope frequency 一致。
+
+本次改造继续使用 `wide_tables.scope_json` 和 `schedule_rules_json`，不增加数据库字段，也不需要执行新的 SQL。

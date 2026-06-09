@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.schedule.application.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -95,6 +96,24 @@ class ScheduleRuleDispatchAppServiceTest {
     assertEquals("ig-1", captor.getValue().getPartitionKey());
     verify(taskAppService).executeTaskGroup(any(), any(), org.mockito.ArgumentMatchers.eq("key-1"));
     verify(triggerLogAppService).markDispatched("stl-1", result.getTaskGroupId());
+  }
+
+  @Test
+  void rejectsDispatchFrequencyDifferentFromRule() {
+    ScheduleRule rule = rule(true);
+    when(ruleRepository.getById("rule-1")).thenReturn(rule);
+    ScheduleRuleDispatchCommand command = command("2026-Q2");
+    command.setFrequency("QUARTERLY");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.dispatch("rule-1", command, "key-1"));
+
+    assertEquals(
+        "Dispatch frequency does not match schedule rule: QUARTERLY != MONTHLY",
+        error.getMessage());
+    verify(triggerLogAppService, never()).createRunning(any(), any(), any());
   }
 
   private static ScheduleRule rule(boolean enabled) {

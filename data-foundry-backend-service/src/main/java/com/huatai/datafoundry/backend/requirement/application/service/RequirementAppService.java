@@ -198,6 +198,7 @@ public class RequirementAppService {
         // still need to be editable (tasks are planned/executed based on them).
         toUpdate.setIndicatorGroupsJson(writeJson(command.getIndicatorGroups()));
       } else {
+        ScheduleScopeValidator.validate(command.getScope(), command.getScheduleRules());
         toUpdate.setTitle(command.getTitle());
         toUpdate.setDescription(command.getDescription());
         toUpdate.setTableName(command.getTableName());
@@ -262,6 +263,7 @@ public class RequirementAppService {
     if (command == null) {
       return null;
     }
+    ScheduleScopeValidator.validate(command.getScope(), command.getScheduleRules());
     WideTable base = new WideTable();
     base.setTitle(command.getTitle());
     base.setDescription(command.getDescription());

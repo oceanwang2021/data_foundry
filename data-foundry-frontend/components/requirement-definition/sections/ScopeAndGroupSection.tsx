@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DefinitionSectionId } from "@/lib/requirement-definition-navigation";
 import {
+  buildDefaultDateRange,
   buildSelectableBusinessDates,
   extractBusinessDateYear,
   formatBusinessDateLabel,
@@ -10,7 +11,6 @@ import {
   limitFutureBusinessDates,
   OPEN_ENDED_PREVIEW_PERIODS,
   pickDefaultBusinessYear,
-  snapToPeriodEnd,
 } from "@/lib/business-date";
 import { previewParameterRowsSql } from "@/lib/api-client";
 import {
@@ -521,17 +521,18 @@ export default function ScopeAndGroupSection({
         ...patch,
       };
 
-      const freq = merged.frequency;
-      if (freq === "monthly" || freq === "quarterly" || freq === "yearly") {
-        merged.start = snapToPeriodEnd(merged.start, freq);
-        if (merged.end !== "never") {
-          merged.end = snapToPeriodEnd(merged.end, freq);
-        }
+      if (patch.frequency && patch.frequency !== wideTable.businessDateRange.frequency) {
+        const defaults = buildDefaultDateRange(patch.frequency);
+        merged.start = defaults.start;
+        merged.end = wideTable.businessDateRange.end === "never" ? "never" : defaults.end;
       }
 
       return {
         ...wideTable,
         businessDateRange: merged,
+        scheduleRule: wideTable.scheduleRule
+          ? { ...wideTable.scheduleRule, periodLabel: merged.frequency }
+          : wideTable.scheduleRule,
         status: "draft" as const,
         currentPlanFingerprint: undefined,
         currentPlanVersion: Math.max(selectedWideTablePlanVersion, 1) + 1,
@@ -1078,7 +1079,7 @@ function BusinessDateInput({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
-  if (frequency === "daily" || frequency === "weekly") {
+  if (frequency === "daily") {
     return (
       <input
         type="date"

@@ -44,7 +44,7 @@ import { getWideTableDimensionBindingKey } from "@/lib/wide-table-preview";
 import {
   extractBusinessDateMonth,
   extractBusinessDateYear,
-  formatBusinessDate,
+  formatBusinessDateForFrequency,
   limitFutureBusinessDates,
   pickDefaultBusinessYear,
 } from "@/lib/business-date";
@@ -2487,10 +2487,14 @@ function resolveIndicatorCellBinding(
   if (hasWideTableBusinessDateDimension(context.wideTable) && !businessDate) return { ...headerBinding };
   const bindingKey = buildTaskGroupBindingKey(context.wideTable, businessDate, row.values);
   const rowId = resolveProcessingRowId(row);
+  const today = formatBusinessDateForFrequency(
+    new Date(),
+    context.wideTable.businessDateRange.frequency,
+  );
   const taskGroup = context.taskGroupByBindingKey.get(bindingKey)
     ?? context.taskGroupByRowIdKey.get(buildTaskGroupRowIdKey(businessDate, rowId))
-    ?? (businessDate > buildTodayBusinessDate()
-      ? buildPlannedTaskGroup(context.wideTable.id, businessDate, context.currentPlanVersion, buildTodayBusinessDate())
+    ?? (businessDate > today
+      ? buildPlannedTaskGroup(context.wideTable.id, businessDate, context.currentPlanVersion, today)
       : undefined);
   return { ...headerBinding, taskGroup };
 }
@@ -2515,8 +2519,6 @@ function resolveProcessingRowId(row: WideTableProcessingRow): number {
   const rowId = Number(row.values.ROW_ID ?? row.recordId);
   return Number.isFinite(rowId) ? rowId : row.recordId;
 }
-
-function buildTodayBusinessDate(): string { return formatBusinessDate(new Date()); }
 
 function columnHeaderClassName(column: ColumnDefinition, tone?: ToneDefinition): string {
   if (column.category !== "indicator") return "bg-background";

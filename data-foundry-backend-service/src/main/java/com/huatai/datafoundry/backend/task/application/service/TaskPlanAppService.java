@@ -19,6 +19,7 @@ import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.PlanFetchTasksInput;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService.Scope;
 import com.huatai.datafoundry.backend.targettable.application.query.service.TargetTableQueryService;
+import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -51,9 +52,6 @@ public class TaskPlanAppService {
   private final ObjectMapper objectMapper;
 
   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([^{}]+)\\}");
-  private static final Pattern YEAR_PATTERN = Pattern.compile("^(\\d{4})");
-  private static final Pattern YEAR_MONTH_PATTERN = Pattern.compile("^(\\d{4})[-/](\\d{1,2})");
-  private static final Pattern YEAR_QUARTER_PATTERN = Pattern.compile("^(\\d{4})[-/]?[Qq](\\d)");
   // Trial-run ids must fit into task_groups.id (VARCHAR(64)).
   private static final DateTimeFormatter TRIAL_ID_TIME_FMT =
       DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS", Locale.ROOT);
@@ -403,6 +401,7 @@ public class TaskPlanAppService {
 
     List<TaskGroup> taskGroups = new ArrayList<TaskGroup>(businessDates.size() * Math.max(1, indicatorGroups.size()));
     for (String businessDate : businessDates) {
+      boolean currentOrPast = isCurrentOrPastPeriod(businessDate, scope.frequency);
       int totalTasks = parameterRows.isEmpty()
           ? Math.max(1, scope.dimensionCombinationCount)
           : resolveParameterRowsForTaskGroup(parameterRows, businessDate, scope.frequency).size();
@@ -413,7 +412,8 @@ public class TaskPlanAppService {
         tg.setRequirementId(requirementId);
         tg.setWideTableId(wideTableId);
         tg.setBusinessDate(businessDate);
-        tg.setSourceType(businessDate.compareTo(todayMonth()) <= 0 ? "backfill" : "scheduled");
+        tg.setFrequency(normalizeFrequency(scope.frequency));
+        tg.setSourceType(currentOrPast ? "backfill" : "scheduled");
         tg.setStatus("pending");
         tg.setPlanVersion(planVersion);
         tg.setGroupKind("baseline");
@@ -427,7 +427,7 @@ public class TaskPlanAppService {
         tg.setFailedTasks(0);
         tg.setCancelledTasks(0);
         tg.setInvalidatedTasks(0);
-        tg.setTriggeredBy(businessDate.compareTo(todayMonth()) <= 0 ? "backfill" : "schedule");
+        tg.setTriggeredBy(currentOrPast ? "backfill" : "schedule");
         taskGroups.add(tg);
       }
     }
@@ -1442,61 +1442,11 @@ public class TaskPlanAppService {
     if (businessDate == null || businessDate.isEmpty()) {
       return null;
     }
-    String normalizedFrequency = frequency != null ? frequency.trim().toLowerCase(Locale.ROOT) : "";
-    if ("yearly".equals(normalizedFrequency)) {
-      return extractYearToken(businessDate);
-    }
-    if ("monthly".equals(normalizedFrequency)) {
-      return extractYearMonthToken(businessDate);
-    }
-    if ("quarterly".equals(normalizedFrequency)) {
-      return extractQuarterToken(businessDate);
-    }
-    return businessDate;
-  }
-
-  private String extractYearToken(String rawBusinessDate) {
-    Matcher matcher = YEAR_PATTERN.matcher(rawBusinessDate);
-    return matcher.find() ? matcher.group(1) : rawBusinessDate;
-  }
-
-  private String extractYearMonthToken(String rawBusinessDate) {
-    Matcher matcher = YEAR_MONTH_PATTERN.matcher(rawBusinessDate);
-    if (matcher.find()) {
-      String year = matcher.group(1);
-      int month = parsePositiveInt(matcher.group(2));
-      if (month >= 1 && month <= 12) {
-        return String.format(Locale.ROOT, "%s-%02d", year, month);
-      }
-      return year + "-" + matcher.group(2);
-    }
-    return rawBusinessDate;
-  }
-
-  private String extractQuarterToken(String rawBusinessDate) {
-    Matcher quarterMatcher = YEAR_QUARTER_PATTERN.matcher(rawBusinessDate);
-    if (quarterMatcher.find()) {
-      return String.format(Locale.ROOT, "%s-Q%s", quarterMatcher.group(1), quarterMatcher.group(2));
-    }
-    Matcher monthMatcher = YEAR_MONTH_PATTERN.matcher(rawBusinessDate);
-    if (monthMatcher.find()) {
-      int month = parsePositiveInt(monthMatcher.group(2));
-      if (month >= 1 && month <= 12) {
-        int quarter = ((month - 1) / 3) + 1;
-        return String.format(Locale.ROOT, "%s-Q%d", monthMatcher.group(1), quarter);
-      }
-    }
-    return rawBusinessDate;
-  }
-
-  private int parsePositiveInt(String rawValue) {
-    if (rawValue == null) {
-      return -1;
-    }
     try {
-      return Integer.parseInt(rawValue.trim());
-    } catch (Exception ex) {
-      return -1;
+      return ScheduleFrequency.parse(normalizeFrequency(frequency))
+          .normalizeCompatibleBusinessDate(businessDate);
+    } catch (IllegalArgumentException ex) {
+      return businessDate;
     }
   }
 
@@ -1577,8 +1527,10 @@ public class TaskPlanAppService {
     }
   }
 
-  private static String todayMonth() {
-    return TaskPlanServiceTime.todayMonth();
+  private static boolean isCurrentOrPastPeriod(String businessDate, String frequency) {
+    ScheduleFrequency parsed = ScheduleFrequency.parse(normalizeFrequency(frequency));
+    return !parsed.periodStart(businessDate)
+        .isAfter(parsed.periodStart(parsed.currentPeriod(LocalDate.now())));
   }
 
   private static String asString(Object value) {
@@ -1609,12 +1561,10 @@ public class TaskPlanAppService {
     }
   }
 
-  /** Isolated time helper for deterministic tests later. */
-  static class TaskPlanServiceTime {
-    static String todayMonth() {
-      java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM");
-      return fmt.format(java.time.LocalDate.now());
-    }
+  private static String normalizeFrequency(String frequency) {
+    return frequency != null && !frequency.trim().isEmpty()
+        ? frequency.trim().toUpperCase(Locale.ROOT)
+        : ScheduleFrequency.MONTHLY.name();
   }
 
   public static class TrialRunResult {

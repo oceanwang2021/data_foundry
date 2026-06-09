@@ -14,7 +14,13 @@ import type {
 } from "@/lib/types";
 import { createRequirement, listTargetTableColumns } from "@/lib/api-client";
 import { getCurrentUser } from "@/lib/auth-permissions";
-import { buildSelectableBusinessDates, formatBusinessDateLabel } from "@/lib/business-date";
+import {
+  BUSINESS_DATE_FREQUENCIES,
+  buildDefaultDateRange,
+  buildSelectableBusinessDates,
+  formatBusinessDateLabel,
+  toApiBusinessDateFrequency,
+} from "@/lib/business-date";
 import { DEFAULT_RUNTIME_SETTINGS, loadRuntimeSettings } from "@/lib/runtime-settings";
 import { cn } from "@/lib/utils";
 import AccountSelect from "@/components/AccountSelect";
@@ -157,7 +163,7 @@ function BusinessDateInput({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
-  if (frequency === "daily" || frequency === "weekly") {
+  if (frequency === "daily") {
     return (
       <input
         type="date"
@@ -301,12 +307,12 @@ export default function CreateRequirementModal({
   }, [isOpen, isProjectSelectable, projectOptions, selectedProjectId]);
 
   useEffect(() => {
-    if (bizFrequency === "daily" || bizFrequency === "weekly") {
-      const today = new Date().toISOString().slice(0, 10);
-      setBizStart((prev) => prev || today);
-      setBizEnd((prev) => prev || today);
+    if (!bizStart || !bizEnd) {
+      const defaults = buildDefaultDateRange(bizFrequency);
+      setBizStart(defaults.start);
+      setBizEnd(defaults.end);
     }
-  }, [bizFrequency]);
+  }, [bizEnd, bizFrequency, bizStart]);
 
   if (!isOpen) return null;
 
@@ -369,7 +375,7 @@ export default function CreateRequirementModal({
 
       const scope: any = {
         business_date: {
-          frequency: bizFrequency,
+          frequency: toApiBusinessDateFrequency(bizFrequency),
           start: bizStart || undefined,
           end: endNever ? "never" : (bizEnd || undefined),
           latest_year_quarterly: false,
@@ -385,7 +391,7 @@ export default function CreateRequirementModal({
       const scheduleRules = dataUpdateEnabled === true && cronExpression.trim() !== ""
         ? [{
             id: `SR-${Date.now()}`,
-            frequency: bizFrequency,
+            frequency: toApiBusinessDateFrequency(bizFrequency),
             trigger_time: cronExpression.trim(),
           }]
         : [];
@@ -628,14 +634,20 @@ export default function CreateRequirementModal({
                 <label className="text-xs text-muted-foreground">时间粒度</label>
                 <select
                   value={bizFrequency}
-                  onChange={(e) => setBizFrequency(e.target.value as BusinessDateFrequency)}
+                  onChange={(e) => {
+                    const frequency = e.target.value as BusinessDateFrequency;
+                    const defaults = buildDefaultDateRange(frequency);
+                    setBizFrequency(frequency);
+                    setBizStart(defaults.start);
+                    setBizEnd(defaults.end);
+                  }}
                   className="w-full rounded-md border px-3 py-2 text-sm bg-background"
                 >
-                  <option value="daily">日</option>
-                  <option value="weekly">周</option>
-                  <option value="monthly">月</option>
-                  <option value="quarterly">季</option>
-                  <option value="yearly">年</option>
+                  {BUSINESS_DATE_FREQUENCIES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}（{item.apiValue}，{item.format}，如 {item.example}）
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-1">

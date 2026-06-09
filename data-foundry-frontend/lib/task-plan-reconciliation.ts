@@ -1,4 +1,9 @@
-import { formatBusinessDate, formatBusinessDateLabel, normalizeBusinessDateToken } from "@/lib/business-date";
+import {
+  compareBusinessDates,
+  formatBusinessDateForFrequency,
+  formatBusinessDateLabel,
+  normalizeBusinessDateForFrequency,
+} from "@/lib/business-date";
 import type {
   BusinessDateFrequency,
   FetchTask,
@@ -283,15 +288,17 @@ function shouldRebuildCurrentPlanForRequirementLifecycle(params: {
     return false;
   }
 
-  const today = formatBusinessDate(now);
+  const today = formatBusinessDateForFrequency(now, wideTable.businessDateRange.frequency);
   const expectedHistoricalDates = Array.from(nextRecordsByDate.keys())
-    .filter((businessDate) => businessDate <= today)
+    .filter((businessDate) =>
+      compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) <= 0)
     .sort((left, right) => left.localeCompare(right));
   const currentHistoricalDates = Array.from(
     new Set(
       currentRevisionTaskGroups
         .map((taskGroup) => taskGroup.businessDate)
-        .filter((businessDate) => businessDate <= today),
+        .filter((businessDate) =>
+          compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) <= 0),
     ),
   ).sort((left, right) => left.localeCompare(right));
 
@@ -304,7 +311,11 @@ function shouldRebuildCurrentPlanForRequirementLifecycle(params: {
   }
 
   return currentRevisionTaskGroups.some((taskGroup) => {
-    if (taskGroup.businessDate > today) {
+    if (compareBusinessDates(
+      taskGroup.businessDate,
+      today,
+      wideTable.businessDateRange.frequency,
+    ) > 0) {
       return false;
     }
     return taskGroup.triggeredBy !== "backfill";
@@ -370,8 +381,9 @@ function buildTaskGroup(params: {
       updatedAt: timestamp,
     };
   }
-  const today = formatBusinessDate(now);
-  const historical = businessDate <= today;
+  const today = formatBusinessDateForFrequency(now, wideTable.businessDateRange.frequency);
+  const historical =
+    compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) <= 0;
   const triggeredBy = historical ? "backfill" : "schedule";
 
   return {
@@ -430,7 +442,7 @@ function normalizeBusinessDateSlot(
   value: string,
   frequency: BusinessDateFrequency,
 ): string {
-  const normalized = normalizeBusinessDateToken(String(value).trim());
+  const normalized = normalizeBusinessDateForFrequency(String(value).trim(), frequency);
   if (!normalized) {
     return "";
   }

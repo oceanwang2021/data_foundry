@@ -2,10 +2,9 @@ package com.huatai.datafoundry.backend.schedule.domain.service;
 
 import com.huatai.datafoundry.backend.schedule.application.command.ScheduleRuleDispatchCommand;
 import com.huatai.datafoundry.backend.schedule.domain.model.ScheduleRule;
+import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.Year;
-import java.time.YearMonth;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,27 +21,26 @@ public class BusinessDateResolver {
 
   public String resolve(ScheduleRule rule, ScheduleRuleDispatchCommand command) {
     String explicit = trimToNull(command != null ? command.getBusinessDate() : null);
+    String frequencyValue = upper(firstNonBlank(
+        command != null ? command.getFrequency() : null, rule != null ? rule.getFrequency() : null));
+    ScheduleFrequency frequency = ScheduleFrequency.parse(frequencyValue);
     if (explicit != null) {
-      return explicit;
+      return frequency.normalizeBusinessDate(explicit);
     }
 
-    String frequency = upper(firstNonBlank(
-        command != null ? command.getFrequency() : null, rule != null ? rule.getFrequency() : null));
     String mode = upper(firstNonBlank(
         command != null ? command.getBusinessDateMode() : null,
         rule != null ? rule.getBusinessDateMode() : null,
         "PREVIOUS_PERIOD"));
     LocalDate today = LocalDate.now(clock);
 
-    if ("MONTHLY".equals(frequency)) {
-      YearMonth month = YearMonth.from(today);
-      return ("CURRENT_PERIOD".equals(mode) ? month : month.minusMonths(1)).toString();
+    if ("CURRENT_PERIOD".equals(mode)) {
+      return frequency.currentPeriod(today);
     }
-    if ("YEARLY".equals(frequency)) {
-      Year year = Year.from(today);
-      return ("CURRENT_PERIOD".equals(mode) ? year : year.minusYears(1)).toString();
+    if ("PREVIOUS_PERIOD".equals(mode)) {
+      return frequency.previousPeriod(today);
     }
-    throw new IllegalArgumentException("Unsupported schedule frequency: " + frequency);
+    throw new IllegalArgumentException("Unsupported businessDateMode: " + mode);
   }
 
   private static String firstNonBlank(String... values) {

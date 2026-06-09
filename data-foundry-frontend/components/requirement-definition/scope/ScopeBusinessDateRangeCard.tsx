@@ -10,6 +10,7 @@ import {
   fallbackBusinessDateEnd,
   formatBusinessDateEnd,
 } from "@/components/requirement-definition/utils/scheduleRuleUtils";
+import { BUSINESS_DATE_FREQUENCIES } from "@/lib/business-date";
 import type { WideTable } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -54,11 +55,11 @@ export function ScopeBusinessDateRangeCard({
                   }
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 >
-                  <option value="daily">日</option>
-                  <option value="weekly">周</option>
-                  <option value="monthly">月</option>
-                  <option value="quarterly">季</option>
-                  <option value="yearly">年</option>
+                  {BUSINESS_DATE_FREQUENCIES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}（{item.apiValue}，{item.format}，如 {item.example}）
+                    </option>
+                  ))}
                 </select>
               )}
             />

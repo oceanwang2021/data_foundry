@@ -9,7 +9,7 @@ import type {
 import type { ScheduleJob } from "@/lib/domain";
 import {
   buildBusinessDateSlots,
-  formatBusinessDate,
+  formatBusinessDateForFrequency,
   formatBusinessDateLabel,
   isOpenEndedBusinessDateRange,
   OPEN_ENDED_PREVIEW_PERIODS,
@@ -189,7 +189,10 @@ export function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
   }
 
   const businessDates = buildBusinessDateSlots(wideTable.businessDateRange);
-  const today = formatBusinessDate(new Date());
+  const today = formatBusinessDateForFrequency(
+    new Date(),
+    wideTable.businessDateRange.frequency,
+  );
   const historicalDates = businessDates.filter((value) => value <= today);
   const futureDates = businessDates.filter((value) => value > today);
   const dimensionColumns = wideTable.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate);
@@ -246,7 +249,10 @@ export function buildPlanVersionViews(
   const currentVersion = wideTable.currentPlanVersion ?? Math.max(1, ...scopedTaskGroups.map((taskGroup) => taskGroup.planVersion ?? 1));
   const versionSet = new Set<number>([currentVersion]);
   scopedTaskGroups.forEach((taskGroup) => versionSet.add(taskGroup.planVersion ?? 1));
-  const today = formatBusinessDate(new Date());
+  const today = formatBusinessDateForFrequency(
+    new Date(),
+    wideTable.businessDateRange.frequency,
+  );
   const currentFutureDates = buildBusinessDateSlots(wideTable.businessDateRange)
     .filter((businessDate) => businessDate > today)
     .sort((left, right) => right.localeCompare(left));
@@ -335,7 +341,10 @@ export function buildTaskGroupRunViews(
   }
 
   const taskGroupsByDate = new Map<string, TaskGroup[]>();
-  const today = formatBusinessDate(new Date());
+  const today = formatBusinessDateForFrequency(
+    new Date(),
+    wideTable.businessDateRange.frequency,
+  );
   for (const taskGroup of taskGroups) {
     const scopedTaskGroups = taskGroupsByDate.get(taskGroup.businessDate) ?? [];
     scopedTaskGroups.push(taskGroup);

@@ -108,6 +108,59 @@ public class TaskPlanAppServiceTest {
   }
 
   @Test
+  void weeklyScheduledTaskMatchesConcreteDateAndRendersIsoWeek() {
+    WideTableReadRepository wideTableRepository = Mockito.mock(WideTableReadRepository.class);
+    TaskGroupRepository taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
+    FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
+    TaskPlanAppService svc =
+        new TaskPlanAppService(
+            wideTableRepository,
+            taskGroupRepository,
+            fetchTaskRepository,
+            new TaskPlanDomainService(),
+            null,
+            new ObjectMapper());
+
+    WideTablePlanSource wideTable = new WideTablePlanSource();
+    wideTable.setId("WT_WEEK");
+    wideTable.setRequirementId("R_WEEK");
+    wideTable.setSchemaVersion(1);
+    wideTable.setScopeJson(
+        "{\"business_date\":{\"frequency\":\"WEEKLY\"},"
+            + "\"parameter_rows\":["
+            + "{\"row_id\":1,\"business_date\":\"2026-06-09\",\"values\":{\"city\":\"sh\"}},"
+            + "{\"row_id\":2,\"business_date\":\"2026-06-16\",\"values\":{\"city\":\"bj\"}}]}");
+    wideTable.setIndicatorGroupsJson(
+        "[{\"id\":\"ig-week\",\"name\":\"Weekly Group\","
+            + "\"indicator_columns\":[\"a\"],"
+            + "\"prompt_template\":\"Collect {business_date} {city}\"}]");
+    when(wideTableRepository.getByIdForRequirement("R_WEEK", "WT_WEEK"))
+        .thenReturn(wideTable);
+    when(fetchTaskRepository.listByTaskGroup("TG_WEEK"))
+        .thenReturn(Collections.<FetchTask>emptyList());
+
+    TaskGroup taskGroup = new TaskGroup();
+    taskGroup.setId("TG_WEEK");
+    taskGroup.setRequirementId("R_WEEK");
+    taskGroup.setWideTableId("WT_WEEK");
+    taskGroup.setBatchId("TG_WEEK");
+    taskGroup.setBusinessDate("2026-W24");
+    taskGroup.setIndicatorGroupId("ig-week");
+    taskGroup.setPlanVersion(1);
+
+    svc.ensureFetchTasksForScheduledTaskGroup(taskGroup);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<FetchTask>> captor = ArgumentCaptor.forClass((Class) List.class);
+    verify(fetchTaskRepository).upsertBatch(captor.capture());
+    assertEquals(1, captor.getValue().size());
+    assertEquals("2026-W24", captor.getValue().get(0).getBusinessDate());
+    assertEquals(
+        "Collect 2026-W24 sh",
+        captor.getValue().get(0).getRenderedPromptText());
+  }
+
+  @Test
   void persistPlanDoesNotRegressStatusOrCounters() {
     TaskGroupRepository taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
     TaskPlanAppService svc =

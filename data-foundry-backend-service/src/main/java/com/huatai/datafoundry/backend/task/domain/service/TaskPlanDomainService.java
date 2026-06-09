@@ -1,7 +1,7 @@
 package com.huatai.datafoundry.backend.task.domain.service;
 
+import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -15,8 +15,6 @@ import java.util.Map;
  * calculation) and should not perform any IO.</p>
  */
 public class TaskPlanDomainService {
-  private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
-
   public List<FetchTaskDraft> planFetchTasks(PlanFetchTasksInput input) {
     if (input == null) {
       return Collections.emptyList();
@@ -105,27 +103,38 @@ public class TaskPlanDomainService {
       return Collections.emptyList();
     }
 
-    if (end == null || end.trim().isEmpty() || "never".equalsIgnoreCase(end)) {
-      LocalDate now = LocalDate.now();
-      LocalDate from = now.minusMonths(4);
-      LocalDate to = now.plusMonths(7);
-      LocalDate startDate = parseMonth(start);
-      if (startDate != null && startDate.isAfter(from)) {
-        from = startDate;
-      }
-      return iterateMonths(from, to);
-    }
-
-    LocalDate startDate = parseMonth(start);
-    LocalDate endDate = parseMonth(end);
-    if (startDate == null || endDate == null) {
+    ScheduleFrequency frequency =
+        ScheduleFrequency.parse(
+            scope.frequency != null && !scope.frequency.trim().isEmpty()
+                ? scope.frequency
+                : "MONTHLY");
+    String normalizedStart;
+    try {
+      normalizedStart = frequency.normalizeCompatibleBusinessDate(start);
+    } catch (IllegalArgumentException ex) {
       return Collections.emptyList();
     }
-    if (endDate.isBefore(startDate)) {
-      return Collections.singletonList(formatMonth(startDate));
+
+    String normalizedEnd;
+    if (end == null || end.trim().isEmpty() || "never".equalsIgnoreCase(end)) {
+      String windowStart = defaultOpenEndedStart(frequency, LocalDate.now());
+      if (frequency.periodStart(normalizedStart).isBefore(frequency.periodStart(windowStart))) {
+        normalizedStart = windowStart;
+      }
+      normalizedEnd = defaultOpenEndedEnd(frequency, LocalDate.now());
+    } else {
+      try {
+        normalizedEnd = frequency.normalizeCompatibleBusinessDate(end);
+      } catch (IllegalArgumentException ex) {
+        return Collections.emptyList();
+      }
     }
-    List<String> out = iterateMonths(startDate, endDate);
-    return out.size() > 120 ? out.subList(0, 120) : out;
+
+    if (frequency.periodStart(normalizedEnd).isBefore(frequency.periodStart(normalizedStart))) {
+      return Collections.singletonList(normalizedStart);
+    }
+    return iteratePeriods(
+        frequency, normalizedStart, normalizedEnd, frequency.defaultMaxPeriods());
   }
 
   public int calculateDimensionCombinationCount(List<DimensionRange> dimensions) {
@@ -199,27 +208,52 @@ public class TaskPlanDomainService {
     return groups.get(0);
   }
 
-  private static List<String> iterateMonths(LocalDate start, LocalDate end) {
+  private static List<String> iteratePeriods(
+      ScheduleFrequency frequency, String start, String end, int maxPeriods) {
     List<String> out = new ArrayList<String>();
-    LocalDate cursor = start.withDayOfMonth(1);
-    LocalDate until = end.withDayOfMonth(1);
-    while (!cursor.isAfter(until)) {
-      out.add(formatMonth(cursor));
-      cursor = cursor.plusMonths(1);
+    String cursor = start;
+    LocalDate until = frequency.periodStart(end);
+    while (!frequency.periodStart(cursor).isAfter(until) && out.size() < maxPeriods) {
+      out.add(cursor);
+      cursor = frequency.nextPeriod(cursor);
     }
     return out;
   }
 
-  private static LocalDate parseMonth(String value) {
-    try {
-      return LocalDate.parse(value + "-01", DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-    } catch (Exception ex) {
-      return null;
+  private static String defaultOpenEndedEnd(
+      ScheduleFrequency frequency, LocalDate today) {
+    switch (frequency) {
+      case DAILY:
+        return frequency.currentPeriod(today.plusDays(30));
+      case WEEKLY:
+        return frequency.currentPeriod(today.plusWeeks(28));
+      case MONTHLY:
+        return frequency.currentPeriod(today.plusMonths(7));
+      case QUARTERLY:
+        return frequency.currentPeriod(today.plusMonths(24));
+      case YEARLY:
+        return frequency.currentPeriod(today.plusYears(5));
+      default:
+        return frequency.currentPeriod(today);
     }
   }
 
-  private static String formatMonth(LocalDate date) {
-    return MONTH_FMT.format(date);
+  private static String defaultOpenEndedStart(
+      ScheduleFrequency frequency, LocalDate today) {
+    switch (frequency) {
+      case DAILY:
+        return frequency.currentPeriod(today.minusDays(30));
+      case WEEKLY:
+        return frequency.currentPeriod(today.minusWeeks(16));
+      case MONTHLY:
+        return frequency.currentPeriod(today.minusMonths(4));
+      case QUARTERLY:
+        return frequency.currentPeriod(today.minusMonths(12));
+      case YEARLY:
+        return frequency.currentPeriod(today.minusYears(2));
+      default:
+        return frequency.currentPeriod(today);
+    }
   }
 
 public static class Scope {
