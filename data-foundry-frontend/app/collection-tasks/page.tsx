@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Boxes, ChevronDown, ChevronRight, Loader2, Workflow } from "lucide-react";
+import { Boxes, ChevronDown, ChevronRight, Workflow } from "lucide-react";
 import CollectionTaskIndicatorsPopup from "@/components/CollectionTaskIndicatorsPopup";
 import {
   buildCollectionTaskListRows,
@@ -10,10 +10,7 @@ import {
   getCollectionTaskStatusLabel,
   type CollectionTaskListRowView,
 } from "@/lib/collection-task-list-view";
-import {
-  ensureTaskGroupTasks,
-  fetchCollectionTasksOverview,
-} from "@/lib/api-client";
+import { fetchCollectionTasksOverview } from "@/lib/api-client";
 import type { FetchTask, Project, Requirement, TaskGroup, WideTable } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +62,6 @@ export default function CollectionTasksPage() {
   const [allFetchTasks, setAllFetchTasks] = useState<FetchTask[]>([]);
   const [expandedCollectionTaskKey, setExpandedCollectionTaskKey] = useState<string | null>(null);
   const [expandedTaskGroupId, setExpandedTaskGroupId] = useState<string | null>(null);
-  const [loadingTaskGroupId, setLoadingTaskGroupId] = useState<string | null>(null);
   const [selectedIndicatorTask, setSelectedIndicatorTask] =
     useState<SelectedIndicatorTaskState | null>(null);
   const [isTrialSectionExpanded, setIsTrialSectionExpanded] = useState(false);
@@ -124,36 +120,12 @@ export default function CollectionTasksPage() {
     setExpandedTaskGroupId(null);
   };
 
-  const toggleTaskGroup = async (_row: CollectionTaskListRowView, taskGroup: TaskGroup) => {
+  const toggleTaskGroup = (_row: CollectionTaskListRowView, taskGroup: TaskGroup) => {
     if (expandedTaskGroupId === taskGroup.id) {
       setExpandedTaskGroupId(null);
       return;
     }
-
-    setLoadingTaskGroupId(taskGroup.id);
-    try {
-      const result = await ensureTaskGroupTasks(taskGroup.id);
-      if (result.taskGroup) {
-        setTaskGroups((prev) => prev.map((item) => (
-          item.id === result.taskGroupId
-            ? {
-                ...item,
-                ...result.taskGroup,
-              }
-            : item
-        )));
-      }
-      if (result.fetchTasks.length > 0) {
-        const ensuredTaskIds = new Set(result.fetchTasks.map((task) => task.id));
-        setAllFetchTasks((prev) => [
-          ...prev.filter((task) => !ensuredTaskIds.has(task.id)),
-          ...result.fetchTasks,
-        ]);
-      }
-      setExpandedTaskGroupId(taskGroup.id);
-    } finally {
-      setLoadingTaskGroupId(null);
-    }
+    setExpandedTaskGroupId(taskGroup.id);
   };
 
   const renderCollectionTaskSection = (
@@ -317,7 +289,6 @@ export default function CollectionTasksPage() {
                                   ? Math.round((taskGroup.completedTasks / taskGroup.totalTasks) * 100)
                                   : 0;
                               const isTaskGroupExpanded = expandedTaskGroupId === taskGroup.id;
-                              const isLoading = loadingTaskGroupId === taskGroup.id;
                               const scopedFetchTasks = fetchTasksByTaskGroupId.get(taskGroup.id) ?? [];
                               const taskGroupDisplayStatus =
                                 taskGroup.status === "partial"
@@ -350,12 +321,6 @@ export default function CollectionTasksPage() {
                                           <span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">
                                             {triggerLabel[taskGroup.triggeredBy] ?? taskGroup.triggeredBy}
                                           </span>
-                                          {isLoading ? (
-                                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                                              <Loader2 className="h-3 w-3 animate-spin" />
-                                              加载中...
-                                            </span>
-                                          ) : null}
                                         </div>
                                         <div className="mt-1 truncate text-xs text-muted-foreground">
                                           总实例 {taskGroup.totalTasks} · 完成 {taskGroup.completedTasks} · 失败 {taskGroup.failedTasks} · 进度 {progressPercent}%

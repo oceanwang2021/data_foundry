@@ -1,8 +1,10 @@
 package com.huatai.datafoundry.backend.task.application.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 public class TaskAppServiceIdempotencyTest {
 
@@ -112,5 +116,42 @@ public class TaskAppServiceIdempotencyTest {
     String expected =
         UUID.nameUUIDFromBytes(("req:" + key).getBytes(StandardCharsets.UTF_8)).toString();
     assertEquals(expected, captor.getValue().getRequestId());
+  }
+
+  @Test
+  void executeTaskGroupRejectsMissingFetchTasksWithoutLazyGeneration() {
+    TaskGroupRepository taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
+    FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
+    TaskPlanAppService taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
+    ApplicationEventPublisher publisher = Mockito.mock(ApplicationEventPublisher.class);
+
+    TaskGroup taskGroup = new TaskGroup();
+    taskGroup.setId("TG_EMPTY");
+    taskGroup.setStatus("pending");
+    when(taskGroupRepository.getById("TG_EMPTY")).thenReturn(taskGroup);
+    when(fetchTaskRepository.listByTaskGroup("TG_EMPTY"))
+        .thenReturn(java.util.Collections.<FetchTask>emptyList());
+
+    TaskAppService svc =
+        new TaskAppService(
+            taskGroupRepository,
+            fetchTaskRepository,
+            taskPlanAppService,
+            new TaskExecutionDomainService(),
+            new TaskExecutionProperties(),
+            publisher,
+            Mockito.mock(CollectionSearchGateway.class),
+            Mockito.mock(CollectionResultRepository.class),
+            Mockito.mock(TaskGroupAggregateService.class),
+            new ObjectMapper());
+
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> svc.executeTaskGroup("TG_EMPTY", new HashMap<String, Object>(), null));
+
+    assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    verify(taskPlanAppService, never()).ensureFetchTasksForTaskGroup(any(TaskGroup.class));
+    verify(publisher, never()).publishEvent(any());
   }
 }

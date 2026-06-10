@@ -15,7 +15,6 @@ import { cn } from "@/lib/utils";
 import {
   createTrialRun,
   executeTaskGroup,
-  ensureTaskGroupTasks,
   fetchCollectionTaskStatusDetail,
 } from "@/lib/api-client";
 import { ListTree, RotateCcw } from "lucide-react";
@@ -582,48 +581,6 @@ export default function RequirementTasksPanel({
 
   const toggleTaskGroupExpand = (tgId: string) => {
     setExpandedTgId((prev) => (prev === tgId ? null : tgId));
-
-    // Lazy-generation hook: if a real task group is opened and it has no explicit tasks yet,
-    // ask backend to materialize sub-task instances for this task group.
-    const opened = expandedTgId !== tgId;
-    if (!opened) {
-      return;
-    }
-    const view = taskGroupRunViews.find((item) => item.id === tgId);
-    if (!view?.isReal) {
-      return;
-    }
-    const hasExplicitTasks = fetchTasks.some((task) => task.taskGroupId === tgId);
-    if (hasExplicitTasks) {
-      return;
-    }
-
-    void (async () => {
-      try {
-        const result = await ensureTaskGroupTasks(tgId);
-        if (result.taskGroup) {
-          onTaskGroupsChange(
-            taskGroups.map((taskGroup) => (
-              taskGroup.id === result.taskGroupId
-                ? {
-                    ...taskGroup,
-                    ...result.taskGroup,
-                  }
-                : taskGroup
-            )),
-          );
-        }
-        if (result.fetchTasks.length > 0) {
-          const ensuredTaskIds = new Set(result.fetchTasks.map((task) => task.id));
-          onFetchTasksChange([
-            ...fetchTasks.filter((task) => !ensuredTaskIds.has(task.id)),
-            ...result.fetchTasks,
-          ]);
-        }
-      } catch {
-        // Keep UI usable even if backend lazy generation isn't ready yet.
-      }
-    })();
   };
   const returnContextColumns = useMemo(
     () => (selectedWt ? getVisibleNarrowTableContextColumns(selectedWt) : []),

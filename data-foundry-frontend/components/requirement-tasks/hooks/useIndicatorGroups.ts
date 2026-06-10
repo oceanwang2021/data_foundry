@@ -309,8 +309,8 @@ export default function useIndicatorGroups({
         onReplaceWideTableRecords?.(selectedWt.id, annotatedRecords);
         setIndicatorGroupMessage(
           usesBusinessDateAxis
-            ? `已保存指标分组，并生成 ${reconciliation.generatedTaskGroupCount} 个任务实例（子任务将在打开/执行任务实例时按需生成）。`
-            : `已保存指标分组，并生成当前快照的 ${reconciliation.generatedTaskGroupCount} 个任务实例（子任务将在打开/执行任务实例时按需生成）。`,
+            ? `已保存指标分组，并生成 ${reconciliation.generatedTaskGroupCount} 个任务组及对应采集任务。`
+            : `已保存指标分组，并生成当前快照的 ${reconciliation.generatedTaskGroupCount} 个任务组及对应采集任务。`,
         );
       } else {
         await persistWideTablePreview(

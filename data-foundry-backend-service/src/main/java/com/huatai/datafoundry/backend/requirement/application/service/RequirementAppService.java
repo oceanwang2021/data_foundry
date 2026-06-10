@@ -7,7 +7,6 @@ import com.huatai.datafoundry.backend.requirement.application.command.Requiremen
 import com.huatai.datafoundry.backend.requirement.application.command.RequirementUpdateCommand;
 import com.huatai.datafoundry.backend.requirement.application.command.WideTableCreateCommand;
 import com.huatai.datafoundry.backend.requirement.application.command.WideTableUpdateCommand;
-import com.huatai.datafoundry.backend.requirement.application.event.RequirementSubmittedEvent;
 import com.huatai.datafoundry.backend.requirement.domain.model.Requirement;
 import com.huatai.datafoundry.backend.requirement.domain.model.WideTable;
 import com.huatai.datafoundry.backend.requirement.domain.repository.RequirementRepository;
@@ -25,7 +24,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +36,6 @@ public class RequirementAppService {
   private final WideTableScopeImportMapper wideTableScopeImportMapper;
   private final WideTableRowMapper wideTableRowMapper;
   private final ObjectMapper objectMapper;
-  private final ApplicationEventPublisher eventPublisher;
   private final TaskPlanAppService taskPlanAppService;
 
   public RequirementAppService(
@@ -47,14 +44,12 @@ public class RequirementAppService {
       WideTableScopeImportMapper wideTableScopeImportMapper,
       WideTableRowMapper wideTableRowMapper,
       ObjectMapper objectMapper,
-      ApplicationEventPublisher eventPublisher,
       TaskPlanAppService taskPlanAppService) {
     this.accountAppService = accountAppService;
     this.requirementRepository = requirementRepository;
     this.wideTableScopeImportMapper = wideTableScopeImportMapper;
     this.wideTableRowMapper = wideTableRowMapper;
     this.objectMapper = objectMapper;
-    this.eventPublisher = eventPublisher;
     this.taskPlanAppService = taskPlanAppService;
   }
 
@@ -170,10 +165,6 @@ public class RequirementAppService {
       throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update requirement");
     }
 
-    if (command != null && "ready".equalsIgnoreCase(command.getStatus())) {
-      // Publish AFTER_COMMIT event (handled by RequirementSubmittedHandler).
-      eventPublisher.publishEvent(new RequirementSubmittedEvent(requirementId));
-    }
   }
 
   @Transactional

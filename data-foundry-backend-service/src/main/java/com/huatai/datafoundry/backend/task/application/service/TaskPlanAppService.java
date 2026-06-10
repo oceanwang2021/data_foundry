@@ -38,6 +38,7 @@ import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -377,69 +378,12 @@ public class TaskPlanAppService {
     }
   }
 
-  public void ensureDefaultTaskGroupsOnSubmit(String requirementId) {
-    if (taskGroupRepository.countByRequirement(requirementId) > 0) {
-      return;
-    }
-
-    WideTablePlanSource wideTable = wideTableReadRepository.getPrimaryByRequirement(requirementId);
-    if (wideTable == null) {
-      return;
-    }
-
-    Scope scope = parseScope(wideTable.getScopeJson());
-    if (scope.businessDateStart == null || scope.businessDateStart.isEmpty()) {
-      return;
-    }
-
-    List<ParameterRow> parameterRows = resolveScopeParameterRows(scope);
-    int planVersion = 1;
-    List<String> businessDates = taskPlanDomainService.buildBusinessDates(scope);
-    int sortOrder = 0;
-    String wideTableId = wideTable.getId();
-    List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTableId);
-
-    List<TaskGroup> taskGroups = new ArrayList<TaskGroup>(businessDates.size() * Math.max(1, indicatorGroups.size()));
-    for (String businessDate : businessDates) {
-      boolean currentOrPast = isCurrentOrPastPeriod(businessDate, scope.frequency);
-      int totalTasks = parameterRows.isEmpty()
-          ? Math.max(1, scope.dimensionCombinationCount)
-          : resolveParameterRowsForTaskGroup(parameterRows, businessDate, scope.frequency).size();
-      for (IndicatorGroup indicatorGroup : indicatorGroups) {
-        TaskGroup tg = new TaskGroup();
-        tg.setId(taskPlanDomainService.buildTaskGroupId(wideTableId, businessDate, indicatorGroup.id, planVersion));
-        tg.setSortOrder(sortOrder++);
-        tg.setRequirementId(requirementId);
-        tg.setWideTableId(wideTableId);
-        tg.setBusinessDate(businessDate);
-        tg.setFrequency(normalizeFrequency(scope.frequency));
-        tg.setSourceType(currentOrPast ? "backfill" : "scheduled");
-        tg.setStatus("pending");
-        tg.setPlanVersion(planVersion);
-        tg.setGroupKind("baseline");
-        tg.setPartitionType("business_date");
-        tg.setPartitionKey(indicatorGroup.id);
-        tg.setPartitionLabel(indicatorGroup.name);
-        tg.setTotalTasks(totalTasks);
-        tg.setPendingTasks(totalTasks);
-        tg.setRunningTasks(0);
-        tg.setCompletedTasks(0);
-        tg.setFailedTasks(0);
-        tg.setCancelledTasks(0);
-        tg.setInvalidatedTasks(0);
-        tg.setTriggeredBy(currentOrPast ? "backfill" : "schedule");
-        taskGroups.add(tg);
-      }
-    }
-    if (!taskGroups.isEmpty()) {
-      taskGroupRepository.upsertBatch(taskGroups);
-    }
-  }
-
+  @Transactional
   public void persistPlanTaskGroups(String requirementId, String wideTableId, List<Map<String, Object>> rawTaskGroups) {
     persistPlanTaskGroups(requirementId, wideTableId, rawTaskGroups, false);
   }
 
+  @Transactional
   public void persistPlanTaskGroups(
       String requirementId,
       String wideTableId,
@@ -535,6 +479,9 @@ public class TaskPlanAppService {
     }
 
     taskGroupRepository.upsertBatch(records);
+    for (TaskGroup record : records) {
+      ensureFetchTasksForTaskGroup(record);
+    }
 
     if (invalidateMissing) {
       invalidateMissingPendingTaskGroups(requirementId, wideTableId, idSet);
@@ -1525,12 +1472,6 @@ public class TaskPlanAppService {
     } catch (Exception ex) {
       return null;
     }
-  }
-
-  private static boolean isCurrentOrPastPeriod(String businessDate, String frequency) {
-    ScheduleFrequency parsed = ScheduleFrequency.parse(normalizeFrequency(frequency));
-    return !parsed.periodStart(businessDate)
-        .isAfter(parsed.periodStart(parsed.currentPeriod(LocalDate.now())));
   }
 
   private static String asString(Object value) {

@@ -80,11 +80,11 @@ public class TaskAppService {
 
     taskExecutionDomainService.assertCanExecuteTaskGroup(tg.getStatus());
 
-    // Ensure tasks exist (lazy generation).
-    taskPlanAppService.ensureFetchTasksForTaskGroup(tg);
     List<FetchTask> tasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
     if (tasks == null || tasks.isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No fetch tasks available for task group");
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Task group has no fetch tasks; rebuild the task plan before execution");
     }
 
     dispatchFetchTasks(tasks, resolveRequestId(idempotencyKey), "task-group");
@@ -106,14 +106,12 @@ public class TaskAppService {
     if (tg == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "TaskGroup not found");
     }
-    taskPlanAppService.ensureFetchTasksForTaskGroup(tg);
-    TaskGroup refreshedTaskGroup = taskGroupRepository.getById(taskGroupId);
     List<FetchTask> fetchTasks = fetchTaskRepository.listByTaskGroup(taskGroupId);
     Map<String, Object> out = new HashMap<String, Object>();
     out.put("ok", true);
     out.put("task_group_id", taskGroupId);
     out.put("task_count", fetchTasks != null ? fetchTasks.size() : 0);
-    out.put("task_group", refreshedTaskGroup != null ? refreshedTaskGroup : tg);
+    out.put("task_group", tg);
     out.put("fetch_tasks", fetchTasks != null ? fetchTasks : Collections.emptyList());
     return out;
   }
