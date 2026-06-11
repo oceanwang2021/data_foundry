@@ -2,6 +2,25 @@
 setlocal enabledelayedexpansion
 cd /d %~dp0
 if not exist logs mkdir logs
+
+powershell -NoProfile -Command ^
+  "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/actuator/health' -TimeoutSec 2; if ($r.status -eq 'UP') { exit 0 } } catch {}; exit 1"
+if not errorlevel 1 (
+  echo [backend] Backend is already running and healthy at http://127.0.0.1:8000.
+  echo [backend] Stop the existing process before restarting to load new code.
+  timeout /t 5 >nul
+  exit /b 0
+)
+
+powershell -NoProfile -Command ^
+  "$client = New-Object Net.Sockets.TcpClient; try { $client.Connect('127.0.0.1', 8000); exit 0 } catch { exit 1 } finally { $client.Dispose() }"
+if not errorlevel 1 (
+  echo [backend] Startup aborted: port 8000 is occupied by another process.
+  echo [backend] Run "netstat -ano ^| findstr :8000" to locate it.
+  pause
+  exit /b 1
+)
+
 if not defined JAVA_HOME (
   if exist "%USERPROFILE%\.jdks\temurin-8\jre\bin\java.exe" set "JAVA_HOME=%USERPROFILE%\.jdks\temurin-8\jre"
 )
