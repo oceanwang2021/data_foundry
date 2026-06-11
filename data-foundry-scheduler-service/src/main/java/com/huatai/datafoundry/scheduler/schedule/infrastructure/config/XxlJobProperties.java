@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class XxlJobProperties {
   private final Admin admin = new Admin();
   private final Executor executor = new Executor();
+  private final Sync sync = new Sync();
   private String accessToken = "";
   private int timeout = 3;
 
@@ -15,6 +16,10 @@ public class XxlJobProperties {
 
   public Executor getExecutor() {
     return executor;
+  }
+
+  public Sync getSync() {
+    return sync;
   }
 
   public String getAccessToken() {
@@ -35,6 +40,8 @@ public class XxlJobProperties {
 
   public static class Admin {
     private String addresses = "";
+    private String username = "";
+    private String password = "";
 
     public String getAddresses() {
       return addresses;
@@ -42,6 +49,79 @@ public class XxlJobProperties {
 
     public void setAddresses(String addresses) {
       this.addresses = addresses;
+    }
+
+    public String getUsername() {
+      return username;
+    }
+
+    public void setUsername(String username) {
+      this.username = username;
+    }
+
+    public String getPassword() {
+      return password;
+    }
+
+    public void setPassword(String password) {
+      this.password = password;
+    }
+  }
+
+  public static class Sync {
+    private boolean enabled;
+    private int batchSize = 50;
+    private long fixedDelayMs = 30000L;
+    private long initialDelayMs = 10000L;
+    private String groupTitle = "Data Foundry Scheduler";
+    private String author = "data-foundry";
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+      this.enabled = enabled;
+    }
+
+    public int getBatchSize() {
+      return batchSize;
+    }
+
+    public void setBatchSize(int batchSize) {
+      this.batchSize = batchSize;
+    }
+
+    public long getFixedDelayMs() {
+      return fixedDelayMs;
+    }
+
+    public void setFixedDelayMs(long fixedDelayMs) {
+      this.fixedDelayMs = fixedDelayMs;
+    }
+
+    public long getInitialDelayMs() {
+      return initialDelayMs;
+    }
+
+    public void setInitialDelayMs(long initialDelayMs) {
+      this.initialDelayMs = initialDelayMs;
+    }
+
+    public String getGroupTitle() {
+      return groupTitle;
+    }
+
+    public void setGroupTitle(String groupTitle) {
+      this.groupTitle = groupTitle;
+    }
+
+    public String getAuthor() {
+      return author;
+    }
+
+    public void setAuthor(String author) {
+      this.author = author;
     }
   }
 

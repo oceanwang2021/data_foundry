@@ -3,6 +3,8 @@ xxl:
     admin:
       # The local Admin runs with server.servlet.context-path=/.
       addresses: http://127.0.0.1:8080
+      username: ${XXL_JOB_ADMIN_USERNAME:admin}
+      password: ${XXL_JOB_ADMIN_PASSWORD:123456}
     accessToken: default_token
     timeout: 3
     executor:
@@ -13,3 +15,11 @@ xxl:
       port: 9999
       logpath: ./logs/xxl-job/jobhandler
       logretentiondays: 30
+    sync:
+      # Enable after V021 has been applied to data_foundry_backend.
+      enabled: ${XXL_JOB_SYNC_ENABLED:false}
+      batch-size: 50
+      fixed-delay-ms: 30000
+      initial-delay-ms: 10000
+      group-title: Data Foundry Scheduler Local
+      author: data-foundry-local

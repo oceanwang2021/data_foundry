@@ -1,7 +1,12 @@
 package com.huatai.datafoundry.scheduler.schedule.infrastructure.client;
 
 import com.huatai.datafoundry.scheduler.schedule.domain.gateway.BackendGateway;
+import com.huatai.datafoundry.contract.scheduler.XxlJobRuleSyncCommand;
+import com.huatai.datafoundry.contract.scheduler.XxlJobRuleSyncResult;
 import java.net.URI;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -125,6 +130,56 @@ public class BackendClient implements BackendGateway {
       throw translateDownstream(ex);
     } catch (RestClientException ex) {
       throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable", ex);
+    }
+  }
+
+  @Override
+  public List<XxlJobRuleSyncCommand> claimPendingXxlJobRules(int limit) {
+    URI uri =
+        UriComponentsBuilder.fromHttpUrl(backendBaseUrl)
+            .pathSegment("internal", "scheduler", "rules", "xxl-sync", "claim")
+            .queryParam("limit", limit)
+            .build()
+            .encode()
+            .toUri();
+    try {
+      ResponseEntity<XxlJobRuleSyncCommand[]> response =
+          restTemplate.exchange(
+              uri,
+              HttpMethod.POST,
+              new HttpEntity<Object>(null, internalHeaders(null)),
+              XxlJobRuleSyncCommand[].class);
+      XxlJobRuleSyncCommand[] body = response.getBody();
+      return body == null
+          ? Collections.<XxlJobRuleSyncCommand>emptyList()
+          : Arrays.asList(body);
+    } catch (HttpStatusCodeException ex) {
+      throw translateDownstream(ex);
+    } catch (RestClientException ex) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable", ex);
+    }
+  }
+
+  @Override
+  public void applyXxlJobRuleSyncResult(XxlJobRuleSyncResult result) {
+    URI uri =
+        UriComponentsBuilder.fromHttpUrl(backendBaseUrl)
+            .pathSegment("internal", "scheduler", "rules", "xxl-sync", "result")
+            .build()
+            .encode()
+            .toUri();
+    try {
+      restTemplate.exchange(
+          uri,
+          HttpMethod.POST,
+          new HttpEntity<XxlJobRuleSyncResult>(result, internalHeaders(null)),
+          Void.class);
+    } catch (HttpStatusCodeException ex) {
+      throw translateDownstream(ex);
+    } catch (RestClientException ex) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable", ex);
     }
   }
 
