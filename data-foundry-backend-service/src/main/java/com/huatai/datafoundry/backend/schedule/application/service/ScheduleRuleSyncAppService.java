@@ -6,6 +6,7 @@ import com.huatai.datafoundry.backend.schedule.domain.repository.ScheduleRuleRep
 import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
 import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,6 +72,7 @@ public class ScheduleRuleSyncAppService {
       rule.setTriggerTime(triggerTime);
       rule.setXxlJobHandler("dataCollectJobHandler");
       rule.setEnabled(Boolean.valueOf(enabled));
+      rule.setXxlSyncHash(buildXxlSyncHash(rule));
       records.add(rule);
       byIndicatorGroup.put(indicatorGroupId, rule);
     }
@@ -122,6 +124,40 @@ public class ScheduleRuleSyncAppService {
     int hour = time.getHour();
     // Wake the rule daily; task_groups.scheduled_at is the exact due-time gate.
     return second + " " + minute + " " + hour + " * * ?";
+  }
+
+  private static String buildXxlSyncHash(ScheduleRule rule) {
+    String payload =
+        textOrEmpty(rule.getRuleName())
+            + "|"
+            + textOrEmpty(rule.getRuleCode())
+            + "|"
+            + textOrEmpty(rule.getFrequency())
+            + "|"
+            + textOrEmpty(rule.getCronExpression())
+            + "|"
+            + textOrEmpty(rule.getBusinessDateMode())
+            + "|"
+            + String.valueOf(rule.getBusinessDateOffsetDays())
+            + "|"
+            + textOrEmpty(rule.getXxlJobHandler())
+            + "|"
+            + String.valueOf(Boolean.TRUE.equals(rule.getEnabled()));
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      byte[] bytes = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
+      StringBuilder out = new StringBuilder(bytes.length * 2);
+      for (byte value : bytes) {
+        out.append(String.format("%02x", value & 0xff));
+      }
+      return out.toString();
+    } catch (Exception ex) {
+      throw new IllegalStateException("Unable to build XXL-JOB sync hash", ex);
+    }
+  }
+
+  private static String textOrEmpty(String value) {
+    return value != null ? value.trim() : "";
   }
 
   private static LocalTime parseTime(String value) {

@@ -41,6 +41,10 @@ class ScheduleRuleSyncAppServiceTest {
     assertEquals(LocalTime.of(8, 30), first.get("ig-1").getTriggerTime());
     assertEquals("0 30 8 * * ?", first.get("ig-1").getCronExpression());
     assertTrue(first.get("ig-1").getRuleCode().length() <= 128);
+    assertEquals(64, first.get("ig-1").getXxlSyncHash().length());
+    assertEquals(
+        first.get("ig-1").getXxlSyncHash(),
+        second.get("ig-1").getXxlSyncHash());
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<ScheduleRule>> captor =

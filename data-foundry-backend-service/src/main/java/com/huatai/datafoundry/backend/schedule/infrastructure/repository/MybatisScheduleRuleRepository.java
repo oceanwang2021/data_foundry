@@ -22,6 +22,16 @@ public class MybatisScheduleRuleRepository implements ScheduleRuleRepository {
   }
 
   @Override
+  public List<ScheduleRule> listByWideTable(String requirementId, String wideTableId) {
+    return mapper.listByWideTable(requirementId, wideTableId);
+  }
+
+  @Override
+  public List<ScheduleRule> listPendingXxlSync(int limit) {
+    return mapper.listPendingXxlSync(Math.max(1, limit));
+  }
+
+  @Override
   public int upsertBatch(List<ScheduleRule> rules) {
     return rules == null || rules.isEmpty() ? 0 : mapper.upsertBatch(rules);
   }
@@ -48,5 +58,46 @@ public class MybatisScheduleRuleRepository implements ScheduleRuleRepository {
   public int updateExecutionStatus(
       String id, LocalDateTime successTime, String triggerStatus) {
     return mapper.updateExecutionStatus(id, successTime, triggerStatus);
+  }
+
+  @Override
+  public int markXxlSyncing(String id) {
+    return mapper.markXxlSyncing(id);
+  }
+
+  @Override
+  public int markXxlSynced(
+      String id,
+      String xxlJobId,
+      String xxlJobGroup,
+      String xxlExecutorName,
+      LocalDateTime nextTriggerTime,
+      LocalDateTime syncTime,
+      String syncHash) {
+    return mapper.markXxlSynced(
+        id,
+        xxlJobId,
+        xxlJobGroup,
+        xxlExecutorName,
+        nextTriggerTime,
+        syncTime,
+        syncHash);
+  }
+
+  @Override
+  public int markXxlSyncFailed(String id, LocalDateTime syncTime, String errorMessage) {
+    return mapper.markXxlSyncFailed(id, syncTime, errorMessage);
+  }
+
+  @Override
+  public int markXxlDisabled(
+      String id,
+      String xxlJobId,
+      String xxlJobGroup,
+      String xxlExecutorName,
+      LocalDateTime syncTime,
+      String syncHash) {
+    return mapper.markXxlDisabled(
+        id, xxlJobId, xxlJobGroup, xxlExecutorName, syncTime, syncHash);
   }
 }

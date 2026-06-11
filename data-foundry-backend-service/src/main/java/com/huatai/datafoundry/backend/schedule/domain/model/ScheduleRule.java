@@ -20,6 +20,11 @@ public class ScheduleRule {
   private String xxlExecutorName;
   private String xxlJobHandler;
   private String xxlJobId;
+  private String xxlSyncStatus;
+  private String xxlSyncHash;
+  private LocalDateTime xxlLastSyncTime;
+  private String xxlLastErrorMessage;
+  private Integer xxlSyncRetryCount;
   private LocalDateTime lastTriggerTime;
   private LocalDateTime lastSuccessTime;
   private String lastTriggerStatus;
@@ -61,6 +66,16 @@ public class ScheduleRule {
   public void setXxlJobHandler(String xxlJobHandler) { this.xxlJobHandler = xxlJobHandler; }
   public String getXxlJobId() { return xxlJobId; }
   public void setXxlJobId(String xxlJobId) { this.xxlJobId = xxlJobId; }
+  public String getXxlSyncStatus() { return xxlSyncStatus; }
+  public void setXxlSyncStatus(String xxlSyncStatus) { this.xxlSyncStatus = xxlSyncStatus; }
+  public String getXxlSyncHash() { return xxlSyncHash; }
+  public void setXxlSyncHash(String xxlSyncHash) { this.xxlSyncHash = xxlSyncHash; }
+  public LocalDateTime getXxlLastSyncTime() { return xxlLastSyncTime; }
+  public void setXxlLastSyncTime(LocalDateTime xxlLastSyncTime) { this.xxlLastSyncTime = xxlLastSyncTime; }
+  public String getXxlLastErrorMessage() { return xxlLastErrorMessage; }
+  public void setXxlLastErrorMessage(String xxlLastErrorMessage) { this.xxlLastErrorMessage = xxlLastErrorMessage; }
+  public Integer getXxlSyncRetryCount() { return xxlSyncRetryCount; }
+  public void setXxlSyncRetryCount(Integer xxlSyncRetryCount) { this.xxlSyncRetryCount = xxlSyncRetryCount; }
   public LocalDateTime getLastTriggerTime() { return lastTriggerTime; }
   public void setLastTriggerTime(LocalDateTime lastTriggerTime) { this.lastTriggerTime = lastTriggerTime; }
   public LocalDateTime getLastSuccessTime() { return lastSuccessTime; }
