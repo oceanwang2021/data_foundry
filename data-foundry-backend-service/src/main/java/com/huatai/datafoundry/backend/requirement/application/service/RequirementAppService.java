@@ -185,9 +185,12 @@ public class RequirementAppService {
     if (command != null) {
       boolean schemaLocked = Boolean.TRUE.equals(requirement.getSchemaLocked());
       if (schemaLocked) {
-        // Schema is locked after requirement submission, but indicator-group prompt templates
-        // still need to be editable (tasks are planned/executed based on them).
+        // Schema/range stay locked after submission, while prompt and recurring-update
+        // configuration remain editable before rebuilding task groups.
+        ScheduleScopeValidator.validate(command.getScope(), command.getScheduleRules());
         toUpdate.setIndicatorGroupsJson(writeJson(command.getIndicatorGroups()));
+        toUpdate.setScheduleRulesJson(writeJson(command.getScheduleRules()));
+        toUpdate.setCollectionCoverageMode(command.getCollectionCoverageMode());
       } else {
         ScheduleScopeValidator.validate(command.getScope(), command.getScheduleRules());
         toUpdate.setTitle(command.getTitle());
@@ -408,6 +411,27 @@ public class RequirementAppService {
       invalidateMissing = isTruthy(flag);
     }
     if (body != null) {
+      Object scope = body.get("scope");
+      Object scheduleRules = body.get("schedule_rules");
+      ScheduleScopeValidator.validate(scope, scheduleRules);
+      WideTable planConfig = new WideTable();
+      planConfig.setId(wideTableId);
+      planConfig.setRequirementId(requirementId);
+      if (scope != null) {
+        planConfig.setScopeJson(writeJson(scope));
+      }
+      if (body.get("indicator_groups") != null) {
+        planConfig.setIndicatorGroupsJson(writeJson(body.get("indicator_groups")));
+      }
+      if (scheduleRules != null) {
+        planConfig.setScheduleRulesJson(writeJson(scheduleRules));
+      }
+      if (body.get("collection_coverage_mode") != null) {
+        planConfig.setCollectionCoverageMode(
+            String.valueOf(body.get("collection_coverage_mode")));
+      }
+      requirementRepository.updateWideTableByIdAndRequirement(planConfig);
+
       Object taskGroupsObj = body.get("task_groups");
       if (taskGroupsObj instanceof List) {
         @SuppressWarnings("unchecked")

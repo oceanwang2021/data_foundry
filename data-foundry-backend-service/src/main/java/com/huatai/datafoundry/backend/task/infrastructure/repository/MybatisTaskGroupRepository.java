@@ -37,6 +37,12 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
   }
 
   @Override
+  public TaskGroup findNextPendingByScheduleRule(String scheduleRuleId) {
+    TaskGroupRecord record = taskGroupMapper.findNextPendingByScheduleRule(scheduleRuleId);
+    return record != null ? toDomain(record) : null;
+  }
+
+  @Override
   public List<TaskGroup> listAll() {
     return toDomainList(taskGroupMapper.listAll());
   }
@@ -112,6 +118,7 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     tg.setSourceType(record.getSourceType());
     tg.setStatus(record.getStatus());
     tg.setScheduleRuleId(record.getScheduleRuleId());
+    tg.setScheduledAt(record.getScheduledAt());
     tg.setIndicatorGroupId(record.getIndicatorGroupId());
     tg.setBackfillRequestId(record.getBackfillRequestId());
     tg.setPlanVersion(record.getPlanVersion());
@@ -146,6 +153,7 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
     record.setSourceType(taskGroup.getSourceType());
     record.setStatus(taskGroup.getStatus());
     record.setScheduleRuleId(taskGroup.getScheduleRuleId());
+    record.setScheduledAt(taskGroup.getScheduledAt());
     record.setIndicatorGroupId(taskGroup.getIndicatorGroupId());
     record.setBackfillRequestId(taskGroup.getBackfillRequestId());
     record.setPlanVersion(taskGroup.getPlanVersion());

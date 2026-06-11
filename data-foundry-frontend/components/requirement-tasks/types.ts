@@ -46,6 +46,7 @@ export type HistoricalTaskGroupView = {
   groupKind?: TaskGroup["groupKind"];
   coverageStatus?: TaskGroup["coverageStatus"];
   deltaReason?: string;
+  scheduledAt?: string;
   taskGroupForTasks: TaskGroup;
 };
 

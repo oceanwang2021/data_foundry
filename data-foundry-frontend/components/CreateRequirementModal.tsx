@@ -393,6 +393,7 @@ export default function CreateRequirementModal({
             id: `SR-${Date.now()}`,
             frequency: toApiBusinessDateFrequency(bizFrequency),
             trigger_time: cronExpression.trim(),
+            business_date_offset_days: 1,
           }]
         : [];
 

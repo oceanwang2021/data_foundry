@@ -3,6 +3,9 @@ package com.huatai.datafoundry.backend.task.application.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huatai.datafoundry.backend.requirement.application.query.dto.WideTableRowReadDto;
 import com.huatai.datafoundry.backend.requirement.application.query.service.WideTableRowQueryService;
+import com.huatai.datafoundry.backend.schedule.application.service.ScheduleRuleSyncAppService;
+import com.huatai.datafoundry.backend.schedule.domain.model.ScheduleRule;
+import com.huatai.datafoundry.backend.schedule.domain.service.SchedulePlanningTimeCalculator;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
@@ -50,6 +53,8 @@ public class TaskPlanAppService {
   private final CollectionSearchGateway collectionSearchGateway;
   private final TargetTableQueryService targetTableQueryService;
   private final WideTableRowQueryService wideTableRowQueryService;
+  private final ScheduleRuleSyncAppService scheduleRuleSyncAppService;
+  private final SchedulePlanningTimeCalculator schedulePlanningTimeCalculator;
   private final ObjectMapper objectMapper;
 
   private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{([^{}]+)\\}");
@@ -72,6 +77,8 @@ public class TaskPlanAppService {
         collectionSearchGateway,
         null,
         null,
+        null,
+        null,
         objectMapper);
   }
 
@@ -84,6 +91,8 @@ public class TaskPlanAppService {
       CollectionSearchGateway collectionSearchGateway,
       TargetTableQueryService targetTableQueryService,
       WideTableRowQueryService wideTableRowQueryService,
+      ScheduleRuleSyncAppService scheduleRuleSyncAppService,
+      SchedulePlanningTimeCalculator schedulePlanningTimeCalculator,
       ObjectMapper objectMapper) {
     this.wideTableReadRepository = wideTableReadRepository;
     this.taskGroupRepository = taskGroupRepository;
@@ -92,6 +101,8 @@ public class TaskPlanAppService {
     this.collectionSearchGateway = collectionSearchGateway;
     this.targetTableQueryService = targetTableQueryService;
     this.wideTableRowQueryService = wideTableRowQueryService;
+    this.scheduleRuleSyncAppService = scheduleRuleSyncAppService;
+    this.schedulePlanningTimeCalculator = schedulePlanningTimeCalculator;
     this.objectMapper = objectMapper;
   }
 
@@ -395,6 +406,12 @@ public class TaskPlanAppService {
         wideTable != null ? wideTable.getIndicatorGroupsJson() : null,
         wideTableId);
     Map<String, IndicatorGroup> indicatorGroupById = buildIndicatorGroupById(indicatorGroups);
+    Scope scope = parseScope(wideTable != null ? wideTable.getScopeJson() : null);
+    ScheduleFrequency frequency = ScheduleFrequency.parse(normalizeFrequency(scope.frequency));
+    Map<String, ScheduleRule> rulesByIndicatorGroup =
+        scheduleRuleSyncAppService != null && wideTable != null
+            ? scheduleRuleSyncAppService.sync(wideTable)
+            : Collections.<String, ScheduleRule>emptyMap();
     List<TaskGroup> records = new ArrayList<TaskGroup>(rawTaskGroups.size());
     int idx = 0;
     for (Map<String, Object> raw : rawTaskGroups) {
@@ -430,6 +447,7 @@ public class TaskPlanAppService {
       if (!isTaskGroupCompatibleWithIndicatorGroups(tg, indicatorGroups)) {
         continue;
       }
+      applySchedulePlan(tg, frequency, rulesByIndicatorGroup);
       records.add(tg);
     }
     if (records.isEmpty()) return;
@@ -570,8 +588,11 @@ public class TaskPlanAppService {
 
     Scope scope = parseScope(wideTable.getScopeJson());
     List<IndicatorGroup> indicatorGroups = parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTable.getId());
+    normalizeTaskGroupPartition(
+        taskGroup, indicatorGroups, buildIndicatorGroupById(indicatorGroups));
     if (!isTaskGroupCompatibleWithIndicatorGroups(taskGroup, indicatorGroups)) {
-      return;
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Task group indicator group does not belong to the wide table");
     }
     IndicatorGroup indicatorGroup = resolveIndicatorGroupForTaskGroup(taskGroup, indicatorGroups);
     if (indicatorGroup == null) {
@@ -643,110 +664,6 @@ public class TaskPlanAppService {
     taskGroupRepository.upsert(withTotals(taskGroup, tasks.size()));
   }
 
-  /** Scheduled rules generate tasks only for the indicator group bound to the rule. */
-  public void ensureFetchTasksForScheduledTaskGroup(TaskGroup taskGroup) {
-    if (taskGroup == null) return;
-
-    WideTablePlanSource wideTable =
-        wideTableReadRepository.getByIdForRequirement(
-            taskGroup.getRequirementId(), taskGroup.getWideTableId());
-    if (wideTable == null) {
-      return;
-    }
-    Scope scope = parseScope(wideTable.getScopeJson());
-    List<IndicatorGroup> indicatorGroups =
-        parseIndicatorGroups(wideTable.getIndicatorGroupsJson(), wideTable.getId());
-    if (indicatorGroups == null || indicatorGroups.isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Wide table has no indicator groups");
-    }
-    String indicatorGroupId = firstNonBlank(taskGroup.getIndicatorGroupId(), taskGroup.getPartitionKey());
-    if (indicatorGroupId == null) {
-      throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "Scheduled task group indicatorGroupId is required");
-    }
-    IndicatorGroup indicatorGroup = null;
-    for (IndicatorGroup candidate : indicatorGroups) {
-      if (candidate != null && indicatorGroupId.equals(candidate.id)) {
-        indicatorGroup = candidate;
-        break;
-      }
-    }
-    if (indicatorGroup == null) {
-      throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "Schedule rule indicator group does not belong to the wide table");
-    }
-    taskGroup.setIndicatorGroupId(indicatorGroup.id);
-    taskGroup.setPartitionType("indicator_group");
-    taskGroup.setPartitionKey(indicatorGroup.id);
-    taskGroup.setPartitionLabel(
-        firstNonBlank(indicatorGroup.name, taskGroup.getPartitionLabel(), indicatorGroup.id));
-
-    List<FetchTask> existingTasks = fetchTaskRepository.listByTaskGroup(taskGroup.getId());
-    if (existingTasks != null && !existingTasks.isEmpty()) {
-      for (FetchTask existingTask : existingTasks) {
-        if (existingTask != null
-            && !indicatorGroup.id.equals(existingTask.getIndicatorGroupId())) {
-          throw new ResponseStatusException(
-              HttpStatus.CONFLICT,
-              "Scheduled task group already contains tasks from another indicator group");
-        }
-      }
-      taskGroupRepository.upsert(withTotals(taskGroup, existingTasks.size()));
-      return;
-    }
-
-    List<ParameterRow> parameterRows =
-        resolveParameterRowsForTaskGroup(
-            resolveScopeParameterRows(scope), taskGroup.getBusinessDate(), scope.frequency);
-    List<FetchTask> tasks = new ArrayList<FetchTask>();
-    PlanFetchTasksInput input = new PlanFetchTasksInput();
-    input.taskGroupId = taskGroup.getId();
-    input.businessDate = taskGroup.getBusinessDate();
-    input.planVersion = taskGroup.getPlanVersion() != null ? taskGroup.getPlanVersion() : 1;
-    input.schemaVersion = wideTable.getSchemaVersion() != null ? wideTable.getSchemaVersion() : 1;
-    input.partitionKey = indicatorGroup.id;
-    input.dimensions = scope.dimensions;
-    input.parameterRows = parameterRows;
-    input.indicatorGroups = indicatorGroups;
-
-    List<FetchTaskDraft> drafts = taskPlanDomainService.planFetchTasks(input);
-    for (FetchTaskDraft draft : drafts) {
-      FetchTask task = new FetchTask();
-      task.setId(draft.id);
-      task.setSortOrder(tasks.size());
-      task.setRequirementId(taskGroup.getRequirementId());
-      task.setWideTableId(taskGroup.getWideTableId());
-      task.setTaskGroupId(taskGroup.getId());
-      task.setBatchId(taskGroup.getBatchId());
-      task.setRowId(draft.rowId);
-      task.setIndicatorGroupId(draft.indicatorGroupId);
-      task.setIndicatorGroupName(draft.indicatorGroupName);
-      task.setName(draft.name);
-      task.setSchemaVersion(draft.schemaVersion);
-      task.setExecutionMode(draft.executionMode);
-      task.setIndicatorKeysJson(writeJson(draft.indicatorKeys));
-      task.setDimensionValuesJson(writeJson(draft.dimensionValues));
-      task.setPromptTemplateSnapshot(indicatorGroup.promptTemplate);
-      task.setBusinessDate(draft.businessDate);
-      task.setRenderedPromptText(
-          renderPromptTemplate(
-              indicatorGroup.promptTemplate,
-              draft.dimensionValues,
-              draft.businessDate,
-              scope.frequency));
-      task.setStatus(draft.status);
-      task.setCanRerun(draft.canRerun);
-      task.setPlanVersion(draft.planVersion);
-      task.setRowBindingKey(draft.rowBindingKey);
-      tasks.add(task);
-    }
-
-    if (!tasks.isEmpty()) {
-      fetchTaskRepository.upsertBatch(tasks);
-    }
-    taskGroupRepository.upsert(withTotals(taskGroup, tasks.size()));
-  }
-
   public List<FetchTask> refreshPromptSnapshotsForCollection(List<FetchTask> fetchTasks) {
     if (fetchTasks == null || fetchTasks.isEmpty()) {
       return Collections.emptyList();
@@ -809,6 +726,7 @@ public class TaskPlanAppService {
     tg.setSourceType(taskGroup.getSourceType());
     tg.setStatus(taskGroup.getStatus());
     tg.setScheduleRuleId(taskGroup.getScheduleRuleId());
+    tg.setScheduledAt(taskGroup.getScheduledAt());
     tg.setIndicatorGroupId(taskGroup.getIndicatorGroupId());
     tg.setBackfillRequestId(taskGroup.getBackfillRequestId());
     tg.setPlanVersion(taskGroup.getPlanVersion());
@@ -852,7 +770,8 @@ public class TaskPlanAppService {
     if (indicatorGroupById == null || indicatorGroupById.isEmpty()) {
       return;
     }
-    String partitionKey = asString(taskGroup.getPartitionKey());
+    String partitionKey =
+        firstNonBlank(taskGroup.getPartitionKey(), taskGroup.getIndicatorGroupId());
     if ((partitionKey == null || partitionKey.isEmpty()) && indicatorGroupById.size() == 1) {
       partitionKey = indicatorGroups.get(0).id;
       taskGroup.setPartitionKey(partitionKey);
@@ -860,12 +779,62 @@ public class TaskPlanAppService {
     if (partitionKey == null || partitionKey.isEmpty()) {
       return;
     }
+    taskGroup.setPartitionKey(partitionKey);
     IndicatorGroup indicatorGroup = indicatorGroupById.get(partitionKey);
     if (indicatorGroup != null) {
+      taskGroup.setIndicatorGroupId(indicatorGroup.id);
+      taskGroup.setPartitionType("indicator_group");
       taskGroup.setPartitionLabel(
           indicatorGroup.name != null && !indicatorGroup.name.trim().isEmpty()
               ? indicatorGroup.name
               : taskGroup.getPartitionLabel());
+    }
+  }
+
+  private void applySchedulePlan(
+      TaskGroup taskGroup,
+      ScheduleFrequency frequency,
+      Map<String, ScheduleRule> rulesByIndicatorGroup) {
+    taskGroup.setFrequency(frequency.name());
+    String businessDate = firstNonBlank(taskGroup.getBusinessDate());
+    if (businessDate == null) {
+      taskGroup.setScheduleRuleId(null);
+      taskGroup.setScheduledAt(null);
+      taskGroup.setSourceType("BACKFILL");
+      taskGroup.setTriggeredBy("backfill");
+      return;
+    }
+
+    String normalizedBusinessDate = frequency.normalizeCompatibleBusinessDate(businessDate);
+    taskGroup.setBusinessDate(normalizedBusinessDate);
+    LocalDate periodStart = frequency.periodStart(normalizedBusinessDate);
+    LocalDate currentPeriodStart = frequency.periodStart(frequency.currentPeriod(LocalDate.now()));
+    if (periodStart.isBefore(currentPeriodStart)) {
+      taskGroup.setScheduleRuleId(null);
+      taskGroup.setScheduledAt(null);
+      taskGroup.setSourceType("BACKFILL");
+      taskGroup.setTriggeredBy("backfill");
+      return;
+    }
+
+    ScheduleRule rule = rulesByIndicatorGroup.get(taskGroup.getIndicatorGroupId());
+    if (rule == null) {
+      taskGroup.setScheduleRuleId(null);
+      taskGroup.setScheduledAt(null);
+      taskGroup.setSourceType("MANUAL");
+      taskGroup.setTriggeredBy("manual");
+      return;
+    }
+    taskGroup.setScheduleRuleId(rule.getId());
+    taskGroup.setSourceType("SCHEDULED");
+    taskGroup.setTriggeredBy("schedule");
+    if (schedulePlanningTimeCalculator != null) {
+      taskGroup.setScheduledAt(
+          schedulePlanningTimeCalculator.calculate(
+              frequency.name(),
+              normalizedBusinessDate,
+              rule.getBusinessDateOffsetDays(),
+              rule.getTriggerTime()));
     }
   }
 

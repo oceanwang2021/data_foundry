@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.schedule.domain.model;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 public class ScheduleRule {
   private String id;
@@ -12,6 +13,8 @@ public class ScheduleRule {
   private String frequency;
   private String cronExpression;
   private String businessDateMode;
+  private Integer businessDateOffsetDays;
+  private LocalTime triggerTime;
   private Boolean enabled;
   private String xxlJobGroup;
   private String xxlExecutorName;
@@ -44,6 +47,10 @@ public class ScheduleRule {
   public void setCronExpression(String cronExpression) { this.cronExpression = cronExpression; }
   public String getBusinessDateMode() { return businessDateMode; }
   public void setBusinessDateMode(String businessDateMode) { this.businessDateMode = businessDateMode; }
+  public Integer getBusinessDateOffsetDays() { return businessDateOffsetDays; }
+  public void setBusinessDateOffsetDays(Integer businessDateOffsetDays) { this.businessDateOffsetDays = businessDateOffsetDays; }
+  public LocalTime getTriggerTime() { return triggerTime; }
+  public void setTriggerTime(LocalTime triggerTime) { this.triggerTime = triggerTime; }
   public Boolean getEnabled() { return enabled; }
   public void setEnabled(Boolean enabled) { this.enabled = enabled; }
   public String getXxlJobGroup() { return xxlJobGroup; }

@@ -161,9 +161,12 @@ public class RequirementQueryService {
       dto.setWideTableId(record.getWideTableId());
       dto.setBatchId(record.getBatchId());
       dto.setBusinessDate(record.getBusinessDate());
+      dto.setFrequency(record.getFrequency());
       dto.setSourceType(record.getSourceType());
       dto.setStatus(record.getStatus());
       dto.setScheduleRuleId(record.getScheduleRuleId());
+      dto.setScheduledAt(record.getScheduledAt());
+      dto.setIndicatorGroupId(record.getIndicatorGroupId());
       dto.setBackfillRequestId(record.getBackfillRequestId());
       dto.setPlanVersion(record.getPlanVersion());
       dto.setGroupKind(record.getGroupKind());

@@ -66,9 +66,14 @@ export function limitFutureBusinessDates(
   const future: string[] = [];
 
   businessDates.forEach((token) => {
-    const start = businessDatePeriodStart(token, frequency);
+    const resolvedFrequency = frequency ?? detectBusinessDateFrequency(token) ?? undefined;
+    const start = businessDatePeriodStart(token, resolvedFrequency);
     if (!start) return;
-    (start.getTime() <= today.getTime() ? historical : future).push(token);
+    const currentToken = resolvedFrequency
+      ? formatBusinessDateForFrequency(today, resolvedFrequency)
+      : formatBusinessDate(today);
+    const isHistorical = compareBusinessDates(token, currentToken, resolvedFrequency) < 0;
+    (isHistorical ? historical : future).push(token);
   });
   future.sort((left, right) => compareBusinessDates(left, right, frequency));
   const allowed = new Set(future.slice(0, maxFuturePeriods));

@@ -135,10 +135,20 @@ public class BackendClient implements BackendGateway {
     } catch (Exception ignored) {
       status = HttpStatus.SERVICE_UNAVAILABLE;
     }
+    String responseBody = ex.getResponseBodyAsString();
+    String detail =
+        responseBody != null && !responseBody.trim().isEmpty()
+            ? truncate(responseBody.trim(), 500)
+            : ex.getStatusText();
     if (status.is4xxClientError()) {
-      return new ResponseStatusException(status, "Backend callback rejected");
+      return new ResponseStatusException(status, "Backend request rejected: " + detail, ex);
     }
-    return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable");
+    return new ResponseStatusException(
+        HttpStatus.SERVICE_UNAVAILABLE, "Backend service unavailable: " + detail, ex);
+  }
+
+  private static String truncate(String value, int maxLength) {
+    return value.length() <= maxLength ? value : value.substring(0, maxLength);
   }
 
   private HttpHeaders internalHeaders(String idempotencyKey) {

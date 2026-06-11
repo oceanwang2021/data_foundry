@@ -13,6 +13,7 @@ public class TaskGroupRecord {
   private String sourceType;
   private String status;
   private String scheduleRuleId;
+  private LocalDateTime scheduledAt;
   private String indicatorGroupId;
   private String backfillRequestId;
   private Integer planVersion;
@@ -110,6 +111,14 @@ public class TaskGroupRecord {
 
   public void setScheduleRuleId(String scheduleRuleId) {
     this.scheduleRuleId = scheduleRuleId;
+  }
+
+  public LocalDateTime getScheduledAt() {
+    return scheduledAt;
+  }
+
+  public void setScheduledAt(LocalDateTime scheduledAt) {
+    this.scheduledAt = scheduledAt;
   }
 
   public String getIndicatorGroupId() {

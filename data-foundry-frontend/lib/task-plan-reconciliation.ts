@@ -138,9 +138,8 @@ export function reconcileTaskPlanChange(params: {
       );
     });
   const nextTaskGroupIds = new Set(nextTaskGroups.map((taskGroup) => taskGroup.id));
-  // Lazy task generation:
-  // - Only persist task groups (task instances) when the plan is rebuilt.
-  // - Fetch tasks (sub-task instances) are generated on demand when a task group is opened/executed.
+  // The backend materializes fetch tasks in the same transaction that persists
+  // these groups. The frontend only submits the plan skeleton.
   const nextFetchTasks: FetchTask[] = [];
   const generatedTaskCount = nextTaskGroups.reduce((sum, taskGroup) => sum + (taskGroup.totalTasks ?? 0), 0);
 
@@ -291,14 +290,14 @@ function shouldRebuildCurrentPlanForRequirementLifecycle(params: {
   const today = formatBusinessDateForFrequency(now, wideTable.businessDateRange.frequency);
   const expectedHistoricalDates = Array.from(nextRecordsByDate.keys())
     .filter((businessDate) =>
-      compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) <= 0)
+      compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) < 0)
     .sort((left, right) => left.localeCompare(right));
   const currentHistoricalDates = Array.from(
     new Set(
       currentRevisionTaskGroups
         .map((taskGroup) => taskGroup.businessDate)
         .filter((businessDate) =>
-          compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) <= 0),
+          compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) < 0),
     ),
   ).sort((left, right) => left.localeCompare(right));
 
@@ -315,7 +314,7 @@ function shouldRebuildCurrentPlanForRequirementLifecycle(params: {
       taskGroup.businessDate,
       today,
       wideTable.businessDateRange.frequency,
-    ) > 0) {
+    ) >= 0) {
       return false;
     }
     return taskGroup.triggeredBy !== "backfill";
@@ -383,7 +382,7 @@ function buildTaskGroup(params: {
   }
   const today = formatBusinessDateForFrequency(now, wideTable.businessDateRange.frequency);
   const historical =
-    compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) <= 0;
+    compareBusinessDates(businessDate, today, wideTable.businessDateRange.frequency) < 0;
   const triggeredBy = historical ? "backfill" : "schedule";
 
   return {

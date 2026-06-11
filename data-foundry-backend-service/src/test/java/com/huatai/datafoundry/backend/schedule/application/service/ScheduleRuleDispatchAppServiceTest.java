@@ -3,6 +3,7 @@ package com.huatai.datafoundry.backend.schedule.application.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -11,21 +12,17 @@ import com.huatai.datafoundry.backend.schedule.application.command.ScheduleRuleD
 import com.huatai.datafoundry.backend.schedule.application.dto.ScheduleRuleDispatchResult;
 import com.huatai.datafoundry.backend.schedule.domain.model.ScheduleRule;
 import com.huatai.datafoundry.backend.schedule.domain.repository.ScheduleRuleRepository;
-import com.huatai.datafoundry.backend.schedule.domain.service.BusinessDateResolver;
-import com.huatai.datafoundry.backend.schedule.domain.service.ScheduleTaskGroupBuilder;
 import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
-import com.huatai.datafoundry.backend.task.application.service.TaskPlanAppService;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 class ScheduleRuleDispatchAppServiceTest {
   private ScheduleRuleRepository ruleRepository;
   private TaskGroupRepository taskGroupRepository;
-  private TaskPlanAppService taskPlanAppService;
   private TaskAppService taskAppService;
   private ScheduleTriggerLogAppService triggerLogAppService;
   private ScheduleRuleDispatchAppService service;
@@ -34,7 +31,6 @@ class ScheduleRuleDispatchAppServiceTest {
   void setUp() {
     ruleRepository = Mockito.mock(ScheduleRuleRepository.class);
     taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
-    taskPlanAppService = Mockito.mock(TaskPlanAppService.class);
     taskAppService = Mockito.mock(TaskAppService.class);
     triggerLogAppService = Mockito.mock(ScheduleTriggerLogAppService.class);
     when(triggerLogAppService.createRunning(any(), any(), any())).thenReturn("stl-1");
@@ -42,9 +38,6 @@ class ScheduleRuleDispatchAppServiceTest {
         new ScheduleRuleDispatchAppService(
             ruleRepository,
             taskGroupRepository,
-            new BusinessDateResolver(),
-            new ScheduleTaskGroupBuilder(),
-            taskPlanAppService,
             taskAppService,
             triggerLogAppService);
   }
@@ -62,10 +55,13 @@ class ScheduleRuleDispatchAppServiceTest {
   }
 
   @Test
-  void skipsExistingBusinessPeriod() {
+  void skipsTaskGroupThatHasAlreadyBeenDispatched() {
     ScheduleRule rule = rule(true);
     TaskGroup existing = new TaskGroup();
     existing.setId("tg-existing");
+    existing.setBusinessDate("2026-05");
+    existing.setStatus("completed");
+    existing.setScheduledAt(LocalDateTime.now().minusMinutes(1));
     when(ruleRepository.getById("rule-1")).thenReturn(rule);
     when(
             taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
@@ -75,27 +71,65 @@ class ScheduleRuleDispatchAppServiceTest {
     ScheduleRuleDispatchResult result =
         service.dispatch("rule-1", command("2026-05"), "key-1");
 
-    assertEquals("SKIPPED_ALREADY_EXISTS", result.getStatus());
+    assertEquals("SKIPPED_ALREADY_DISPATCHED", result.getStatus());
     assertEquals("tg-existing", result.getTaskGroupId());
     verify(taskAppService, never()).executeTaskGroup(any(), any(), any());
   }
 
   @Test
-  void createsTasksAndExecutesNewPeriod() {
+  void executesExistingDueTaskGroupWithoutCreatingTasks() {
     ScheduleRule rule = rule(true);
+    TaskGroup existing = new TaskGroup();
+    existing.setId("tg-existing");
+    existing.setBusinessDate("2026-05");
+    existing.setStatus("pending");
+    existing.setScheduledAt(LocalDateTime.now().minusMinutes(1));
     when(ruleRepository.getById("rule-1")).thenReturn(rule);
-    when(taskGroupRepository.insertIfAbsent(any())).thenReturn(1);
+    when(
+            taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
+                "rule-1", "2026-05", "ig-1"))
+        .thenReturn(existing);
 
     ScheduleRuleDispatchResult result =
         service.dispatch("rule-1", command("2026-05"), "key-1");
 
     assertEquals("DISPATCHED", result.getStatus());
-    ArgumentCaptor<TaskGroup> captor = ArgumentCaptor.forClass(TaskGroup.class);
-    verify(taskPlanAppService).ensureFetchTasksForScheduledTaskGroup(captor.capture());
-    assertEquals("ig-1", captor.getValue().getIndicatorGroupId());
-    assertEquals("ig-1", captor.getValue().getPartitionKey());
-    verify(taskAppService).executeTaskGroup(any(), any(), org.mockito.ArgumentMatchers.eq("key-1"));
-    verify(triggerLogAppService).markDispatched("stl-1", result.getTaskGroupId());
+    assertEquals("tg-existing", result.getTaskGroupId());
+    verify(taskGroupRepository, never()).insertIfAbsent(any());
+    verify(taskAppService).executeTaskGroup(eq("tg-existing"), any(), eq("key-1"));
+    verify(triggerLogAppService).markDispatched("stl-1", "tg-existing");
+  }
+
+  @Test
+  void skipsExistingTaskGroupBeforeItsScheduledTime() {
+    ScheduleRule rule = rule(true);
+    TaskGroup existing = new TaskGroup();
+    existing.setId("tg-existing");
+    existing.setBusinessDate("2026-05");
+    existing.setStatus("pending");
+    existing.setScheduledAt(LocalDateTime.now().plusDays(1));
+    when(ruleRepository.getById("rule-1")).thenReturn(rule);
+    when(
+            taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
+                "rule-1", "2026-05", "ig-1"))
+        .thenReturn(existing);
+
+    ScheduleRuleDispatchResult result =
+        service.dispatch("rule-1", command("2026-05"), "key-1");
+
+    assertEquals("SKIPPED_NOT_DUE", result.getStatus());
+    verify(taskAppService, never()).executeTaskGroup(any(), any(), any());
+  }
+
+  @Test
+  void skipsWhenNoExistingTaskGroupCanBeFound() {
+    when(ruleRepository.getById("rule-1")).thenReturn(rule(true));
+
+    ScheduleRuleDispatchResult result =
+        service.dispatch("rule-1", command("2026-05"), "key-1");
+
+    assertEquals("SKIPPED_TASK_GROUP_NOT_FOUND", result.getStatus());
+    verify(taskAppService, never()).executeTaskGroup(any(), any(), any());
   }
 
   @Test

@@ -193,8 +193,8 @@ export function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
     new Date(),
     wideTable.businessDateRange.frequency,
   );
-  const historicalDates = businessDates.filter((value) => value <= today);
-  const futureDates = businessDates.filter((value) => value > today);
+  const historicalDates = businessDates.filter((value) => value < today);
+  const futureDates = businessDates.filter((value) => value >= today);
   const dimensionColumns = wideTable.schema.columns.filter((column) => column.category === "dimension" && !column.isBusinessDate);
   const dimensionCombinationCount = calculateDimensionCombinationCount(wideTable, dimensionColumns);
   const indicatorGroupLabels = resolveIndicatorGroupLabels(wideTable);
@@ -254,14 +254,14 @@ export function buildPlanVersionViews(
     wideTable.businessDateRange.frequency,
   );
   const currentFutureDates = buildBusinessDateSlots(wideTable.businessDateRange)
-    .filter((businessDate) => businessDate > today)
+    .filter((businessDate) => businessDate >= today)
     .sort((left, right) => right.localeCompare(left));
 
   return Array.from(versionSet)
     .sort((left, right) => right - left)
     .map((version) => {
       const versionTaskGroups = scopedTaskGroups.filter(
-        (taskGroup) => (taskGroup.planVersion ?? 1) === version && (taskGroup.businessDate <= today || version === currentVersion),
+        (taskGroup) => (taskGroup.planVersion ?? 1) === version && (taskGroup.businessDate < today || version === currentVersion),
       );
       const baselineGroups = versionTaskGroups.filter((taskGroup) => (taskGroup.groupKind ?? "baseline") === "baseline");
       const deltaGroups = versionTaskGroups.filter((taskGroup) => (taskGroup.groupKind ?? "baseline") === "delta");
@@ -352,12 +352,12 @@ export function buildTaskGroupRunViews(
   }
   const historicalRealDates = taskGroups
     .map((taskGroup) => taskGroup.businessDate)
-    .filter((businessDate) => businessDate <= today);
-  const currentHistoricalDates = taskPlan.businessDates.filter((businessDate) => businessDate <= today);
+    .filter((businessDate) => businessDate < today);
+  const currentHistoricalDates = taskPlan.businessDates.filter((businessDate) => businessDate < today);
   const futureBusinessDates = Array.from(
     new Set([
-      ...taskPlan.businessDates.filter((businessDate) => businessDate > today),
-      ...taskGroups.map((taskGroup) => taskGroup.businessDate).filter((businessDate) => businessDate > today),
+      ...taskPlan.businessDates.filter((businessDate) => businessDate >= today),
+      ...taskGroups.map((taskGroup) => taskGroup.businessDate).filter((businessDate) => businessDate >= today),
     ]),
   ).sort((left, right) => left.localeCompare(right));
   const visibleBusinessDates = Array.from(
@@ -403,6 +403,7 @@ export function buildTaskGroupRunViews(
             planVersion: taskGroup.planVersion,
             groupKind: "baseline",
             coverageStatus: "current",
+            scheduledAt: taskGroup.scheduledAt,
             taskGroupForTasks: taskGroup,
           };
         });
@@ -606,7 +607,7 @@ function resolvePlannedTriggerType(
   businessDate: string,
   today: string,
 ): TaskGroup["triggeredBy"] {
-  return businessDate <= today ? "backfill" : "schedule";
+  return businessDate < today ? "backfill" : "schedule";
 }
 
 function resolveIndicatorGroupLabels(wideTable: WideTable): string[] {

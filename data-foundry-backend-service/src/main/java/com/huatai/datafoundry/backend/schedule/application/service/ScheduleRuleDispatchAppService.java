@@ -4,15 +4,13 @@ import com.huatai.datafoundry.backend.schedule.application.command.ScheduleRuleD
 import com.huatai.datafoundry.backend.schedule.application.dto.ScheduleRuleDispatchResult;
 import com.huatai.datafoundry.backend.schedule.domain.model.ScheduleRule;
 import com.huatai.datafoundry.backend.schedule.domain.repository.ScheduleRuleRepository;
-import com.huatai.datafoundry.backend.schedule.domain.service.BusinessDateResolver;
-import com.huatai.datafoundry.backend.schedule.domain.service.ScheduleTaskGroupBuilder;
 import com.huatai.datafoundry.backend.task.application.service.TaskAppService;
-import com.huatai.datafoundry.backend.task.application.service.TaskPlanAppService;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,25 +20,16 @@ import org.springframework.web.server.ResponseStatusException;
 public class ScheduleRuleDispatchAppService {
   private final ScheduleRuleRepository scheduleRuleRepository;
   private final TaskGroupRepository taskGroupRepository;
-  private final BusinessDateResolver businessDateResolver;
-  private final ScheduleTaskGroupBuilder taskGroupBuilder;
-  private final TaskPlanAppService taskPlanAppService;
   private final TaskAppService taskAppService;
   private final ScheduleTriggerLogAppService triggerLogAppService;
 
   public ScheduleRuleDispatchAppService(
       ScheduleRuleRepository scheduleRuleRepository,
       TaskGroupRepository taskGroupRepository,
-      BusinessDateResolver businessDateResolver,
-      ScheduleTaskGroupBuilder taskGroupBuilder,
-      TaskPlanAppService taskPlanAppService,
       TaskAppService taskAppService,
       ScheduleTriggerLogAppService triggerLogAppService) {
     this.scheduleRuleRepository = scheduleRuleRepository;
     this.taskGroupRepository = taskGroupRepository;
-    this.businessDateResolver = businessDateResolver;
-    this.taskGroupBuilder = taskGroupBuilder;
-    this.taskPlanAppService = taskPlanAppService;
     this.taskAppService = taskAppService;
     this.triggerLogAppService = triggerLogAppService;
   }
@@ -67,50 +56,87 @@ public class ScheduleRuleDispatchAppService {
     String indicatorGroupId =
         requireText(rule.getIndicatorGroupId(), "Schedule rule indicatorGroupId is required");
 
-    String businessDate = businessDateResolver.resolve(rule, command);
-    String triggerLogId = triggerLogAppService.createRunning(rule.getId(), businessDate, command);
+    String requestedBusinessDate = firstNonBlank(command.getBusinessDate());
+    if (requestedBusinessDate != null) {
+      requestedBusinessDate = ruleFrequency.normalizeCompatibleBusinessDate(requestedBusinessDate);
+    }
     LocalDateTime triggerTime = LocalDateTime.now();
+    String triggerLogId = null;
     try {
       if (!Boolean.TRUE.equals(rule.getEnabled())) {
+        triggerLogId =
+            triggerLogAppService.createRunning(rule.getId(), requestedBusinessDate, command);
         triggerLogAppService.markSkipped(triggerLogId, null, "Schedule rule is disabled");
         scheduleRuleRepository.updateLastTrigger(
             rule.getId(), triggerTime, null, "SKIPPED_DISABLED");
-        return result(rule.getId(), null, businessDate, triggerLogId, "SKIPPED_DISABLED");
+        return result(
+            rule.getId(), null, requestedBusinessDate, triggerLogId, "SKIPPED_DISABLED");
       }
 
-      TaskGroup existing =
-          taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
-              rule.getId(), businessDate, indicatorGroupId);
-      if (existing != null) {
+      TaskGroup taskGroup =
+          requestedBusinessDate != null
+              ? taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
+                  rule.getId(), requestedBusinessDate, indicatorGroupId)
+              : taskGroupRepository.findNextPendingByScheduleRule(rule.getId());
+      String businessDate =
+          taskGroup != null ? taskGroup.getBusinessDate() : requestedBusinessDate;
+      triggerLogId = triggerLogAppService.createRunning(rule.getId(), businessDate, command);
+      if (taskGroup == null) {
         triggerLogAppService.markSkipped(
-            triggerLogId, existing.getId(), "Task group already exists for business date");
+            triggerLogId, null, "No existing task group is available for dispatch");
         scheduleRuleRepository.updateLastTrigger(
-            rule.getId(), triggerTime, null, "SKIPPED_ALREADY_EXISTS");
+            rule.getId(), triggerTime, null, "SKIPPED_TASK_GROUP_NOT_FOUND");
         return result(
             rule.getId(),
-            existing.getId(),
+            null,
             businessDate,
             triggerLogId,
-            "SKIPPED_ALREADY_EXISTS");
+            "SKIPPED_TASK_GROUP_NOT_FOUND");
       }
 
-      TaskGroup taskGroup = taskGroupBuilder.build(rule, command, businessDate);
-      if (taskGroupRepository.insertIfAbsent(taskGroup) == 0) {
-        TaskGroup concurrent =
-            taskGroupRepository.getByScheduleRulePeriodAndIndicatorGroup(
-                rule.getId(), businessDate, indicatorGroupId);
-        String concurrentId = concurrent != null ? concurrent.getId() : taskGroup.getId();
+      if (taskGroup.getScheduledAt() == null) {
         triggerLogAppService.markSkipped(
-            triggerLogId, concurrentId, "Concurrent dispatch already created task group");
+            triggerLogId, taskGroup.getId(), "Task group has no planned schedule time");
+        scheduleRuleRepository.updateLastTrigger(
+            rule.getId(), triggerTime, null, "SKIPPED_SCHEDULE_NOT_PLANNED");
         return result(
             rule.getId(),
-            concurrentId,
+            taskGroup.getId(),
             businessDate,
             triggerLogId,
-            "SKIPPED_ALREADY_EXISTS");
+            "SKIPPED_SCHEDULE_NOT_PLANNED");
       }
 
-      taskPlanAppService.ensureFetchTasksForScheduledTaskGroup(taskGroup);
+      if (taskGroup.getScheduledAt().isAfter(triggerTime)) {
+        triggerLogAppService.markSkipped(
+            triggerLogId, taskGroup.getId(), "Task group has not reached its scheduled time");
+        scheduleRuleRepository.updateLastTrigger(
+            rule.getId(), triggerTime, null, "SKIPPED_NOT_DUE");
+        return result(
+            rule.getId(),
+            taskGroup.getId(),
+            businessDate,
+            triggerLogId,
+            "SKIPPED_NOT_DUE");
+      }
+
+      String status =
+          taskGroup.getStatus() != null
+              ? taskGroup.getStatus().trim().toLowerCase(Locale.ROOT)
+              : "";
+      if (!"pending".equals(status) && !"failed".equals(status)) {
+        triggerLogAppService.markSkipped(
+            triggerLogId, taskGroup.getId(), "Task group is already dispatched");
+        scheduleRuleRepository.updateLastTrigger(
+            rule.getId(), triggerTime, null, "SKIPPED_ALREADY_DISPATCHED");
+        return result(
+            rule.getId(),
+            taskGroup.getId(),
+            businessDate,
+            triggerLogId,
+            "SKIPPED_ALREADY_DISPATCHED");
+      }
+
       taskAppService.executeTaskGroup(
           taskGroup.getId(),
           Collections.<String, Object>emptyMap(),
@@ -122,6 +148,10 @@ public class ScheduleRuleDispatchAppService {
       return result(
           rule.getId(), taskGroup.getId(), businessDate, triggerLogId, "DISPATCHED");
     } catch (RuntimeException ex) {
+      if (triggerLogId == null) {
+        triggerLogId =
+            triggerLogAppService.createRunning(rule.getId(), requestedBusinessDate, command);
+      }
       triggerLogAppService.markFailed(triggerLogId, ex.getMessage());
       scheduleRuleRepository.updateLastTrigger(rule.getId(), triggerTime, null, "FAILED");
       throw ex;

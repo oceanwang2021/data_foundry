@@ -49,9 +49,9 @@ public class DataCollectJobHandler {
           result.get("task_group_id"),
           result.get("business_date"));
     } catch (Exception ex) {
-      XxlJobHelper.log("Schedule parameter rejected, error={}", ex.getMessage());
-      log.warn("XXL-JOB schedule parameter rejected: {}", ex.getMessage(), ex);
-      throw new IllegalArgumentException("Invalid XXL-JOB dispatch parameter", ex);
+      XxlJobHelper.log("Schedule dispatch failed, error={}", ex.getMessage());
+      log.warn("XXL-JOB schedule dispatch failed: {}", ex.getMessage(), ex);
+      throw new IllegalStateException("XXL-JOB schedule dispatch failed: " + ex.getMessage(), ex);
     }
   }
 }

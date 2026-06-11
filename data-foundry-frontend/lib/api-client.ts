@@ -318,7 +318,9 @@ function mapScheduleRule(raw: any, wideTableId: string): ScheduleRule {
     type: "periodic",
     cronExpression: raw.trigger_time ?? undefined,
     periodLabel: frequency,
-    businessDateOffsetDays: 0,
+    businessDateOffsetDays: Number(
+      raw.business_date_offset_days ?? raw.businessDateOffsetDays ?? 0,
+    ),
     description: `${frequency} schedule`,
   };
 }
@@ -679,6 +681,11 @@ export function mapTaskGroup(raw: any): TaskGroup {
     businessDate: normalizedBusinessDate,
     businessDateLabel: normalizedBusinessDateLabel ?? normalizedBusinessDate,
     batchId: raw.batch_id ?? raw.batchId,
+    frequency: raw.frequency ?? undefined,
+    sourceType: raw.source_type ?? raw.sourceType ?? undefined,
+    scheduleRuleId: raw.schedule_rule_id ?? raw.scheduleRuleId ?? undefined,
+    scheduledAt: raw.scheduled_at ?? raw.scheduledAt ?? undefined,
+    indicatorGroupId: raw.indicator_group_id ?? raw.indicatorGroupId ?? undefined,
     partitionType: raw.partition_type ?? raw.partitionType,
     partitionKey: normalizeApiPartitionLabel(raw.partition_key ?? raw.partitionKey, raw.partition_type ?? raw.partitionType)
       ?? raw.partition_key
@@ -720,8 +727,9 @@ export function mapTaskGroupStatus(status: string): TaskGroup["status"] {
 }
 
 function mapTriggeredBy(sourceType: string): TaskGroup["triggeredBy"] {
-  if (sourceType === "backfill") return "backfill";
-  if (sourceType === "scheduled") return "schedule";
+  const normalized = String(sourceType ?? "").toLowerCase();
+  if (normalized === "backfill") return "backfill";
+  if (normalized === "scheduled") return "schedule";
   return "manual";
 }
 
@@ -1741,6 +1749,7 @@ type BackendScheduleRule = {
   id: string;
   frequency: "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
   trigger_time: string;
+  business_date_offset_days: number;
   auto_retry_limit?: number;
   enabled?: boolean;
 };
@@ -1777,6 +1786,10 @@ function toBackendScheduleRules(wideTable: WideTable): BackendScheduleRule[] | u
       id: wideTable.scheduleRule.id || `sr_${wideTable.id}`,
       frequency: resolveBackendFrequency(wideTable, wideTable.scheduleRule),
       trigger_time: resolveBackendTriggerTime(wideTable.scheduleRule),
+      business_date_offset_days: Math.max(
+        0,
+        Number(wideTable.scheduleRule.businessDateOffsetDays) || 0,
+      ),
       auto_retry_limit: 0,
       enabled: true,
     },
@@ -1892,6 +1905,7 @@ export async function persistWideTablePlan(
         last_edited_at: group.promptConfig.lastEditedAt,
       } : undefined,
     })),
+    schedule_rules: toBackendScheduleRules(normalizedWideTable),
     rows: toBackendWideTablePlanRows(normalizedWideTable, records, planVersion),
     task_groups: toBackendWideTablePlanTaskGroups(normalizedWideTable.id, taskGroups, planVersion),
     semantic_time_axis: resolveWideTableSemanticTimeAxis(normalizedWideTable),

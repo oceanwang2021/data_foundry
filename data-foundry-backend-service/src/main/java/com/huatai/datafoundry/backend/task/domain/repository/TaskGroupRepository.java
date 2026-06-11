@@ -11,6 +11,8 @@ public interface TaskGroupRepository {
   TaskGroup getByScheduleRulePeriodAndIndicatorGroup(
       String scheduleRuleId, String businessDate, String indicatorGroupId);
 
+  TaskGroup findNextPendingByScheduleRule(String scheduleRuleId);
+
   List<TaskGroup> listAll();
 
   List<TaskGroup> listByIds(List<String> taskGroupIds);

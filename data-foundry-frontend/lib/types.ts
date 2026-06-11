@@ -256,7 +256,12 @@ export type TaskGroup = {
   businessDate: string;
   businessDateLabel: string;
   batchId?: string;
-  partitionType?: "business_date" | "full_table" | "shard";
+  frequency?: "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+  sourceType?: string;
+  scheduleRuleId?: string;
+  scheduledAt?: string;
+  indicatorGroupId?: string;
+  partitionType?: "business_date" | "full_table" | "shard" | "indicator_group";
   partitionKey?: string;
   partitionLabel?: string;
   planVersion?: number;

@@ -9,6 +9,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huatai.datafoundry.backend.schedule.application.service.ScheduleRuleSyncAppService;
+import com.huatai.datafoundry.backend.schedule.domain.model.ScheduleRule;
+import com.huatai.datafoundry.backend.schedule.domain.service.SchedulePlanningTimeCalculator;
 import com.huatai.datafoundry.backend.task.domain.model.FetchTask;
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.domain.model.WideTablePlanSource;
@@ -16,6 +19,8 @@ import com.huatai.datafoundry.backend.task.domain.repository.FetchTaskRepository
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
 import com.huatai.datafoundry.backend.task.domain.repository.WideTableReadRepository;
 import com.huatai.datafoundry.backend.task.domain.service.TaskPlanDomainService;
+import java.time.LocalTime;
+import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -64,7 +69,7 @@ public class TaskPlanAppServiceTest {
     taskGroup.setIndicatorGroupId("ig-2");
     taskGroup.setPlanVersion(1);
 
-    svc.ensureFetchTasksForScheduledTaskGroup(taskGroup);
+    svc.ensureFetchTasksForTaskGroup(taskGroup);
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<FetchTask>> captor = ArgumentCaptor.forClass((Class) List.class);
@@ -103,7 +108,7 @@ public class TaskPlanAppServiceTest {
     ResponseStatusException ex =
         assertThrows(
             ResponseStatusException.class,
-            () -> svc.ensureFetchTasksForScheduledTaskGroup(taskGroup));
+            () -> svc.ensureFetchTasksForTaskGroup(taskGroup));
     assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
   }
 
@@ -148,7 +153,7 @@ public class TaskPlanAppServiceTest {
     taskGroup.setIndicatorGroupId("ig-week");
     taskGroup.setPlanVersion(1);
 
-    svc.ensureFetchTasksForScheduledTaskGroup(taskGroup);
+    svc.ensureFetchTasksForTaskGroup(taskGroup);
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<FetchTask>> captor = ArgumentCaptor.forClass((Class) List.class);
@@ -251,6 +256,67 @@ public class TaskPlanAppServiceTest {
   }
 
   @Test
+  void persistPlanBindsCurrentPeriodToRuleAndKeepsPastPeriodManual() {
+    WideTableReadRepository wideTableRepository = Mockito.mock(WideTableReadRepository.class);
+    TaskGroupRepository taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
+    FetchTaskRepository fetchTaskRepository = Mockito.mock(FetchTaskRepository.class);
+    ScheduleRuleSyncAppService ruleSyncAppService =
+        Mockito.mock(ScheduleRuleSyncAppService.class);
+    TaskPlanAppService svc =
+        new TaskPlanAppService(
+            wideTableRepository,
+            taskGroupRepository,
+            fetchTaskRepository,
+            new TaskPlanDomainService(),
+            null,
+            null,
+            null,
+            ruleSyncAppService,
+            new SchedulePlanningTimeCalculator(),
+            new ObjectMapper());
+
+    YearMonth current = YearMonth.now();
+    WideTablePlanSource wideTable = new WideTablePlanSource();
+    wideTable.setId("WT1");
+    wideTable.setRequirementId("R1");
+    wideTable.setSchemaVersion(1);
+    wideTable.setScopeJson("{\"business_date\":{\"frequency\":\"MONTHLY\"}}");
+    wideTable.setIndicatorGroupsJson(
+        "[{\"id\":\"ig-1\",\"name\":\"Group 1\",\"indicator_columns\":[\"a\"]}]");
+    ScheduleRule rule = new ScheduleRule();
+    rule.setId("sr-1");
+    rule.setIndicatorGroupId("ig-1");
+    rule.setFrequency("MONTHLY");
+    rule.setBusinessDateOffsetDays(Integer.valueOf(3));
+    rule.setTriggerTime(LocalTime.of(8, 30));
+    when(wideTableRepository.getByIdForRequirement("R1", "WT1")).thenReturn(wideTable);
+    when(ruleSyncAppService.sync(wideTable))
+        .thenReturn(Collections.singletonMap("ig-1", rule));
+    when(taskGroupRepository.listByIds(anyList())).thenReturn(Collections.<TaskGroup>emptyList());
+    when(fetchTaskRepository.listByTaskGroup(anyString()))
+        .thenReturn(Collections.<FetchTask>emptyList());
+
+    Map<String, Object> past = planGroup("TG_PAST", current.minusMonths(1).toString());
+    Map<String, Object> currentGroup = planGroup("TG_CURRENT", current.toString());
+    svc.persistPlanTaskGroups("R1", "WT1", Arrays.asList(past, currentGroup));
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<TaskGroup>> captor = ArgumentCaptor.forClass((Class) List.class);
+    verify(taskGroupRepository).upsertBatch(captor.capture());
+    Map<String, TaskGroup> byId = new HashMap<String, TaskGroup>();
+    for (TaskGroup taskGroup : captor.getValue()) {
+      byId.put(taskGroup.getId(), taskGroup);
+    }
+    assertEquals("BACKFILL", byId.get("TG_PAST").getSourceType());
+    assertEquals(null, byId.get("TG_PAST").getScheduleRuleId());
+    assertEquals("SCHEDULED", byId.get("TG_CURRENT").getSourceType());
+    assertEquals("sr-1", byId.get("TG_CURRENT").getScheduleRuleId());
+    assertEquals(
+        current.atEndOfMonth().plusDays(3).atTime(8, 30),
+        byId.get("TG_CURRENT").getScheduledAt());
+  }
+
+  @Test
   void persistPlanRejectsCrossAggregateOverwrite() {
     TaskGroupRepository taskGroupRepository = Mockito.mock(TaskGroupRepository.class);
     TaskPlanAppService svc =
@@ -278,6 +344,17 @@ public class TaskPlanAppServiceTest {
             ResponseStatusException.class,
             () -> svc.persistPlanTaskGroups("R1", "WT1", Collections.singletonList(raw)));
     assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+  }
+
+  private static Map<String, Object> planGroup(String id, String businessDate) {
+    Map<String, Object> raw = new HashMap<String, Object>();
+    raw.put("id", id);
+    raw.put("business_date", businessDate);
+    raw.put("partition_type", "indicator_group");
+    raw.put("partition_key", "ig-1");
+    raw.put("status", "pending");
+    raw.put("plan_version", 1);
+    return raw;
   }
 
   @Test

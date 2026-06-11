@@ -81,6 +81,11 @@ export default function TaskGroupCards({
                           + `${taskGroup.totalTasks} | will be created and executed automatically when due`
                         : `planned task group | total ${taskGroup.totalTasks} | no runtime records yet`}
                   </div>
+                  {taskGroup.scheduledAt ? (
+                    <div className="mt-1 text-xs text-blue-700">
+                      计划执行时间：{new Date(taskGroup.scheduledAt).toLocaleString("zh-CN")}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="w-24 shrink-0">
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
