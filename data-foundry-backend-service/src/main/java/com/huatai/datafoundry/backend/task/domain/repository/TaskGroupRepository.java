@@ -1,6 +1,7 @@
 package com.huatai.datafoundry.backend.task.domain.repository;
 
 import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface TaskGroupRepository {
@@ -30,4 +31,7 @@ public interface TaskGroupRepository {
   int updateStatus(String taskGroupId, String status);
 
   int updateStatusByIds(List<String> taskGroupIds, String status);
+
+  int updatePendingSchedule(
+      String taskGroupId, String scheduleRuleId, LocalDateTime scheduledAt);
 }

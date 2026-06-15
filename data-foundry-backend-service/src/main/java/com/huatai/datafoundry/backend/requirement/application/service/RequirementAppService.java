@@ -14,6 +14,7 @@ import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.myb
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.WideTableScopeImportRecord;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.mapper.WideTableRowMapper;
 import com.huatai.datafoundry.backend.requirement.infrastructure.persistence.mybatis.record.WideTableRowRecord;
+import com.huatai.datafoundry.backend.schedule.application.service.SchedulePlanRefreshAppService;
 import com.huatai.datafoundry.backend.task.application.service.TaskPlanAppService;
 import java.util.ArrayList;
 import java.time.LocalDate;
@@ -37,6 +38,7 @@ public class RequirementAppService {
   private final WideTableRowMapper wideTableRowMapper;
   private final ObjectMapper objectMapper;
   private final TaskPlanAppService taskPlanAppService;
+  private final SchedulePlanRefreshAppService schedulePlanRefreshAppService;
 
   public RequirementAppService(
       AccountAppService accountAppService,
@@ -44,13 +46,15 @@ public class RequirementAppService {
       WideTableScopeImportMapper wideTableScopeImportMapper,
       WideTableRowMapper wideTableRowMapper,
       ObjectMapper objectMapper,
-      TaskPlanAppService taskPlanAppService) {
+      TaskPlanAppService taskPlanAppService,
+      SchedulePlanRefreshAppService schedulePlanRefreshAppService) {
     this.accountAppService = accountAppService;
     this.requirementRepository = requirementRepository;
     this.wideTableScopeImportMapper = wideTableScopeImportMapper;
     this.wideTableRowMapper = wideTableRowMapper;
     this.objectMapper = objectMapper;
     this.taskPlanAppService = taskPlanAppService;
+    this.schedulePlanRefreshAppService = schedulePlanRefreshAppService;
   }
 
   @Transactional
@@ -214,6 +218,11 @@ public class RequirementAppService {
     int updated = requirementRepository.updateWideTableByIdAndRequirement(toUpdate);
     if (updated <= 0) {
       throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update wide table");
+    }
+    if (command != null && command.getScheduleRules() != null) {
+      WideTable refreshed =
+          requirementRepository.getWideTableByIdForRequirement(requirementId, wideTableId);
+      schedulePlanRefreshAppService.refresh(refreshed);
     }
   }
 

@@ -5,6 +5,7 @@ import type { ScheduleRule, TaskGroup, WideTableRecord } from "@/lib/types";
 import {
   buildDisplayableFullSnapshotTaskGroupPages,
   buildFullSnapshotTaskGroupPages,
+  describeBusinessDateScheduleRule,
   describeFullSnapshotScheduleRule,
   filterFullSnapshotScopedRows,
 } from "@/lib/task-group-display";
@@ -60,12 +61,25 @@ describe("task-group display helpers", () => {
       id: "sr_ops",
       wideTableId: "wt_ops",
       type: "periodic",
+      triggerTime: "07:45",
       periodLabel: "monthly",
       businessDateOffsetDays: 2,
       description: "",
     };
 
-    expect(describeFullSnapshotScheduleRule(rule)).toBe("月频结束后 +2 天触发 1 个全量快照任务组");
+    expect(describeFullSnapshotScheduleRule(rule)).toBe("月频结束后 +2 天于 07:45 触发 1 个全量快照任务组");
+  });
+
+  it("describes business-date scheduling with the default trigger time", () => {
+    const rule: ScheduleRule = {
+      id: "sr_ops",
+      wideTableId: "wt_ops",
+      type: "periodic",
+      businessDateOffsetDays: 1,
+      description: "",
+    };
+
+    expect(describeBusinessDateScheduleRule(rule)).toBe("业务日期后 +1 天于 09:00 触发");
   });
 
   it("orders full-snapshot pages by task-group start time", () => {

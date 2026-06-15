@@ -1,6 +1,8 @@
 package com.huatai.datafoundry.backend.requirement.application.service;
 
 import com.huatai.datafoundry.contract.scheduler.ScheduleFrequency;
+import java.time.DateTimeException;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 
@@ -56,12 +58,27 @@ final class ScheduleScopeValidator {
                 + " != "
                 + frequency.name());
       }
+      validateTriggerTime(
+          text(((Map<?, ?>) item).get("trigger_time")),
+          text(((Map<?, ?>) item).get("triggerTime")));
     }
   }
 
   private static void validateDate(ScheduleFrequency frequency, String value) {
     if (value != null) {
       frequency.normalizeBusinessDate(value);
+    }
+  }
+
+  private static void validateTriggerTime(String snakeCaseValue, String camelCaseValue) {
+    String value = snakeCaseValue != null ? snakeCaseValue : camelCaseValue;
+    if (value == null) {
+      return;
+    }
+    try {
+      LocalTime.parse(value.length() == 5 ? value + ":00" : value);
+    } catch (DateTimeException ex) {
+      throw new IllegalArgumentException("Invalid schedule trigger time: " + value, ex);
     }
   }
 

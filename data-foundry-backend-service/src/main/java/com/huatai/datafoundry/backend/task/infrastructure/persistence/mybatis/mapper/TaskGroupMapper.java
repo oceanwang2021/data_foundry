@@ -210,4 +210,13 @@ public interface TaskGroupMapper {
       "</script>",
   })
   int updateStatusByIds(@Param("ids") List<String> ids, @Param("status") String status);
+
+  @Update(
+      "update task_groups set schedule_rule_id = #{scheduleRuleId}, "
+          + "scheduled_at = #{scheduledAt}, updated_at = current_timestamp "
+          + "where id = #{id} and status = 'pending' and upper(source_type) = 'SCHEDULED'")
+  int updatePendingSchedule(
+      @Param("id") String id,
+      @Param("scheduleRuleId") String scheduleRuleId,
+      @Param("scheduledAt") java.time.LocalDateTime scheduledAt);
 }

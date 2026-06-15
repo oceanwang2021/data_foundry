@@ -310,13 +310,23 @@ function mapIndicatorGroup(raw: any, wideTableId: string): IndicatorGroup {
 }
 
 /** 后端 ScheduleRule → 前端 ScheduleRule */
+function normalizeScheduleRuleTriggerTime(value: unknown): string | undefined {
+  const candidate = String(value ?? "").trim();
+  const match = candidate.match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  return match ? `${match[1]}:${match[2]}` : undefined;
+}
+
 function mapScheduleRule(raw: any, wideTableId: string): ScheduleRule {
   const frequency = normalizeBusinessDateFrequency(raw.frequency);
+  const triggerTime = normalizeScheduleRuleTriggerTime(
+    raw.trigger_time ?? raw.triggerTime,
+  );
   return {
     id: raw.id,
     wideTableId,
     type: "periodic",
-    cronExpression: raw.trigger_time ?? undefined,
+    cronExpression: triggerTime,
+    triggerTime,
     periodLabel: frequency,
     businessDateOffsetDays: Number(
       raw.business_date_offset_days ?? raw.businessDateOffsetDays ?? 0,
@@ -1769,12 +1779,8 @@ function resolveBackendFrequency(wideTable: WideTable, scheduleRule?: ScheduleRu
 }
 
 function resolveBackendTriggerTime(scheduleRule?: ScheduleRule): string {
-  const candidate = scheduleRule?.cronExpression;
-  if (!candidate) {
-    return "09:00";
-  }
-  // Backend compares lexicographically (HH:MM), keep a strict default when invalid.
-  return /^\d{2}:\d{2}$/.test(candidate) ? candidate : "09:00";
+  const candidate = scheduleRule?.triggerTime ?? scheduleRule?.cronExpression;
+  return normalizeScheduleRuleTriggerTime(candidate) ?? "09:00";
 }
 
 function toBackendScheduleRules(wideTable: WideTable): BackendScheduleRule[] | undefined {

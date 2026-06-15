@@ -134,12 +134,14 @@ export function IncrementalUpdateSettingsCard({
   usesBusinessDateAxis,
   onApplyDefaultScheduleRule,
   onScheduleRuleChange,
+  describeRule,
 }: {
   visible: boolean;
   selectedWt?: WideTable;
   usesBusinessDateAxis: boolean;
   onApplyDefaultScheduleRule: () => void;
-  onScheduleRuleChange: (offsetDays: number) => void;
+  onScheduleRuleChange: (patch: Partial<NonNullable<WideTable["scheduleRule"]>>) => void;
+  describeRule: (rule: WideTable["scheduleRule"]) => string;
 }) {
   if (!visible) {
     return null;
@@ -176,7 +178,7 @@ export function IncrementalUpdateSettingsCard({
               <p className="text-xs text-muted-foreground">
                 增量更新任务组按业务日期拆分，并通过“业务日期后偏移多少天”决定每个业务日期对应任务组的启动时间。
               </p>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <EditableField
                   label="时间偏移量"
                   control={(
@@ -185,14 +187,36 @@ export function IncrementalUpdateSettingsCard({
                       min={0}
                       step={1}
                       value={selectedWt.scheduleRule?.businessDateOffsetDays ?? 1}
-                      onChange={(event) => onScheduleRuleChange(Math.max(0, Number(event.target.value) || 0))}
+                      onChange={(event) =>
+                        onScheduleRuleChange({
+                          businessDateOffsetDays: Math.max(0, Number(event.target.value) || 0),
+                        })}
+                      className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    />
+                  )}
+                />
+                <EditableField
+                  label="触发时间"
+                  control={(
+                    <input
+                      type="time"
+                      step={60}
+                      value={
+                        selectedWt.scheduleRule?.triggerTime
+                        ?? selectedWt.scheduleRule?.cronExpression
+                        ?? "09:00"
+                      }
+                      onChange={(event) =>
+                        onScheduleRuleChange({
+                          triggerTime: event.target.value || "09:00",
+                        })}
                       className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                     />
                   )}
                 />
                 <ReadOnlyField
                   label="规则说明"
-                  value={`业务日期后 +${selectedWt.scheduleRule?.businessDateOffsetDays ?? 1} 天`}
+                  value={describeRule(selectedWt.scheduleRule)}
                 />
               </div>
             </>
@@ -244,7 +268,7 @@ export function FullUpdateSettingsCard({
           <p className="text-xs text-muted-foreground">
             参照现有方案，全量更新不按业务日期拆任务组，而是按调度频度持续生成新的全量快照任务组。
           </p>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <EditableField
               label="调度频度"
               control={(
@@ -274,6 +298,25 @@ export function FullUpdateSettingsCard({
                       businessDateOffsetDays: Math.max(0, Number(event.target.value) || 0),
                     })
                   }
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                />
+              )}
+            />
+            <EditableField
+              label="触发时间"
+              control={(
+                <input
+                  type="time"
+                  step={60}
+                  value={
+                    selectedWt.scheduleRule?.triggerTime
+                    ?? selectedWt.scheduleRule?.cronExpression
+                    ?? "09:00"
+                  }
+                  onChange={(event) =>
+                    onFullSnapshotScheduleRuleChange({
+                      triggerTime: event.target.value || "09:00",
+                    })}
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 />
               )}

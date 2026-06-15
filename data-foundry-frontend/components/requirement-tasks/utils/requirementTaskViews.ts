@@ -21,6 +21,7 @@ import {
 import { hasWideTableBusinessDateDimension } from "@/lib/wide-table-mode";
 import {
   buildFullSnapshotTaskGroupPages,
+  describeBusinessDateScheduleRule,
   describeFullSnapshotScheduleRule,
 } from "@/lib/task-group-display";
 import { normalizeCollectionTaskLabel } from "@/lib/collection-task-list-view";
@@ -213,7 +214,7 @@ export function buildTaskPlanView(wideTable: WideTable): TaskPlanView {
         : computedRowCount;
   const plannedTaskCount = plannedRowCount * indicatorGroupCount;
   const scheduleSummary = wideTable.scheduleRule
-    ? `业务日期后 +${wideTable.scheduleRule.businessDateOffsetDays} 天触发`
+    ? describeBusinessDateScheduleRule(wideTable.scheduleRule)
     : isOpenEnded
       ? "未配置未来调度"
       : "固定结束日期，无未来调度";

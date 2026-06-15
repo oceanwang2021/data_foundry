@@ -10,7 +10,10 @@ import {
   hasWideTableBusinessDateDimension,
   normalizeWideTableMode,
 } from "@/lib/wide-table-mode";
-import { describeFullSnapshotScheduleRule } from "@/lib/task-group-display";
+import {
+  describeBusinessDateScheduleRule,
+  describeFullSnapshotScheduleRule,
+} from "@/lib/task-group-display";
 import type {
   Requirement,
   WideTable,
@@ -109,15 +112,22 @@ export default function DataUpdateSection({
     setUpdateMessage(`已切换为${formatRequirementDataUpdateMode(mode)}。`);
   };
 
-  const handleScheduleRuleChange = (offsetDays: number) => {
-    updateSelectedWideTable((wideTable) => ({
-      ...wideTable,
-      scheduleRule: {
+  const handleScheduleRuleChange = (
+    patch: Partial<NonNullable<WideTable["scheduleRule"]>>,
+  ) => {
+    updateSelectedWideTable((wideTable) => {
+      const nextRule = {
         ...(wideTable.scheduleRule ?? buildDefaultScheduleRule(wideTable.id, "business_date", wideTable.businessDateRange.frequency)),
-        businessDateOffsetDays: offsetDays,
-        description: `业务日期后 +${offsetDays} 天触发未来任务`,
-      },
-    }));
+        ...patch,
+      };
+      return {
+        ...wideTable,
+        scheduleRule: {
+          ...nextRule,
+          description: describeBusinessDateScheduleRule(nextRule),
+        },
+      };
+    });
     setUpdateMessage("增量更新调度设置已修改。");
   };
 
@@ -230,6 +240,7 @@ export default function DataUpdateSection({
               usesBusinessDateAxis={usesBusinessDateAxis}
               onApplyDefaultScheduleRule={() => handleApplyDefaultScheduleRule("business_date")}
               onScheduleRuleChange={handleScheduleRuleChange}
+              describeRule={describeBusinessDateScheduleRule}
             />
 
             <FullUpdateSettingsCard

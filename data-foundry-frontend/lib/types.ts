@@ -240,6 +240,7 @@ export type ScheduleRule = {
   wideTableId: string;
   type: "adhoc" | "periodic";
   cronExpression?: string;
+  triggerTime?: string;
   periodLabel?: string;
   businessDateOffsetDays: number;
   description: string;

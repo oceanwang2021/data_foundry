@@ -58,6 +58,18 @@ class ScheduleScopeValidatorTest {
             Collections.emptyList()));
   }
 
+  @Test
+  void rejectsInvalidTriggerTime() {
+    Map<String, Object> rule = rule("MONTHLY");
+    rule.put("trigger_time", "25:00");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ScheduleScopeValidator.validate(
+            scope("MONTHLY", "2026-06", "never"),
+            Collections.singletonList(rule)));
+  }
+
   private static Map<String, Object> scope(
       String frequency, String start, String end) {
     Map<String, Object> businessDate = new HashMap<String, Object>();

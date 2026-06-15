@@ -130,6 +130,22 @@ export function formatSchedulePeriodLabel(periodLabel?: string): string {
   return PERIOD_LABELS[periodLabel] ?? periodLabel;
 }
 
+export function normalizeScheduleTriggerTime(value?: string): string {
+  const candidate = String(value ?? "").trim();
+  const match = candidate.match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  return match ? `${match[1]}:${match[2]}` : "09:00";
+}
+
+export function describeBusinessDateScheduleRule(rule?: ScheduleRule): string {
+  if (!rule) {
+    return "未配置增量调度";
+  }
+
+  const offsetDays = Math.max(rule.businessDateOffsetDays ?? 0, 0);
+  const triggerTime = normalizeScheduleTriggerTime(rule.triggerTime ?? rule.cronExpression);
+  return `业务日期后 +${offsetDays} 天于 ${triggerTime} 触发`;
+}
+
 export function describeFullSnapshotScheduleRule(rule?: ScheduleRule): string {
   if (!rule) {
     return "未配置全量快照调度";
@@ -137,5 +153,6 @@ export function describeFullSnapshotScheduleRule(rule?: ScheduleRule): string {
 
   const period = formatSchedulePeriodLabel(rule.periodLabel);
   const offsetDays = Math.max(rule.businessDateOffsetDays ?? 0, 0);
-  return `${period}结束后 +${offsetDays} 天触发 1 个全量快照任务组`;
+  const triggerTime = normalizeScheduleTriggerTime(rule.triggerTime ?? rule.cronExpression);
+  return `${period}结束后 +${offsetDays} 天于 ${triggerTime} 触发 1 个全量快照任务组`;
 }

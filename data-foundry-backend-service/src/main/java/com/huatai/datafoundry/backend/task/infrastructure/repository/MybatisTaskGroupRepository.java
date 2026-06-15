@@ -4,6 +4,7 @@ import com.huatai.datafoundry.backend.task.domain.model.TaskGroup;
 import com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.mapper.TaskGroupMapper;
 import com.huatai.datafoundry.backend.task.infrastructure.persistence.mybatis.record.TaskGroupRecord;
 import com.huatai.datafoundry.backend.task.domain.repository.TaskGroupRepository;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Repository;
@@ -94,6 +95,12 @@ public class MybatisTaskGroupRepository implements TaskGroupRepository {
   @Override
   public int updateStatusByIds(List<String> taskGroupIds, String status) {
     return taskGroupMapper.updateStatusByIds(taskGroupIds, status);
+  }
+
+  @Override
+  public int updatePendingSchedule(
+      String taskGroupId, String scheduleRuleId, LocalDateTime scheduledAt) {
+    return taskGroupMapper.updatePendingSchedule(taskGroupId, scheduleRuleId, scheduledAt);
   }
 
   private static List<TaskGroup> toDomainList(List<TaskGroupRecord> records) {
