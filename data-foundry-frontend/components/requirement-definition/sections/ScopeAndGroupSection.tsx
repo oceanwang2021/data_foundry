@@ -344,7 +344,11 @@ export default function ScopeAndGroupSection({
     rows: ParameterRow[],
     message: string,
     source: WideTable["parameterSource"] = { mode: "manual_file" },
+    options: { keepDraftParameterFileImport?: boolean } = {},
   ) => {
+    if (!options.keepDraftParameterFileImport) {
+      clearDraftParameterFileImport();
+    }
     markSelectedScopePreviewDirty();
     updateSelectedWideTable((wideTable) => {
       const currentPlanVersion = wideTable.currentPlanVersion ?? resolveCurrentPlanVersion(wideTable, selectedWideTableRecords, taskGroups ?? []);
@@ -837,7 +841,12 @@ export default function ScopeAndGroupSection({
         dimensionColumns.map((column) => [column.name, String(row[column.name] ?? "").trim()]),
       ),
     }));
-    applyParameterRows(importedParameterRows, `已导入 ${importedParameterRows.length} 行采集参数。`);
+    applyParameterRows(
+      importedParameterRows,
+      `已导入 ${importedParameterRows.length} 行采集参数。`,
+      { mode: "manual_file" },
+      { keepDraftParameterFileImport: true },
+    );
 
     onDimensionExcelImportsChange((prev) => ({
       ...prev,

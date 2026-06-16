@@ -35,6 +35,19 @@ type Props = {
   onRemoveParameterRow: (rowIndex: number) => void;
 };
 
+function isEditablePasteTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tagName = target.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || target.isContentEditable;
+}
+
+function looksLikeTablePaste(value: string): boolean {
+  const normalized = value.replace(/^\uFEFF/, "").trim();
+  return normalized.includes("\t") || normalized.includes(",") || /\r?\n/.test(normalized);
+}
+
 export function ScopeParameterTableCard({
   faded,
   parameterInputMode,
@@ -139,6 +152,12 @@ export function ScopeParameterTableCard({
             if (!canUseManualParameterInput) return;
             const pastedText = event.clipboardData.getData("text/plain");
             if (!pastedText.trim()) return;
+            if (isEditablePasteTarget(event.target)) {
+              return;
+            }
+            if (!looksLikeTablePaste(pastedText)) {
+              return;
+            }
             event.preventDefault();
             onPasteParameterRows(pastedText);
           }}
