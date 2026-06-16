@@ -12,6 +12,7 @@ import {
   formatBusinessDateForFrequency,
   formatBusinessDateLabel,
   isOpenEndedBusinessDateRange,
+  limitFutureBusinessDates,
   OPEN_ENDED_PREVIEW_PERIODS,
 } from "@/lib/business-date";
 import type { FetchTaskCardView } from "@/lib/fetch-task-views";
@@ -254,8 +255,14 @@ export function buildPlanVersionViews(
     new Date(),
     wideTable.businessDateRange.frequency,
   );
-  const currentFutureDates = buildBusinessDateSlots(wideTable.businessDateRange)
-    .filter((businessDate) => businessDate >= today)
+  const currentFutureDates = limitFutureBusinessDates(
+    buildBusinessDateSlots(wideTable.businessDateRange)
+      .filter((businessDate) => businessDate >= today),
+    {
+      maxFuturePeriods: OPEN_ENDED_PREVIEW_PERIODS,
+      frequency: wideTable.businessDateRange.frequency,
+    },
+  )
     .sort((left, right) => right.localeCompare(left));
 
   return Array.from(versionSet)
@@ -355,12 +362,18 @@ export function buildTaskGroupRunViews(
     .map((taskGroup) => taskGroup.businessDate)
     .filter((businessDate) => businessDate < today);
   const currentHistoricalDates = taskPlan.businessDates.filter((businessDate) => businessDate < today);
-  const futureBusinessDates = Array.from(
-    new Set([
-      ...taskPlan.businessDates.filter((businessDate) => businessDate >= today),
-      ...taskGroups.map((taskGroup) => taskGroup.businessDate).filter((businessDate) => businessDate >= today),
-    ]),
-  ).sort((left, right) => left.localeCompare(right));
+  const futureBusinessDates = limitFutureBusinessDates(
+    Array.from(
+      new Set([
+        ...taskPlan.businessDates.filter((businessDate) => businessDate >= today),
+        ...taskGroups.map((taskGroup) => taskGroup.businessDate).filter((businessDate) => businessDate >= today),
+      ]),
+    ).sort((left, right) => left.localeCompare(right)),
+    {
+      maxFuturePeriods: OPEN_ENDED_PREVIEW_PERIODS,
+      frequency: wideTable.businessDateRange.frequency,
+    },
+  );
   const visibleBusinessDates = Array.from(
     new Set([...historicalRealDates, ...currentHistoricalDates, ...futureBusinessDates]),
   );

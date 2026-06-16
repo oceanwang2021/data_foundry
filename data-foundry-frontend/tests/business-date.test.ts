@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBusinessDateSlots,
   buildDefaultDateRange,
+  buildSelectableBusinessDates,
   businessDatePeriodEnd,
   formatBusinessDateForFrequency,
   normalizeBusinessDateForFrequency,
@@ -73,5 +74,14 @@ describe("canonical business date tokens", () => {
       "weekly",
       new Date(Date.UTC(2025, 11, 29)),
     )).toEqual({ start: "2026-W01", end: "2026-W01" });
+  });
+
+  it("includes future selectable periods for non-daily frequencies", () => {
+    const referenceDate = new Date(Date.UTC(2026, 5, 16));
+
+    expect(buildSelectableBusinessDates("weekly", { referenceDate })).toContain("2026-W52");
+    expect(buildSelectableBusinessDates("monthly", { referenceDate })).toContain("2026-12");
+    expect(buildSelectableBusinessDates("quarterly", { referenceDate })).toContain("2026-Q4");
+    expect(buildSelectableBusinessDates("yearly", { referenceDate })).toContain("2031");
   });
 });

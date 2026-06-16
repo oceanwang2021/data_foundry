@@ -290,7 +290,7 @@ export function snapToPeriodEnd(
 
 export function buildSelectableBusinessDates(
   frequency: BusinessDateFrequency,
-  options: { referenceDate?: Date; lookbackYears?: number } = {},
+  options: { referenceDate?: Date; lookbackYears?: number; lookaheadYears?: number } = {},
 ): string[] {
   const referenceDate = toUtcDate(options.referenceDate ?? new Date());
   const start = new Date(Date.UTC(
@@ -298,9 +298,14 @@ export function buildSelectableBusinessDates(
     0,
     1,
   ));
+  const end = new Date(Date.UTC(
+    referenceDate.getUTCFullYear() + (options.lookaheadYears ?? 5),
+    11,
+    31,
+  ));
   return buildBusinessDateSlots({
     start: formatBusinessDateForFrequency(start, frequency),
-    end: formatBusinessDateForFrequency(referenceDate, frequency),
+    end: formatBusinessDateForFrequency(end, frequency),
     frequency,
   });
 }
